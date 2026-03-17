@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BLEUMR_AGENT_PREFIX } from '../services/BleumrLore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Search, Layers3, X, Zap, CheckCircle2, Bot, FlaskConical, Orbit, Sparkles } from 'lucide-react';
+import { Brain, Search as SearchIcon, Layers3, X, Zap, CheckCircle2, Bot, Orbit, Sparkles, Archive, Pencil, Download, Trash2, Plus, FolderOpen } from 'lucide-react';
 import { InlineStarSphere } from './InlineStarSphere';
 
 // ─── Agent config ─────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ const AGENTS = [
     name: 'Researcher',
     title: 'Knowledge Hunter',
     role: 'Digs deep, verifies facts',
-    Icon: Search,
+    Icon: SearchIcon,
     model: 'llama-3.3-70b-versatile',
     badge: 'Intel',
     accent: '#22d3ee',
@@ -644,7 +645,7 @@ function buildContent(text: string, format: ExportFormat, task: string): string 
 <body>
 <span class="badge">BLEUMR RESEARCH CENTER</span>
 <h1>${task}</h1>
-<p class="meta">Generated ${new Date().toLocaleString()} · Bleumr Workspace · 3-agent synthesis</p>
+<p class="meta">Generated ${new Date().toLocaleString()} · Bleumr Mission Team · 3-agent synthesis</p>
 <div>${md2html(text)}</div>
 ${chartScript}
 </body>
@@ -660,6 +661,399 @@ function triggerDownload(content: string, filename: string, mime: string) {
   const a    = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+// ─── Workspace File Cabinet — storage ────────────────────────────────────────
+
+export interface WSFile {
+  id: string;
+  name: string;
+  content: string;
+  format: ExportFormat;
+  agentId: AgentId;
+  task: string;
+  createdAt: number;
+  folder: string; // '' = root / uncategorised
+}
+
+const WS_FILES_KEY = 'orbit_workspace_files';
+
+function loadWSFiles(): WSFile[] {
+  try { return JSON.parse(localStorage.getItem(WS_FILES_KEY) || '[]'); }
+  catch { return []; }
+}
+function saveWSFiles(files: WSFile[]) {
+  localStorage.setItem(WS_FILES_KEY, JSON.stringify(files));
+}
+function addWSFile(file: Omit<WSFile, 'id' | 'createdAt'>): WSFile[] {
+  const next: WSFile = { ...file, id: Date.now().toString() + Math.random().toString(36).slice(2), createdAt: Date.now() };
+  const all = [next, ...loadWSFiles()];
+  saveWSFiles(all);
+  return all;
+}
+
+// ─── File Cabinet Visual — rendered on back wall ──────────────────────────────
+
+function FileCabinetVisual({ fileCount, onClick }: { fileCount: number; onClick: () => void }) {
+  const hasFiles = fileCount > 0;
+  return (
+    <div onClick={onClick} className="relative cursor-pointer group select-none"
+      style={{ width: 52, height: 72 }}>
+      {/* Cabinet body */}
+      <div className="absolute inset-0 rounded-sm overflow-hidden transition-all duration-300"
+        style={{
+          background: 'linear-gradient(160deg, #1a1d2e 0%, #0f1120 100%)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: hasFiles
+            ? '2px 4px 16px rgba(0,0,0,0.8), inset 1px 0 0 rgba(255,255,255,0.07), 0 0 24px rgba(99,102,241,0.18)'
+            : '2px 4px 16px rgba(0,0,0,0.8), inset 1px 0 0 rgba(255,255,255,0.05)',
+        }}>
+        {/* Top edge rim */}
+        <div className="absolute inset-x-0 top-0 h-px" style={{ background: 'rgba(255,255,255,0.14)' }} />
+        {/* 4 drawers */}
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="absolute left-2 right-2 rounded-sm"
+            style={{
+              top: 4 + i * 17,
+              height: 14,
+              background: i === 0 && hasFiles
+                ? 'linear-gradient(180deg, #1e2448 0%, #171a36 100%)'
+                : 'linear-gradient(180deg, #1e2238 0%, #161929 100%)',
+              border: '1px solid rgba(255,255,255,0.07)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+            }}>
+            {/* Handle bar */}
+            <div className="absolute left-3 right-3 rounded-full"
+              style={{
+                top: '50%', height: 3, transform: 'translateY(-50%)',
+                background: i === 0 && hasFiles
+                  ? 'linear-gradient(90deg, rgba(99,102,241,0.5), rgba(139,92,246,0.5))'
+                  : 'rgba(255,255,255,0.13)',
+                boxShadow: i === 0 && hasFiles ? '0 0 6px rgba(99,102,241,0.45)' : 'none',
+              }} />
+          </div>
+        ))}
+        {/* Right shadow edge */}
+        <div className="absolute right-0 top-0 bottom-0 w-1"
+          style={{ background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.45))' }} />
+      </div>
+
+      {/* File count badge */}
+      {hasFiles && (
+        <motion.div
+          initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', bounce: 0.5 }}
+          className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(99,102,241,0.9)', border: '1px solid rgba(129,140,248,0.6)', boxShadow: '0 0 10px rgba(99,102,241,0.7)', fontSize: 8, color: '#fff', fontWeight: 700, zIndex: 1 }}>
+          {fileCount > 99 ? '99+' : fileCount}
+        </motion.div>
+      )}
+
+      {/* Hover glow overlay */}
+      <motion.div className="absolute inset-0 rounded-sm pointer-events-none"
+        initial={{ opacity: 0 }}
+        whileHover={{ opacity: 1 }}
+        style={{ boxShadow: '0 0 22px rgba(99,102,241,0.45)', background: 'rgba(99,102,241,0.04)' }} />
+
+      {/* Label */}
+      <div className="absolute w-full text-center"
+        style={{ bottom: -14, fontSize: 7, fontWeight: 700, letterSpacing: '0.3em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)' }}>
+        FILES
+      </div>
+    </div>
+  );
+}
+
+// ─── File Cabinet Panel ───────────────────────────────────────────────────────
+
+function FileCabinetPanel({
+  files, onClose, onSave, onDelete, onAnalyze,
+}: {
+  files: WSFile[];
+  onClose: () => void;
+  onSave: (files: WSFile[]) => void;
+  onDelete: (id: string) => void;
+  onAnalyze: (file: WSFile) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [folder, setFolder] = useState('__all__');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [newFolderMode, setNewFolderMode] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (renamingId && renameRef.current) renameRef.current.focus(); }, [renamingId]);
+
+  const folders = useMemo(() => {
+    const set = new Set(files.map(f => f.folder).filter(Boolean));
+    return Array.from(set) as string[];
+  }, [files]);
+
+  const filtered = useMemo(() => {
+    return files
+      .filter(f => folder === '__all__' || f.folder === folder)
+      .filter(f => !search || f.name.toLowerCase().includes(search.toLowerCase()) || f.task.toLowerCase().includes(search.toLowerCase()));
+  }, [files, folder, search]);
+
+  const commitRename = (id: string) => {
+    if (!renameName.trim()) { setRenamingId(null); return; }
+    onSave(files.map(f => f.id === id ? { ...f, name: renameName.trim() } : f));
+    setRenamingId(null);
+  };
+
+  const moveToFolder = (id: string, targetFolder: string) => {
+    onSave(files.map(f => f.id === id ? { ...f, folder: targetFolder } : f));
+  };
+
+  const createFolder = () => {
+    if (!newFolderName.trim()) { setNewFolderMode(false); return; }
+    setFolder(newFolderName.trim());
+    setNewFolderMode(false);
+    setNewFolderName('');
+  };
+
+  const fmtDate = (ts: number) => {
+    const d = new Date(ts);
+    const diffD = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (diffD === 0) return 'Today · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if (diffD === 1) return 'Yesterday';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const FMT_COLOR: Record<string, string> = {
+    md: '#818cf8', html: '#f59e0b', csv: '#34d399', json: '#22d3ee', txt: '#94a3b8',
+  };
+
+  return (
+    <motion.div
+      initial={{ x: 370, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 370, opacity: 0 }}
+      transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+      className="absolute right-0 top-0 bottom-0 flex flex-col z-[60] overflow-hidden"
+      style={{ width: 360, background: 'rgba(5,7,18,0.78)', backdropFilter: 'blur(56px)', borderLeft: '1px solid rgba(255,255,255,0.07)' }}>
+
+      {/* Left rim glow */}
+      <div className="absolute left-0 top-0 bottom-0 w-px pointer-events-none"
+        style={{ background: 'linear-gradient(180deg, rgba(99,102,241,0.35), rgba(99,102,241,0.1) 60%, transparent)' }} />
+
+      {/* Ambient glow */}
+      <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-64 h-32 pointer-events-none rounded-full"
+        style={{ background: 'radial-gradient(ellipse, rgba(99,102,241,0.1) 0%, transparent 70%)', filter: 'blur(24px)' }} />
+
+      {/* Header */}
+      <div className="relative flex items-center gap-3 px-4 pt-4 pb-3 shrink-0"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="absolute inset-x-0 top-0 h-px"
+          style={{ background: 'linear-gradient(90deg, transparent, rgba(99,102,241,0.3), rgba(139,92,246,0.2), transparent)' }} />
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: 'rgba(99,102,241,0.14)', border: '1px solid rgba(99,102,241,0.28)', boxShadow: '0 0 14px rgba(99,102,241,0.15), inset 0 1px 0 rgba(255,255,255,0.08)' }}>
+          <Archive style={{ width: 14, height: 14, color: '#818cf8' }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-white text-sm font-semibold leading-none tracking-wide">File Cabinet</h2>
+          <p className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            {files.length} {files.length === 1 ? 'file' : 'files'} · team deliverables
+          </p>
+        </div>
+        <button onClick={onClose}
+          className="p-1.5 rounded-lg transition-colors hover:bg-white/8"
+          style={{ color: '#475569' }}>
+          <X style={{ width: 14, height: 14 }} />
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="px-4 py-2.5 shrink-0">
+        <div className="flex items-center gap-2 rounded-xl px-3 py-2"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <SearchIcon style={{ width: 11, height: 11, color: '#334155' }} />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search files or tasks…"
+            className="flex-1 text-[11px] text-white placeholder-slate-700 bg-transparent outline-none" />
+          {search && (
+            <button onClick={() => setSearch('')} style={{ color: '#334155' }}>
+              <X style={{ width: 10, height: 10 }} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Folder chips */}
+      <div className="px-4 pb-2.5 shrink-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[{ key: '__all__', label: 'All' }, ...folders.map(f => ({ key: f, label: f }))].map(({ key, label }) => (
+            <button key={key} onClick={() => setFolder(key)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-semibold transition-all"
+              style={{
+                background: folder === key ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.04)',
+                color: folder === key ? '#a5b4fc' : '#475569',
+                border: `1px solid ${folder === key ? 'rgba(99,102,241,0.32)' : 'rgba(255,255,255,0.06)'}`,
+              }}>
+              {key !== '__all__' && <FolderOpen style={{ width: 8, height: 8 }} />}
+              {label}
+            </button>
+          ))}
+          {!newFolderMode ? (
+            <button onClick={() => setNewFolderMode(true)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-semibold"
+              style={{ color: '#2d3748', border: '1px dashed rgba(255,255,255,0.07)' }}>
+              <Plus style={{ width: 8, height: 8 }} />Folder
+            </button>
+          ) : (
+            <input
+              value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') { setNewFolderMode(false); setNewFolderName(''); } }}
+              onBlur={createFolder}
+              placeholder="Name…" autoFocus
+              className="px-2.5 py-1 rounded-full text-[9px] text-white bg-transparent outline-none"
+              style={{ border: '1px solid rgba(99,102,241,0.45)', width: 80 }} />
+          )}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div className="h-px mx-4 shrink-0" style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)' }} />
+
+      {/* File list */}
+      <div className="flex-1 overflow-y-auto px-3 py-3" style={{ scrollbarWidth: 'none' }}>
+        <AnimatePresence>
+          {filtered.length === 0 && (
+            <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center py-16 gap-3">
+              <Archive style={{ width: 32, height: 32, color: '#1a1e30' }} />
+              <p className="text-[11px]" style={{ color: '#2d3748' }}>
+                {search ? 'No files match your search' : files.length === 0 ? 'Files appear here after a Mission Team run' : 'No files in this folder'}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="space-y-2">
+          <AnimatePresence>
+            {filtered.map((file, idx) => {
+              const agentObj = AGENTS.find(a => a.id === file.agentId) ?? AGENTS[2];
+              const fmtColor = FMT_COLOR[file.format] ?? '#94a3b8';
+              const isRenaming = renamingId === file.id;
+
+              return (
+                <motion.div key={file.id}
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: { delay: idx * 0.04 } }}
+                  exit={{ opacity: 0, x: 20, transition: { duration: 0.15 } }}
+                  className="rounded-2xl p-3 group relative overflow-hidden"
+                  style={{
+                    background: 'rgba(255,255,255,0.026)',
+                    border: '1px solid rgba(255,255,255,0.07)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  }}>
+                  {/* Card top rim */}
+                  <div className="absolute inset-x-0 top-0 h-px rounded-t-2xl"
+                    style={{ background: `linear-gradient(90deg, transparent, ${fmtColor}40, transparent)` }} />
+
+                  {/* Main row */}
+                  <div className="flex items-start gap-2.5">
+                    {/* Format badge */}
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-[9px] font-bold"
+                      style={{ background: fmtColor + '14', border: `1px solid ${fmtColor}30`, color: fmtColor, letterSpacing: '0.05em' }}>
+                      .{file.format}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      {/* File name */}
+                      {isRenaming ? (
+                        <input ref={renameRef} value={renameName}
+                          onChange={e => setRenameName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') commitRename(file.id); if (e.key === 'Escape') setRenamingId(null); }}
+                          onBlur={() => commitRename(file.id)}
+                          className="w-full text-[12px] text-white bg-transparent outline-none pb-0.5"
+                          style={{ borderBottom: '1px solid rgba(99,102,241,0.5)' }} />
+                      ) : (
+                        <p className="text-[12px] font-medium leading-tight truncate" style={{ color: 'rgba(255,255,255,0.8)' }}>
+                          {file.name}
+                        </p>
+                      )}
+
+                      {/* Task excerpt */}
+                      <p className="text-[9px] mt-0.5 truncate" style={{ color: '#334155' }}>{file.task}</p>
+
+                      {/* Meta row */}
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <div className="flex items-center gap-1">
+                          <agentObj.Icon style={{ width: 8, height: 8, color: agentObj.accent }} />
+                          <span style={{ fontSize: 8, color: agentObj.accent + 'bb' }}>{agentObj.name}</span>
+                        </div>
+                        <span style={{ fontSize: 8, color: '#1e2535' }}>·</span>
+                        <span style={{ fontSize: 8, color: '#334155' }}>{fmtDate(file.createdAt)}</span>
+                        {file.folder && (
+                          <>
+                            <span style={{ fontSize: 8, color: '#1e2535' }}>·</span>
+                            <span className="flex items-center gap-0.5" style={{ fontSize: 8, color: 'rgba(99,102,241,0.55)' }}>
+                              <FolderOpen style={{ width: 7, height: 7 }} />{file.folder}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action row — shown on hover */}
+                  <div className="flex items-center gap-1 mt-2.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                    {/* Analyze with team */}
+                    <button onClick={() => onAnalyze(file)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-semibold transition-all hover:scale-105 active:scale-95"
+                      style={{ background: 'rgba(99,102,241,0.18)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.28)', boxShadow: '0 0 8px rgba(99,102,241,0.1)' }}>
+                      <Sparkles style={{ width: 8, height: 8 }} />Analyze
+                    </button>
+
+                    {/* Rename */}
+                    <button onClick={() => { setRenamingId(file.id); setRenameName(file.name); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] transition-all hover:scale-105"
+                      style={{ background: 'rgba(255,255,255,0.04)', color: '#475569', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <Pencil style={{ width: 8, height: 8 }} />Rename
+                    </button>
+
+                    {/* Move to folder — only shown if folders exist */}
+                    {folders.length > 0 && (
+                      <select value={file.folder} onChange={e => moveToFolder(file.id, e.target.value)}
+                        className="text-[9px] rounded-lg px-1.5 py-1 outline-none cursor-pointer appearance-none"
+                        style={{ background: 'rgba(255,255,255,0.04)', color: '#475569', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        <option value="" className="bg-[#080a18]">No folder</option>
+                        {folders.map(f => <option key={f} value={f} className="bg-[#080a18]">{f}</option>)}
+                      </select>
+                    )}
+
+                    {/* Download again */}
+                    <button onClick={() => {
+                      const meta = FORMAT_META.find(m => m.ext === file.format)!;
+                      if (meta) triggerDownload(file.content, `${file.name}.${file.format}`, meta.mime);
+                    }}
+                      className="p-1.5 rounded-lg transition-all hover:scale-105 ml-auto"
+                      style={{ background: 'rgba(255,255,255,0.04)', color: '#475569', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <Download style={{ width: 9, height: 9 }} />
+                    </button>
+
+                    {/* Delete */}
+                    <button onClick={() => onDelete(file.id)}
+                      className="p-1.5 rounded-lg transition-all hover:scale-105"
+                      style={{ background: 'rgba(239,68,68,0.06)', color: 'rgba(239,68,68,0.55)', border: '1px solid rgba(239,68,68,0.1)' }}>
+                      <Trash2 style={{ width: 9, height: 9 }} />
+                    </button>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Footer hint */}
+      {files.length > 0 && (
+        <div className="px-4 py-2.5 shrink-0 flex items-center justify-center gap-1.5"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <Sparkles style={{ width: 9, height: 9, color: '#334155' }} />
+          <p className="text-[9px]" style={{ color: '#2d3748' }}>Click Analyze to re-run a file through the team</p>
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 // ─── Data packet traveling between agents ─────────────────────────────────────
@@ -710,6 +1104,459 @@ function PhaseRail({ phase }: { phase: Phase }) {
   );
 }
 
+// ─── Top-view office ──────────────────────────────────────────────────────────
+const TOP_STATIONS = [
+  { agent: AGENTS[0], cx: 20, cy: 60 },
+  { agent: AGENTS[1], cx: 50, cy: 65 },
+  { agent: AGENTS[2], cx: 80, cy: 60 },
+] as const;
+
+function TopViewOffice({
+  statuses, agentStreaming, agentPhaseLabel, selected, onSelect, fileCount, onCabinetClick,
+}: {
+  statuses: Record<AgentId, AgentStatus>;
+  agentStreaming: Record<AgentId, string>;
+  agentPhaseLabel: Record<AgentId, string>;
+  selected: AgentId | null;
+  onSelect: (id: AgentId) => void;
+  fileCount: number;
+  onCabinetClick: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 overflow-hidden" style={{ background: '#04060b' }}>
+
+      {/* ── Grid Floor ── */}
+      <div className="absolute" style={{ left: '4%', right: '4%', top: '10%', bottom: '5%', background: '#05060c' }}>
+        {/* Major grid lines — horizontal */}
+        {Array.from({ length: 14 }).map((_, i) => (
+          <div key={`h${i}`} className="absolute left-0 right-0"
+            style={{ top: `${(i + 1) * 7}%`, height: 1, background: (i + 1) % 2 === 0 ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.035)' }} />
+        ))}
+        {/* Major grid lines — vertical */}
+        {Array.from({ length: 14 }).map((_, i) => (
+          <div key={`v${i}`} className="absolute top-0 bottom-0"
+            style={{ left: `${(i + 1) * 7}%`, width: 1, background: (i + 1) % 2 === 0 ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.035)' }} />
+        ))}
+        {/* Grid intersection dots */}
+        {Array.from({ length: 7 }).map((_, row) =>
+          Array.from({ length: 7 }).map((_, col) => (
+            <div key={`d${row}-${col}`} className="absolute rounded-full"
+              style={{ left: `${(col + 1) * 14 - 0.5}%`, top: `${(row + 1) * 14 - 0.5}%`, width: 2, height: 2, background: 'rgba(99,102,241,0.25)' }} />
+          ))
+        )}
+        {/* Center glow beneath emblem */}
+        <div className="absolute left-1/2 -translate-x-1/2 top-1/3 -translate-y-1/2 rounded-full pointer-events-none"
+          style={{ width: 200, height: 200, background: 'radial-gradient(circle,rgba(99,102,241,0.07) 0%,transparent 70%)', filter: 'blur(8px)' }} />
+        {/* Edge fade vignette */}
+        <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 80% 80% at 50% 50%,transparent 40%,rgba(3,4,10,0.7) 100%)' }} />
+      </div>
+
+      {/* ── Walls ── */}
+      {/* Back wall */}
+      <div className="absolute left-0 right-0 top-0" style={{ height: '10%', background: 'linear-gradient(180deg,#020306 0%,#040509 100%)', borderBottom: '2px solid rgba(255,255,255,0.07)' }}>
+        {/* Panel dividers */}
+        {[20, 40, 60, 80].map(x => (
+          <div key={x} className="absolute top-1 bottom-1" style={{ left: `${x}%`, width: 1, background: 'rgba(255,255,255,0.03)' }} />
+        ))}
+        {/* Window openings in back wall */}
+        {[
+          { left: '8%', color: '#818cf8', glow: 'rgba(99,102,241,0.35)' },
+          { right: '8%', color: '#34d399', glow: 'rgba(52,211,153,0.28)' },
+        ].map((w, wi) => (
+          <div key={wi} className="absolute top-1 bottom-1 rounded-sm overflow-hidden"
+            style={{ ...w, width: '14%', background: '#010214', border: `1px solid ${w.color}55`, boxShadow: `inset 0 0 16px ${w.glow}, 0 0 8px ${w.glow}` }}>
+            <motion.div className="absolute inset-0"
+              style={{ background: `linear-gradient(90deg,${wi === 0 ? 'rgba(99,102,241,0.12)' : 'rgba(52,211,153,0.1)'},transparent)` }}
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 3, repeat: Infinity, delay: wi * 1.5 }}
+            />
+            {/* Stars inside */}
+            {Array.from({ length: 8 }).map((_, si) => {
+              const sx = (si * 37 + wi * 13) % 90;
+              const sy = (si * 53 + wi * 17) % 80;
+              return <div key={si} className="absolute rounded-full" style={{ left: `${sx}%`, top: `${sy}%`, width: si % 3 === 0 ? 2 : 1, height: si % 3 === 0 ? 2 : 1, background: wi === 0 ? '#a5b4fc' : '#6ee7b7', opacity: 0.6 }} />;
+            })}
+            {/* Window mullions */}
+            <div className="absolute inset-x-0 top-1/2 -translate-y-px" style={{ height: 2, background: 'rgba(30,35,55,0.9)' }} />
+            <div className="absolute inset-y-0 left-1/2 -translate-x-px" style={{ width: 2, background: 'rgba(30,35,55,0.9)' }} />
+          </div>
+        ))}
+        {/* Wall label */}
+        <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 text-[7px] font-bold tracking-[0.35em] uppercase" style={{ color: 'rgba(255,255,255,0.1)' }}>BACK WALL</div>
+      </div>
+
+      {/* Left wall */}
+      <div className="absolute left-0 top-0 bottom-0" style={{ width: '4%', background: '#020307', borderRight: '2px solid rgba(255,255,255,0.06)' }}>
+        {/* Door on left wall */}
+        <div className="absolute left-1 right-1 rounded-t-sm" style={{ bottom: '20%', height: '22%', background: '#010214', border: '1px solid rgba(255,255,255,0.08)', boxShadow: 'inset 0 0 8px rgba(0,0,0,0.6)' }}>
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full" style={{ width: 4, height: 4, background: 'rgba(255,255,255,0.15)' }} />
+        </div>
+        <div className="absolute inset-x-0 top-0 bottom-0 flex items-center justify-center">
+          <span className="text-[6px] font-bold uppercase" style={{ color: 'rgba(255,255,255,0.08)', writingMode: 'vertical-rl', letterSpacing: '0.2em' }}>LEFT</span>
+        </div>
+      </div>
+
+      {/* Right wall */}
+      <div className="absolute right-0 top-0 bottom-0" style={{ width: '4%', background: '#020307', borderLeft: '2px solid rgba(255,255,255,0.06)' }}>
+        <div className="absolute inset-x-0 top-0 bottom-0 flex items-center justify-center">
+          <span className="text-[6px] font-bold uppercase" style={{ color: 'rgba(255,255,255,0.08)', writingMode: 'vertical-rl', letterSpacing: '0.2em' }}>RIGHT</span>
+        </div>
+        {/* Whiteboard on right wall */}
+        <div className="absolute left-1 right-1 rounded-sm" style={{ top: '15%', height: '28%', background: '#07090f', border: '1px solid rgba(255,255,255,0.06)' }}>
+          {[1,2,3,4].map(i => <div key={i} className="mx-1 rounded-full" style={{ marginTop: 3, height: 1, background: 'rgba(255,255,255,0.05)' }} />)}
+        </div>
+      </div>
+
+      {/* Front wall */}
+      <div className="absolute left-0 right-0 bottom-0" style={{ height: '5%', background: '#020307', borderTop: '2px solid rgba(255,255,255,0.06)' }}>
+        <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 text-[6px] font-bold tracking-[0.3em] uppercase" style={{ color: 'rgba(255,255,255,0.08)' }}>FRONT</div>
+      </div>
+
+      {/* ── Floor emblem — center of room ── */}
+      <motion.div className="absolute" style={{ left: '50%', top: '32%', transform: 'translate(-50%,-50%)', width: 72, height: 72, zIndex: 2 }}>
+        <div className="w-full h-full rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)', boxShadow: '0 0 30px rgba(99,102,241,0.08)' }}>
+          <InlineStarSphere size={72} />
+        </div>
+        {/* Outer ring */}
+        <motion.div className="absolute inset-0 rounded-full pointer-events-none"
+          style={{ border: '1px solid rgba(99,102,241,0.15)' }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.6, 0, 0.6] }}
+          transition={{ duration: 4, repeat: Infinity }}
+        />
+        <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[7px] font-bold tracking-[0.28em] uppercase" style={{ color: 'rgba(129,140,248,0.35)' }}>BLEUMR MISSION TEAM</div>
+      </motion.div>
+
+      {/* ── Ambient light pools from windows on floor ── */}
+      <div className="absolute pointer-events-none" style={{ left: '4%', top: '10%', width: '18%', height: '25%', background: 'radial-gradient(ellipse at 50% 0%,rgba(99,102,241,0.08) 0%,transparent 70%)' }} />
+      <div className="absolute pointer-events-none" style={{ right: '4%', top: '10%', width: '18%', height: '25%', background: 'radial-gradient(ellipse at 50% 0%,rgba(52,211,153,0.06) 0%,transparent 70%)' }} />
+
+      {/* ── SVG floor connectors ── */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 5 }}>
+        <defs>
+          <filter id="glow-p"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="glow-r"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        {/* Floor guide line P→R */}
+        <line x1="23%" y1="63%" x2="45%" y2="66%" stroke={AGENTS[0].accent} strokeWidth="1" strokeOpacity="0.18" strokeDasharray="5 5" />
+        {/* Floor guide line R→S */}
+        <line x1="55%" y1="66%" x2="77%" y2="63%" stroke={AGENTS[1].accent} strokeWidth="1" strokeOpacity="0.18" strokeDasharray="5 5" />
+        {/* Floor guide line P→S (arc via top) */}
+        <path d={`M 22% 59% Q 50% 45% 78% 59%`} stroke="rgba(255,255,255,0.05)" strokeWidth="1" fill="none" strokeDasharray="6 8" />
+
+        {/* Animated data packets */}
+        {statuses.researcher === 'thinking' && (
+          <motion.circle r="5" fill={AGENTS[0].accent} filter="url(#glow-p)"
+            animate={{ cx: ['23%', '45%'], cy: ['63%', '66%'], opacity: [0, 1, 1, 0] }}
+            transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 0.8, ease: [0.25,0.46,0.45,0.94] }}
+          />
+        )}
+        {statuses.synth === 'thinking' && (
+          <motion.circle r="5" fill={AGENTS[1].accent} filter="url(#glow-r)"
+            animate={{ cx: ['55%', '77%'], cy: ['66%', '63%'], opacity: [0, 1, 1, 0] }}
+            transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 0.8, ease: [0.25,0.46,0.45,0.94] }}
+          />
+        )}
+      </svg>
+
+      {/* ── Workstations ── */}
+      {TOP_STATIONS.map(({ agent, cx, cy }) => {
+        const status = statuses[agent.id];
+        const thinking = status === 'thinking';
+        const done = status === 'done';
+        const active = status !== 'idle';
+        const isSelected = selected === agent.id;
+
+        // Extract last sentence for bubble
+        const rawStream = agentStreaming[agent.id] || '';
+        const cleanBubble = rawStream.replace(/[#*`>_~]/g,'').replace(/\s+/g,' ').trim().slice(-120);
+
+        return (
+          <div key={agent.id} className="absolute" style={{ left: `${cx}%`, top: `${cy}%`, transform: 'translate(-50%,-50%)', zIndex: 10 }}>
+
+            {/* Glow halo on floor */}
+            <motion.div className="absolute rounded-full blur-2xl pointer-events-none"
+              style={{ width: 160, height: 80, left: '50%', top: '50%', transform: 'translate(-50%,-50%)', background: agent.accent }}
+              animate={{ opacity: thinking ? [0.08, 0.22, 0.08] : active ? 0.1 : isSelected ? 0.07 : 0 }}
+              transition={{ duration: 1.6, repeat: Infinity }}
+            />
+
+            <button onClick={() => onSelect(agent.id)} className="relative outline-none" style={{ cursor: 'pointer' }}>
+
+              {/* Desk surface — viewed from above */}
+              <div className="relative rounded-xl overflow-visible"
+                style={{
+                  width: 148, height: 84,
+                  background: 'linear-gradient(160deg,#14182a 0%,#0d1020 100%)',
+                  border: `1.5px solid ${active || isSelected ? agent.accent + '55' : 'rgba(255,255,255,0.08)'}`,
+                  boxShadow: active ? `0 0 28px ${agent.accent}20, inset 0 1px 0 rgba(255,255,255,0.05)` : 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                }}>
+
+                {/* ── Monitor (top edge of desk) ── */}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded-lg overflow-hidden"
+                  style={{ width: 92, height: 22, background: '#05070e', border: `1px solid ${active ? agent.accent + '70' : 'rgba(255,255,255,0.1)'}` }}>
+                  {active && (
+                    <motion.div className="absolute inset-0"
+                      style={{ background: `linear-gradient(90deg,${agent.accent}15,transparent)` }}
+                      animate={{ opacity: [0.4, 0.9, 0.4] }}
+                      transition={{ duration: 1.8, repeat: Infinity }}
+                    />
+                  )}
+                  {/* Screen content lines */}
+                  {[90, 70, 50].map((w, i) => (
+                    <motion.div key={i} className="absolute rounded-full"
+                      style={{ left: 4, top: `${20 + i * 28}%`, height: 2, width: `${w}%`, background: agent.accent, opacity: 0.7 - i * 0.2 }}
+                      animate={thinking ? { opacity: [0.7 - i * 0.2, 0.15, 0.7 - i * 0.2], width: [`${w}%`, `${w * 0.6}%`, `${w}%`] } : {}}
+                      transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.25 }}
+                    />
+                  ))}
+                  {/* LED status */}
+                  <motion.div className="absolute top-1 right-1 rounded-full"
+                    style={{ width: 4, height: 4, background: active ? agent.accent : '#0d1018' }}
+                    animate={thinking ? { opacity: [1, 0.15, 1], scale: [1, 1.4, 1] } : {}}
+                    transition={{ duration: 0.7, repeat: Infinity }}
+                  />
+                </div>
+
+                {/* Monitor stand — tiny rectangle below monitor */}
+                <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 25, width: 8, height: 4, background: '#0a0c14', borderRadius: 1 }} />
+                <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 29, width: 20, height: 2, background: '#0a0c14', borderRadius: 1 }} />
+
+                {/* ── Keyboard ── */}
+                <div className="absolute left-1/2 -translate-x-1/2"
+                  style={{ top: 36, width: 76, height: 18, background: '#080b13', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 4 }}>
+                  {[0, 1, 2].map(row => (
+                    <div key={row} className="flex gap-px px-1" style={{ marginTop: row === 0 ? 2 : 2 }}>
+                      {Array.from({ length: 10 }).map((_, col) => (
+                        <motion.div key={col} className="flex-1 rounded-sm"
+                          style={{ height: 3, background: active ? `${agent.accent}40` : 'rgba(255,255,255,0.06)' }}
+                          animate={thinking && (row * 10 + col) % 4 === 0 ? { opacity: [0.3, 1, 0.3] } : {}}
+                          transition={{ duration: 0.45, repeat: Infinity, delay: col * 0.04 + row * 0.08 }}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Mouse ── */}
+                <div className="absolute" style={{ right: 8, top: 34, width: 12, height: 20, background: '#0d1018', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 6 }}>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                    style={{ width: 5, height: 5, background: active ? `${agent.accent}50` : 'rgba(255,255,255,0.05)' }} />
+                  <div className="absolute top-1 left-1/2 -translate-x-1/2" style={{ width: 1, height: 7, background: 'rgba(255,255,255,0.06)' }} />
+                </div>
+
+                {/* ── Mug (circle from above) ── */}
+                <div className="absolute" style={{ left: 8, top: 34 }}>
+                  <div className="rounded-full" style={{ width: 18, height: 18, background: 'linear-gradient(135deg,#1f2937,#111827)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div className="absolute inset-1.5 rounded-full" style={{ background: `${agent.accent}35` }} />
+                  </div>
+                  {/* Mug handle */}
+                  <div className="absolute" style={{ right: -5, top: 5, width: 5, height: 8, borderRadius: '0 50% 50% 0', border: '1px solid rgba(255,255,255,0.08)', borderLeft: 'none' }} />
+                  {/* Steam wisps */}
+                  {active && [0, 4].map(dx => (
+                    <motion.div key={dx} className="absolute rounded-full"
+                      style={{ left: 5 + dx, top: -8, width: 2, height: 6, background: 'rgba(148,163,184,0.2)', borderRadius: 4 }}
+                      animate={{ y: [0, -6, 0], opacity: [0, 0.5, 0], scaleX: [1, 1.5, 1] }}
+                      transition={{ duration: 2.5, repeat: Infinity, delay: dx * 0.4 }}
+                    />
+                  ))}
+                </div>
+
+                {/* ── Papers stack ── */}
+                <div className="absolute" style={{ left: 8, bottom: 6, width: 24, height: 28, transform: 'rotate(-5deg)' }}>
+                  {[0, 2, 4].map(offset => (
+                    <div key={offset} className="absolute rounded-sm"
+                      style={{ left: offset, top: offset, right: -offset, bottom: -offset, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      {[0, 1, 2].map(i => (
+                        <div key={i} className="mx-1.5 rounded-full" style={{ marginTop: 4 + i * 5, height: 1.5, background: `rgba(255,255,255,${0.1 - i * 0.02})` }} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Sticky notes ── */}
+                <div className="absolute" style={{ right: 8, bottom: 6, width: 20, height: 20, background: `${agent.accent}18`, border: `1px solid ${agent.accent}30`, borderRadius: 3, transform: 'rotate(3deg)' }}>
+                  {[0, 1].map(i => <div key={i} className="mx-1 rounded-full" style={{ marginTop: 4 + i * 5, height: 1.5, background: `${agent.accent}40` }} />)}
+                </div>
+
+                {/* ── Name plate on front edge of desk ── */}
+                <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 rounded-sm flex items-center justify-center"
+                  style={{ width: 50, height: 8, background: 'rgba(0,0,0,0.4)', border: `1px solid ${agent.accent}30` }}>
+                  <span className="text-[6px] font-bold uppercase tracking-wider" style={{ color: agent.accent }}>{agent.name}</span>
+                </div>
+              </div>
+
+              {/* ── Chair (below desk from top view) ── */}
+              <div className="relative mx-auto rounded-xl"
+                style={{ width: 60, height: 44, marginTop: 6, background: 'linear-gradient(180deg,#1a1e2e,#111420)', border: `1px solid ${isSelected ? agent.accent + '40' : 'rgba(255,255,255,0.07)'}`, boxShadow: isSelected ? `0 0 12px ${agent.accent}20` : 'none' }}>
+                {/* Cushion */}
+                <div className="absolute inset-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)' }} />
+                {/* Chair arm rests */}
+                <div className="absolute left-0 top-3 bottom-3 rounded-l-lg" style={{ width: 5, background: '#0f1220', border: '1px solid rgba(255,255,255,0.06)' }} />
+                <div className="absolute right-0 top-3 bottom-3 rounded-r-lg" style={{ width: 5, background: '#0f1220', border: '1px solid rgba(255,255,255,0.06)' }} />
+                {/* Chair wheels */}
+                {[[-6, -4], [6, -4], [0, 8]].map(([ox, oy], wi) => (
+                  <div key={wi} className="absolute rounded-full"
+                    style={{ width: 5, height: 5, left: `calc(50% + ${ox}px)`, bottom: oy, background: '#090c14', border: '1px solid rgba(255,255,255,0.05)' }} />
+                ))}
+              </div>
+
+              {/* ── Agent avatar ── */}
+              <motion.div
+                className="absolute rounded-full flex items-center justify-center"
+                style={{
+                  width: 44, height: 44,
+                  left: '50%', top: 88,
+                  transform: 'translateX(-50%)',
+                  background: agent.accentDim,
+                  border: `2px solid ${active ? agent.accent : agent.accent + '45'}`,
+                  boxShadow: active ? `0 0 24px ${agent.accent}55, 0 0 8px ${agent.accent}30` : 'none',
+                  zIndex: 3,
+                }}
+                animate={thinking ? { scale: [1, 1.1, 1] } : {}}
+                transition={{ duration: 1.8, repeat: Infinity }}
+              >
+                <agent.Icon style={{ width: 18, height: 18, color: agent.accent }} />
+                {/* Done badge */}
+                {done && (
+                  <motion.div className="absolute -top-1 -right-1 rounded-full flex items-center justify-center"
+                    initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    style={{ width: 14, height: 14, background: '#10b981', border: '1.5px solid #04060b' }}>
+                    <span style={{ fontSize: 8, color: '#fff', lineHeight: 1 }}>✓</span>
+                  </motion.div>
+                )}
+              </motion.div>
+
+              {/* ── Status chip ── */}
+              <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 138, whiteSpace: 'nowrap', zIndex: 4 }}>
+                <div className="flex items-center gap-1 rounded-full px-2.5 py-0.5"
+                  style={{ background: 'rgba(4,6,18,0.92)', border: `1px solid ${active ? agent.accent + '40' : 'rgba(255,255,255,0.06)'}`, backdropFilter: 'blur(8px)' }}>
+                  <motion.div className="rounded-full" style={{ width: 5, height: 5, background: agent.accent }}
+                    animate={{ opacity: thinking ? [1, 0.2, 1] : done ? 1 : 0.2 }}
+                    transition={{ duration: 0.7, repeat: thinking ? Infinity : 0 }}
+                  />
+                  <span className="text-[9px] font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>{agent.name}</span>
+                  {thinking && <span className="text-[8px]" style={{ color: agent.accent }}>working…</span>}
+                  {done && <span className="text-[8px] text-emerald-400">done</span>}
+                </div>
+              </div>
+
+              {/* ── Speech bubble (top view) ── */}
+              <AnimatePresence>
+                {thinking && cleanBubble.length > 10 && (
+                  <motion.div
+                    key="bubble"
+                    initial={{ opacity: 0, scale: 0.85, y: 6 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    className="absolute rounded-2xl px-3 py-2"
+                    style={{
+                      width: 170, left: '50%', transform: 'translateX(-50%)',
+                      top: -82,
+                      background: 'rgba(6,8,18,0.96)',
+                      border: `1px solid ${agent.accent}55`,
+                      boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 0 1px ${agent.accent}15`,
+                      zIndex: 30,
+                    }}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <motion.div className="rounded-full shrink-0" style={{ width: 5, height: 5, background: agent.accent }}
+                        animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.65, repeat: Infinity }} />
+                      <span className="text-[8px] font-bold" style={{ color: agent.accent }}>{agentPhaseLabel[agent.id] || agent.name}</span>
+                    </div>
+                    <p className="text-[9px] leading-snug" style={{ color: 'rgba(255,255,255,0.75)', wordBreak: 'break-word' }}>
+                      {cleanBubble}
+                      <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.5, repeat: Infinity }}
+                        style={{ color: agent.accent, marginLeft: 2, fontWeight: 700 }}>▋</motion.span>
+                    </p>
+                    {/* Tail */}
+                    <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -7, width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `8px solid ${agent.accent}55` }} />
+                    <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -6, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '7px solid rgba(6,8,18,0.96)' }} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </button>
+          </div>
+        );
+      })}
+
+      {/* ── File cabinet — top-down view, back wall center ── */}
+      <motion.div
+        onClick={onCabinetClick}
+        className="absolute cursor-pointer group select-none"
+        style={{ left: '50%', transform: 'translateX(-50%)', top: '11%', width: 44, height: 62, zIndex: 10 }}
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.96 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 22 }}>
+
+        {/* Cabinet body — bird's-eye rectangle */}
+        <div className="absolute inset-0 rounded-sm overflow-hidden"
+          style={{
+            background: 'linear-gradient(160deg, #1c2040 0%, #10132a 100%)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: fileCount > 0
+              ? '0 0 20px rgba(99,102,241,0.25), 0 2px 8px rgba(0,0,0,0.7)'
+              : '0 2px 8px rgba(0,0,0,0.7)',
+          }}>
+          {/* Top face highlight (simulates 3D top edge) */}
+          <div className="absolute inset-x-0 top-0 h-1"
+            style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04))' }} />
+          {/* 4 drawer divisions (horizontal lines from top view) */}
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="absolute left-1.5 right-1.5 rounded-full"
+              style={{
+                top: 6 + i * 14,
+                height: 10,
+                background: fileCount > 0 && i === 0
+                  ? 'linear-gradient(180deg, rgba(99,102,241,0.22), rgba(99,102,241,0.1))'
+                  : 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.07)',
+              }}>
+              {/* Handle dot — visible from top */}
+              <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-4 h-1.5 rounded-full"
+                style={{
+                  background: fileCount > 0 && i === 0
+                    ? 'rgba(99,102,241,0.65)'
+                    : 'rgba(255,255,255,0.18)',
+                  boxShadow: fileCount > 0 && i === 0 ? '0 0 5px rgba(99,102,241,0.6)' : 'none',
+                }} />
+            </div>
+          ))}
+        </div>
+
+        {/* File count badge */}
+        {fileCount > 0 && (
+          <motion.div
+            initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', bounce: 0.5 }}
+            className="absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center"
+            style={{
+              background: 'rgba(99,102,241,0.92)',
+              border: '1px solid rgba(129,140,248,0.7)',
+              boxShadow: '0 0 10px rgba(99,102,241,0.8)',
+              fontSize: 8, color: '#fff', fontWeight: 700, zIndex: 2,
+            }}>
+            {fileCount > 99 ? '99+' : fileCount}
+          </motion.div>
+        )}
+
+        {/* Hover glow ring */}
+        <div className="absolute inset-0 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+          style={{ boxShadow: '0 0 18px rgba(99,102,241,0.5)', border: '1px solid rgba(99,102,241,0.35)' }} />
+
+        {/* Label */}
+        <div className="absolute w-full text-center"
+          style={{ bottom: -13, fontSize: 7, fontWeight: 700, letterSpacing: '0.3em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)' }}>
+          FILES
+        </div>
+      </motion.div>
+
+      {/* ── View label ── */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[8px] font-bold tracking-[0.4em] uppercase" style={{ color: 'rgba(255,255,255,0.1)', zIndex: 1 }}>
+        TOP VIEW
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePageProps) {
   const [input, setInput] = useState('');
@@ -721,6 +1568,9 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
   const [agentPhaseLabel, setAgentPhaseLabel] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
   const [selected, setSelected] = useState<AgentId | null>(null);
   const [lastTask, setLastTask] = useState('');
+  const [viewMode, setViewMode] = useState<'side' | 'top'>('top');
+  const [cabinetOpen, setCabinetOpen] = useState(false);
+  const [wsFiles, setWsFiles] = useState<WSFile[]>(loadWSFiles);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoRunFired = useRef(false);
@@ -731,12 +1581,10 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
   useEffect(() => {
     if (initialTask && !autoRunFired.current && apiKey) {
       autoRunFired.current = true;
-      setInput(initialTask);
-      // Slight delay so the page is fully mounted before firing
+      // Small delay so the page is fully mounted — no fake typing shown
       setTimeout(() => {
-        setInput('');
         runWithTask(initialTask);
-      }, 600);
+      }, 400);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTask, apiKey]);
@@ -810,12 +1658,16 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
         [
           {
             role: 'system',
-            content: `You are Planner — the strategic architect on a three-agent research team (Planner, Researcher, Synth). This is NOT a quick-answer tool. The team is built for deep, thorough, collaborative work. Your job in this first round is to:
-1. Fully understand the scope and hidden complexity of the task.
-2. Break it into a detailed, numbered execution plan (6–10 steps minimum). Each step must be specific — not vague headings.
-3. Flag at least 3 assumptions you're making that Researcher should verify or challenge.
-4. Identify what information would change the plan if it were different.
-Think like a senior consultant drafting a project brief. No shortcuts.`,
+            content: `${BLEUMR_AGENT_PREFIX}
+You are Planner — the strategic architect of the Bleumr Mission Team. You are the mind that sees the shape of the whole before anyone else. When a task arrives, you do not rush to answers — you map the territory.
+
+This is Round 1 of 5. Your job:
+1. Fully grasp the scope and hidden complexity of the task — go deeper than the surface ask.
+2. Break it into a detailed, numbered execution plan (6–10 steps minimum). Each step must be specific and actionable — no vague headings.
+3. Flag at least 3 assumptions you're making that Researcher must verify or challenge.
+4. Name what information, if different, would fundamentally change the plan.
+
+You are inside Bleumr. The person who sent this trusts the Mission Team with their hardest problems. Think like the sharpest consultant on the planet writing a brief they'd bet their reputation on.`,
           },
           { role: 'user', content: `TASK: ${task}\n\nDraft your full strategic plan and flag your assumptions for Researcher:` },
         ],
@@ -838,13 +1690,17 @@ Think like a senior consultant drafting a project brief. No shortcuts.`,
         [
           {
             role: 'system',
-            content: `You are Researcher — the evidence and critical thinking expert on a three-agent team. Planner has laid out a strategic plan. Your job is thorough and challenging — not supportive cheerleading:
-1. Challenge every assumption Planner stated. State whether each is valid, partially valid, or wrong, and explain why with specifics.
-2. Identify gaps, risks, edge cases, and overlooked factors in the plan. Be brutal but constructive.
-3. Provide concrete supporting material: real-world examples, known failure modes, relevant data points, industry patterns, or case studies.
-4. Propose at least 2 alternative angles or approaches Planner may not have considered.
-5. End with a prioritized list of corrections Planner must incorporate in the revision.
-This is deep research, not a summary. Be exhaustive.`,
+            content: `${BLEUMR_AGENT_PREFIX}
+You are Researcher — the challenger and evidence engine of the Bleumr Mission Team. You are the intelligence that refuses to let weak ideas survive. Planner has mapped a strategy. Your job is not to nod along — it is to test every assumption against reality.
+
+This is Round 2 of 5:
+1. Challenge every assumption Planner stated. For each: valid, partially valid, or wrong — and explain exactly why with real specifics.
+2. Identify gaps, risks, edge cases, and overlooked factors. Be brutal but always constructive.
+3. Provide concrete supporting material: real-world examples, known failure modes, data points, industry patterns, case studies.
+4. Propose at least 2 alternative angles or approaches Planner has not considered.
+5. End with a prioritized correction list Planner must incorporate in their revision.
+
+You are inside Bleumr. The Mission Team's value is that we disagree toward truth. Do your job fully — this is deep intelligence work, not a summary.`,
           },
           { role: 'user', content: `TASK: ${task}\n\n=== PLANNER'S PLAN ===\n${plan}\n\nProvide your full research, critique, and corrections:` },
         ],
@@ -867,12 +1723,16 @@ This is deep research, not a summary. Be exhaustive.`,
         [
           {
             role: 'system',
-            content: `You are Planner in your second pass. Researcher has challenged your assumptions, added evidence, and flagged gaps. You must now:
-1. Explicitly address every correction Researcher raised — either incorporate it or explain why you disagree.
-2. Produce a significantly improved, detailed revised plan. This should be substantially different from and better than your first draft.
-3. Incorporate the evidence and examples Researcher provided where they strengthen the plan.
-4. Add implementation specifics: timelines, metrics for success, resource requirements, risk mitigations.
-Do not just tweak the original — rebuild it properly with everything you now know.`,
+            content: `${BLEUMR_AGENT_PREFIX}
+You are Planner — Round 3. Researcher has stress-tested your plan and found real gaps. A lesser mind would be defensive. You absorb and rebuild.
+
+You must now:
+1. Explicitly address every correction Researcher raised — incorporate it or explain precisely why you disagree.
+2. Produce a substantially revised plan — not a tweak, a genuine reconstruction using everything you now know.
+3. Embed Researcher's evidence and examples where they strengthen the structure.
+4. Add implementation detail: timelines, success metrics, resource requirements, risk mitigations.
+
+This is the Mission Team at work inside Bleumr — the iterative depth is the product. Make this revision worth reading.`,
           },
           { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL PLAN ===\n${plan}\n\n=== RESEARCHER'S CRITIQUE & FINDINGS ===\n${research}\n\nWrite your substantially revised and improved plan:` },
         ],
@@ -895,12 +1755,15 @@ Do not just tweak the original — rebuild it properly with everything you now k
         [
           {
             role: 'system',
-            content: `You are Researcher in your second pass. Planner has revised their strategy based on your critique. Now:
-1. Validate the revision — did Planner actually address your concerns? Call out anything still missing or weak.
-2. Add your final layer of intelligence: the deepest, most specific facts, data, or context that will make the final output exceptional.
-3. Provide any structured data (tables, comparisons, benchmarks) that Synth should include in the final deliverable.
-4. Write a brief "team verdict" — 2–3 sentences summarizing what you both agree the best path forward is.
-This is your last input before Synth writes the final answer. Make it count.`,
+            content: `${BLEUMR_AGENT_PREFIX}
+You are Researcher — Round 4, your final pass. Planner has rebuilt the strategy after your critique. Now validate and complete the intelligence picture.
+
+1. Did Planner genuinely address your concerns? Call out anything still missing, weakly handled, or glossed over.
+2. Deliver your final layer of intelligence — the deepest, most specific facts, data, and context that will make the deliverable exceptional.
+3. Include any structured data — tables, comparisons, benchmarks — that Synth should embed in the final output.
+4. Close with a "Mission Team verdict" — 2–3 sentences on what this team now agrees is the clearest path forward.
+
+After this, Synth takes everything and writes the final deliverable for the Bleumr user. Make these last words count.`,
           },
           { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL RESEARCH ===\n${research}\n\n=== PLANNER'S REVISED PLAN ===\n${refinedPlan}\n\nFinal validation, additional intelligence, and team verdict:` },
         ],
@@ -925,14 +1788,20 @@ This is your last input before Synth writes the final answer. Make it count.`,
         [
           {
             role: 'system',
-            content: `You are Synth — the final composer on the team. You have just read a complete multi-round collaboration between Planner and Researcher: two full planning passes and two research passes. Your job is to synthesize everything into a single, world-class deliverable. This is NOT a summary — it is the final product.
-Rules:
-- Use the best ideas from both agents across all rounds.
-- Write at professional consultant quality: structured, specific, actionable.
-- Use rich markdown formatting: ## headers, bullet lists, numbered steps, tables, code blocks where appropriate.
-- Include concrete examples, metrics, timelines, and data where available.
-- Length matters here — this is a deep-work output. Be thorough, not brief.
-- End with a "Next Steps" section with 3–5 immediately actionable items.`,
+            content: `${BLEUMR_AGENT_PREFIX}
+You are Synth — the composer and final voice of the Bleumr Mission Team. You have just witnessed four rounds of real dialogue between Planner and Researcher: two strategy passes, two research passes, real disagreement, real revision. Now you write.
+
+This is Round 5 — the deliverable. Not a summary of what happened. The final product itself.
+
+Rules you do not break:
+- Draw the best intelligence from all four rounds of dialogue. Let it show.
+- Write at the level of a world-class consultant producing a paid deliverable — structured, specific, and actionable.
+- Use rich markdown: ## headers, numbered steps, bullet lists, tables, code blocks where relevant.
+- Embed concrete examples, real metrics, timelines, and data wherever available.
+- This is a deep-work output — be thorough, not brief.
+- Close with a "Next Steps" section: 3–5 immediately actionable items the user can execute today.
+
+This document will be saved to the Bleumr File Cabinet. It may be the most valuable thing this team produces for this user. Write accordingly.`,
           },
           {
             role: 'user',
@@ -963,6 +1832,15 @@ Write the complete, polished final deliverable:`,
       setStreaming('');
       setPhase('done');
 
+      // Auto-save final deliverable to file cabinet
+      const synthTask = task;
+      const synthSlug = (synthTask.replace(/[^a-z0-9 ]/gi, '').trim().slice(0, 36).replace(/\s+/g, '_').toLowerCase()) || 'workspace_output';
+      const autoFormats = detectFormats(full, synthTask);
+      const autoFmt = autoFormats[0] ?? 'md';
+      const autoContent = buildContent(full, autoFmt, synthTask);
+      const savedAll = addWSFile({ name: synthSlug, content: autoContent, format: autoFmt, agentId: 'synth', task: synthTask, folder: '' });
+      setWsFiles(savedAll);
+
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       console.error('[Workspace]', e.message);
@@ -988,21 +1866,55 @@ Write the complete, polished final deliverable:`,
     setOutputs([]); setStreaming(''); setInput('');
   };
 
+  const handleCabinetSave = (updated: WSFile[]) => {
+    saveWSFiles(updated);
+    setWsFiles(updated);
+  };
+
+  const handleCabinetDelete = (id: string) => {
+    const next = wsFiles.filter(f => f.id !== id);
+    saveWSFiles(next);
+    setWsFiles(next);
+  };
+
+  const handleCabinetAnalyze = (file: WSFile) => {
+    setCabinetOpen(false);
+    const prompt = `Please analyze this document titled "${file.name}":\n\n${file.content.slice(0, 4000)}`;
+    setTimeout(() => runWithTask(prompt), 200);
+  };
+
   const isRunning = phase !== 'idle' && phase !== 'done';
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(135deg,#04060e 0%,#060a18 60%,#040810 100%)', fontFamily: 'inherit' }}>
 
-      {/* Minimal top bar — just close + phase rail */}
+      {/* Minimal top bar — close + phase rail + view toggle */}
       <div className="flex items-center justify-between px-4 py-2 shrink-0"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
         <div className="flex items-center gap-2">
           {phase !== 'idle' && <PhaseRail phase={phase} />}
         </div>
-        <button onClick={onClose}
-          className="p-2 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors">
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center rounded-xl overflow-hidden"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            {(['side', 'top'] as const).map(mode => (
+              <button key={mode} onClick={() => setViewMode(mode)}
+                className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+                style={{
+                  background: viewMode === mode ? 'rgba(129,140,248,0.18)' : 'transparent',
+                  color: viewMode === mode ? '#818cf8' : 'rgba(255,255,255,0.25)',
+                  borderRight: mode === 'side' ? '1px solid rgba(255,255,255,0.06)' : undefined,
+                }}>
+                {mode === 'side' ? '⬛ Side' : '⬆ Top'}
+              </button>
+            ))}
+          </div>
+          <button onClick={onClose}
+            className="p-2 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -1011,129 +1923,231 @@ Write the complete, polished final deliverable:`,
         {/* ── LEFT: Office ────────────────────────────────────────── */}
         <div className="relative flex-1 overflow-hidden" style={{ borderRight: '1px solid rgba(255,255,255,0.04)' }}>
 
-          {/* Room bg */}
-          <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 90% 60% at 50% 0%,rgba(99,102,241,0.07) 0%,transparent 70%), linear-gradient(180deg,#07090f 0%,#050710 100%)' }} />
+          {/* ── Top view ── */}
+          <AnimatePresence>
+            {viewMode === 'top' && (
+              <motion.div key="top" className="absolute inset-0 z-50"
+                initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }}
+                transition={{ duration: 0.25 }}>
+                <TopViewOffice
+                  statuses={statuses}
+                  agentStreaming={agentStreaming}
+                  agentPhaseLabel={agentPhaseLabel}
+                  selected={selected}
+                  onSelect={id => setSelected(p => p === id ? null : id)}
+                  fileCount={wsFiles.length}
+                  onCabinetClick={() => setCabinetOpen(true)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Back wall */}
-          <div className="absolute top-0 left-0 right-0" style={{ height: '52%', borderBottom: '1px solid rgba(255,255,255,0.04)', background: 'linear-gradient(180deg,rgba(255,255,255,0.015) 0%,rgba(255,255,255,0.005) 100%)' }} />
+          {/* ── Base room fill ── */}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg,#08090f 0%,#06080e 48%,#0a0c12 100%)' }} />
 
-          {/* Windows — moving starfield, space-station view */}
+          {/* ── Ceiling — dark slab with subtle ambient ── */}
+          <div className="absolute top-0 left-0 right-0" style={{ height: '8%', background: 'linear-gradient(180deg,#030408 0%,#050609 100%)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            {/* Ceiling recessed light strips */}
+            {[25, 50, 75].map(pct => (
+              <div key={pct} className="absolute top-0" style={{ left: `${pct}%`, transform: 'translateX(-50%)', width: 60, height: '100%' }}>
+                <div style={{ width: '100%', height: 2, background: 'linear-gradient(90deg,transparent,rgba(200,220,255,0.12),transparent)' }} />
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 rounded-full blur-lg" style={{ width: 40, height: 20, background: 'rgba(180,200,255,0.07)' }} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Back wall — textured paneling ── */}
+          <div className="absolute left-0 right-0" style={{ top: '8%', height: '48%', background: 'linear-gradient(180deg,#0b0d15 0%,#090b13 100%)' }}>
+            {/* Horizontal rail — chair rail height */}
+            <div className="absolute left-0 right-0" style={{ bottom: 0, height: 1, background: 'rgba(255,255,255,0.055)' }} />
+            <div className="absolute left-0 right-0" style={{ bottom: 3, height: 1, background: 'rgba(255,255,255,0.025)' }} />
+            {/* Vertical panel dividers */}
+            {[16.6, 33.3, 50, 66.6, 83.3].map(pct => (
+              <div key={pct} className="absolute top-0 bottom-0" style={{ left: `${pct}%`, width: 1, background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.04),transparent)' }} />
+            ))}
+            {/* Subtle wall grain overlay */}
+            <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,255,255,0.008) 3px,rgba(255,255,255,0.008) 4px)', opacity: 0.6 }} />
+            {/* Ambient ceiling bounce — soft warm bloom from desk lights */}
+            <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ height: '40%', background: 'linear-gradient(0deg,rgba(99,102,241,0.04) 0%,transparent 100%)' }} />
+          </div>
+
+          {/* ── Wainscoting / lower wall panel ── */}
+          <div className="absolute left-0 right-0" style={{ top: '56%', bottom: '16%', background: 'linear-gradient(180deg,#080a10 0%,#060810 100%)' }}>
+            {/* Panel edge top */}
+            <div className="absolute left-0 right-0 top-0" style={{ height: 2, background: 'rgba(255,255,255,0.05)' }} />
+            {/* Baseboard bottom */}
+            <div className="absolute left-0 right-0 bottom-0" style={{ height: 3, background: 'rgba(255,255,255,0.04)' }} />
+            {/* Vertical groove lines on lower panel */}
+            {[10, 22, 34, 46, 58, 70, 82, 94].map(pct => (
+              <div key={pct} className="absolute top-2 bottom-2" style={{ left: `${pct}%`, width: 1, background: 'rgba(255,255,255,0.025)' }} />
+            ))}
+          </div>
+
+          {/* ── Floor — dark hardwood planks ── */}
+          <div className="absolute left-0 right-0 bottom-0" style={{ height: '16%', background: 'linear-gradient(180deg,#07080d 0%,#050609 100%)' }}>
+            {/* Plank lines */}
+            {[18, 36, 54, 72, 90].map(y => (
+              <div key={y} className="absolute left-0 right-0" style={{ top: `${y}%`, height: 1, background: 'rgba(255,255,255,0.03)' }} />
+            ))}
+            {/* Plank end seams — random widths */}
+            {[8, 28, 52, 76].map(x => (
+              <div key={x} className="absolute top-0 bottom-0" style={{ left: `${x}%`, width: 1, background: 'rgba(255,255,255,0.025)' }} />
+            ))}
+            {/* Subtle floor gloss reflection */}
+            <div className="absolute inset-x-0 top-0" style={{ height: '30%', background: 'linear-gradient(180deg,rgba(99,102,241,0.04) 0%,transparent 100%)' }} />
+          </div>
+
+          {/* ── Windows — much larger, more dramatic ── */}
           {([
-            { style: { left: 24 }, nebulaColor: 'rgba(99,102,241,0.18)', dir: -1 },
-            { style: { right: 24 }, nebulaColor: 'rgba(52,211,153,0.14)', dir: 1 },
-          ] as const).map((w, wi) => (
-            <div key={wi} className="absolute top-4 rounded-2xl overflow-hidden"
-              style={{ width: 94, height: 124, ...w.style, background: '#010308', border: '1px solid rgba(255,255,255,0.12)', boxShadow: 'inset 0 0 30px rgba(0,0,10,0.8), 0 0 0 1px rgba(255,255,255,0.04)' }}>
+            { style: { left: 18 }, nebulaColor: 'rgba(99,102,241,0.22)', dir: -1 as const },
+            { style: { right: 18 }, nebulaColor: 'rgba(52,211,153,0.16)', dir: 1 as const },
+          ]).map((w, wi) => (
+            <div key={wi} className="absolute rounded-2xl overflow-hidden"
+              style={{
+                width: 168, height: 210,
+                top: '9%',
+                ...w.style,
+                background: '#010308',
+                border: '1.5px solid rgba(255,255,255,0.14)',
+                boxShadow: `inset 0 0 60px rgba(0,0,10,0.9), 0 0 0 3px rgba(255,255,255,0.03), 0 8px 40px rgba(0,0,0,0.6), 0 0 60px ${w.nebulaColor.replace('0.22','0.08').replace('0.16','0.06')}`,
+              }}>
 
-              {/* Deep space background */}
-              <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 20%, #05082a 0%, #010308 100%)' }} />
+              {/* Deep space bg */}
+              <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 20%, #050826 0%, #010210 60%, #010308 100%)' }} />
 
-              {/* Star layer 1 — slow drift across */}
+              {/* Star layer 1 — slow drift */}
               <motion.div className="absolute inset-0"
-                animate={{ x: [0, w.dir * 30, 0] }}
-                transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}>
-                {Array.from({ length: 22 }).map((_, si) => {
-                  const sx = ((si * 41 + wi * 17) % 140) - 25;
+                animate={{ x: [0, w.dir * 40, 0] }}
+                transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}>
+                {Array.from({ length: 38 }).map((_, si) => {
+                  const sx = ((si * 41 + wi * 17) % 220) - 30;
                   const sy = ((si * 29 + wi * 11) % 95) + 2;
-                  const sz = si % 4 === 0 ? 2 : 1;
+                  const sz = si % 5 === 0 ? 2.5 : si % 3 === 0 ? 1.5 : 1;
                   return (
                     <motion.div key={si} className="absolute rounded-full"
-                      style={{ left: sx, top: `${sy}%`, width: sz, height: sz, background: si % 6 === 0 ? '#a5b4fc' : si % 4 === 0 ? '#67e8f9' : '#ffffff' }}
-                      animate={{ opacity: [0.15, si % 3 === 0 ? 1 : 0.6, 0.15] }}
-                      transition={{ duration: 2 + (si % 4) * 1.5, repeat: Infinity, delay: (si * 0.35) % 5 }}
+                      style={{ left: sx, top: `${sy}%`, width: sz, height: sz, background: si % 6 === 0 ? '#a5b4fc' : si % 4 === 0 ? '#67e8f9' : si % 7 === 0 ? '#fde68a' : '#ffffff' }}
+                      animate={{ opacity: [0.1, si % 3 === 0 ? 1 : 0.65, 0.1] }}
+                      transition={{ duration: 2 + (si % 5) * 1.3, repeat: Infinity, delay: (si * 0.3) % 6 }}
                     />
                   );
                 })}
               </motion.div>
 
-              {/* Star layer 2 — slightly faster, opposite direction */}
+              {/* Star layer 2 — faster, opposite */}
               <motion.div className="absolute inset-0"
-                animate={{ x: [0, w.dir * -18, 0] }}
-                transition={{ duration: 14, repeat: Infinity, ease: 'linear' }}>
-                {Array.from({ length: 12 }).map((_, si) => {
-                  const sx = ((si * 67 + wi * 23 + 10) % 120) - 15;
+                animate={{ x: [0, w.dir * -24, 0] }}
+                transition={{ duration: 18, repeat: Infinity, ease: 'linear' }}>
+                {Array.from({ length: 18 }).map((_, si) => {
+                  const sx = ((si * 67 + wi * 23 + 10) % 190) - 20;
                   const sy = ((si * 47 + wi * 19 + 5) % 90) + 5;
                   return (
                     <motion.div key={si} className="absolute rounded-full"
-                      style={{ left: sx, top: `${sy}%`, width: 1, height: 1, background: '#ffffff', opacity: 0.4 }}
-                      animate={{ opacity: [0.1, 0.5, 0.1] }}
-                      transition={{ duration: 3 + (si % 3), repeat: Infinity, delay: (si * 0.6) % 4 }}
+                      style={{ left: sx, top: `${sy}%`, width: 1, height: 1, background: '#ffffff', opacity: 0.35 }}
+                      animate={{ opacity: [0.08, 0.55, 0.08] }}
+                      transition={{ duration: 3 + (si % 4), repeat: Infinity, delay: (si * 0.5) % 5 }}
                     />
                   );
                 })}
               </motion.div>
 
-              {/* Nebula cloud — drifts slowly */}
+              {/* Nebula 1 — large, drifting */}
+              <motion.div className="absolute rounded-full blur-2xl pointer-events-none"
+                style={{ width: 130, height: 90, left: '-15%', top: '10%', background: w.nebulaColor }}
+                animate={{ x: [0, w.dir * 30, 0], opacity: [0.45, 0.85, 0.45] }}
+                transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut', delay: wi * 2 }}
+              />
+
+              {/* Nebula 2 — smaller, different color */}
               <motion.div className="absolute rounded-full blur-xl pointer-events-none"
-                style={{ width: 70, height: 50, left: '-10%', top: '15%', background: w.nebulaColor }}
-                animate={{ x: [0, w.dir * 20, 0], opacity: [0.5, 0.9, 0.5] }}
-                transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut', delay: wi * 2 }}
+                style={{ width: 70, height: 50, right: '-10%', top: '50%', background: wi === 0 ? 'rgba(34,211,238,0.15)' : 'rgba(129,140,248,0.15)' }}
+                animate={{ x: [0, w.dir * -20, 0], opacity: [0.3, 0.6, 0.3] }}
+                transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut', delay: wi * 3 + 2 }}
               />
 
               {/* Shooting star */}
               <motion.div className="absolute rounded-full"
-                style={{ width: 20, height: 1, top: '30%', left: '-20%', background: `linear-gradient(90deg, transparent, white)`, opacity: 0 }}
-                animate={{ left: ['-20%', '120%'], opacity: [0, 0.8, 0] }}
-                transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 6 + wi * 4, ease: 'easeIn' }}
+                style={{ width: 32, height: 1.5, top: '28%', left: '-25%', background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.9), white)`, opacity: 0 }}
+                animate={{ left: ['-25%', '130%'], opacity: [0, 0.9, 0] }}
+                transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 7 + wi * 5, ease: 'easeIn' }}
               />
 
-              {/* Window frame cross */}
-              <div className="absolute inset-x-0 top-1/2 h-px pointer-events-none" style={{ background: 'rgba(255,255,255,0.12)', zIndex: 2 }} />
-              <div className="absolute inset-y-0 left-1/2 w-px pointer-events-none" style={{ background: 'rgba(255,255,255,0.12)', zIndex: 2 }} />
+              {/* Second shooting star */}
+              <motion.div className="absolute rounded-full"
+                style={{ width: 20, height: 1, top: '60%', left: '-25%', background: `linear-gradient(90deg, transparent, rgba(167,200,255,0.7))`, opacity: 0 }}
+                animate={{ left: ['-25%', '130%'], opacity: [0, 0.6, 0] }}
+                transition={{ duration: 0.9, repeat: Infinity, repeatDelay: 12 + wi * 3, ease: 'easeIn', delay: 4 }}
+              />
 
-              {/* Inner window bevel */}
-              <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.06), inset 2px 2px 0 rgba(255,255,255,0.04)' }} />
+              {/* Window cross frame — 4-pane look */}
+              <div className="absolute inset-x-0 top-1/2 pointer-events-none" style={{ height: 4, background: 'linear-gradient(180deg,rgba(20,24,40,0.9),rgba(30,35,55,0.9))', zIndex: 3, marginTop: -2 }} />
+              <div className="absolute inset-y-0 left-1/2 pointer-events-none" style={{ width: 4, background: 'linear-gradient(90deg,rgba(20,24,40,0.9),rgba(30,35,55,0.9))', zIndex: 3, marginLeft: -2 }} />
+
+              {/* Frame edge highlight */}
+              <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.07), inset 3px 3px 0 rgba(255,255,255,0.04), inset -1px -1px 0 rgba(0,0,0,0.5)' }} />
+
+              {/* Window light spill onto wall (outside window) */}
+              <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ height: 8, background: `linear-gradient(0deg,${w.nebulaColor.replace(/[\d.]+\)$/, '0.4)')},transparent)`, zIndex: 4, filter: 'blur(4px)' }} />
             </div>
           ))}
 
-          {/* Bleumr Research Center — etched into back wall */}
-          <div className="absolute top-5 left-1/2 -translate-x-1/2 flex flex-col items-center"
-            style={{ width: 200 }}>
-            {/* Engraved panel — inset into wall */}
+          {/* Window sill ledges */}
+          {[{ left: 18 }, { right: 18 }].map((pos, wi) => (
+            <div key={wi} className="absolute rounded-b-sm"
+              style={{
+                width: 178, height: 8, top: 'calc(9% + 210px)',
+                ...pos,
+                background: 'linear-gradient(180deg,#1a1d28,#12141e)',
+                border: '1px solid rgba(255,255,255,0.07)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              }} />
+          ))}
+
+          {/* ── Ambient light pools from windows onto floor ── */}
+          <div className="absolute pointer-events-none" style={{ left: 0, width: 200, bottom: '16%', height: 80, background: 'radial-gradient(ellipse 80% 50% at 30% 100%,rgba(99,102,241,0.06) 0%,transparent 70%)' }} />
+          <div className="absolute pointer-events-none" style={{ right: 0, width: 200, bottom: '16%', height: 80, background: 'radial-gradient(ellipse 80% 50% at 70% 100%,rgba(52,211,153,0.05) 0%,transparent 70%)' }} />
+
+          {/* ── File cabinet — centered on back wall, just below the sign ── */}
+          <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 'calc(10% + 152px)', zIndex: 10 }}>
+            <FileCabinetVisual fileCount={wsFiles.length} onClick={() => setCabinetOpen(true)} />
+          </div>
+
+          {/* Bleumr Workspace — etched into back wall */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center"
+            style={{ top: '10%', width: 200 }}>
             <div className="relative flex flex-col items-center px-5 py-4 rounded-2xl"
               style={{
-                background: 'linear-gradient(160deg, rgba(255,255,255,0.012) 0%, rgba(255,255,255,0.004) 100%)',
-                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'linear-gradient(160deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%)',
+                boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.07)',
               }}>
-
-              {/* App sphere */}
-              <InlineStarSphere size={54} />
-
-              {/* Wordmark */}
-              <div className="mt-2.5 flex flex-col items-center gap-0.5">
-                <motion.span
-                  className="tracking-[0.22em] font-bold text-[11px] uppercase"
-                  style={{ color: 'rgba(255,255,255,0.55)', letterSpacing: '0.25em', textShadow: '0 0 12px rgba(129,140,248,0.35)' }}
-                  animate={{ opacity: [0.45, 0.7, 0.45] }}
-                  transition={{ duration: 4, repeat: Infinity }}
-                >
+              <InlineStarSphere size={64} />
+              <div className="mt-3 flex flex-col items-center gap-0.5">
+                <motion.span className="tracking-[0.25em] font-bold text-[12px] uppercase"
+                  style={{ color: 'rgba(255,255,255,0.6)', textShadow: '0 0 16px rgba(129,140,248,0.4)' }}
+                  animate={{ opacity: [0.45, 0.75, 0.45] }}
+                  transition={{ duration: 4, repeat: Infinity }}>
                   BLEUMR
                 </motion.span>
-                <span className="tracking-[0.18em] text-[7px] font-semibold uppercase"
-                  style={{ color: 'rgba(129,140,248,0.4)', letterSpacing: '0.2em' }}>
-                  WORKSPACE
+                <span className="tracking-[0.2em] text-[7px] font-semibold uppercase"
+                  style={{ color: 'rgba(129,140,248,0.45)' }}>
+                  MISSION TEAM
                 </span>
               </div>
-
-              {/* Bottom accent line */}
               <div className="mt-3 flex items-center gap-1.5">
                 {['#818cf8','#22d3ee','#34d399'].map((c, i) => (
                   <motion.div key={i} className="rounded-full"
-                    style={{ width: 20, height: 1.5, background: c, opacity: 0.35 }}
-                    animate={{ opacity: [0.25, 0.55, 0.25] }}
+                    style={{ width: 22, height: 2, background: c }}
+                    animate={{ opacity: [0.25, 0.6, 0.25] }}
                     transition={{ duration: 2.5, repeat: Infinity, delay: i * 0.4 }}
                   />
                 ))}
               </div>
-
-              {/* Engraved edge highlight */}
               <div className="absolute top-0 inset-x-4 h-px rounded-full"
-                style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.08),transparent)' }} />
+                style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent)' }} />
             </div>
           </div>
 
-          {/* Data packets traveling between agents when collaborating */}
+          {/* ── Data packets ── */}
           <AnimatePresence>
             {statuses.researcher === 'thinking' && (
               <DataPacket fromPct="20%" toPct="44%" color={AGENTS[0].accent} delay={0} />
@@ -1143,8 +2157,8 @@ Write the complete, polished final deliverable:`,
             )}
           </AnimatePresence>
 
-          {/* Agent stations: character seated at desk */}
-          <div className="absolute bottom-14 left-0 right-0 flex items-end justify-around px-10">
+          {/* ── Agent stations ── */}
+          <div className="absolute bottom-14 left-0 right-0 flex items-end justify-around px-8">
             {AGENTS.map(agent => (
               <div key={agent.id} className="flex flex-col items-center">
                 <SeatedCharacter
@@ -1155,21 +2169,33 @@ Write the complete, polished final deliverable:`,
                   streamText={agentStreaming[agent.id]}
                   phaseLabel={agentPhaseLabel[agent.id]}
                 />
-                {/* Desk overlaps character bottom — seated illusion */}
                 <Desk agent={agent} status={statuses[agent.id]} />
               </div>
             ))}
           </div>
 
-          {/* Floor */}
-          <div className="absolute bottom-0 left-0 right-0 h-14"
-            style={{ background: 'linear-gradient(180deg,rgba(4,6,14,0) 0%,rgba(2,4,10,0.97) 100%)' }} />
+          {/* ── Floor fade ── */}
+          <div className="absolute bottom-0 left-0 right-0 h-14 pointer-events-none"
+            style={{ background: 'linear-gradient(180deg,rgba(5,7,14,0) 0%,rgba(3,4,9,0.96) 100%)' }} />
 
-          {/* Status dots bottom */}
-          <div className="absolute bottom-3 left-0 right-0 flex justify-around px-10">
+          {/* ── File Cabinet Panel overlay ── */}
+          <AnimatePresence>
+            {cabinetOpen && (
+              <FileCabinetPanel
+                files={wsFiles}
+                onClose={() => setCabinetOpen(false)}
+                onSave={handleCabinetSave}
+                onDelete={handleCabinetDelete}
+                onAnalyze={handleCabinetAnalyze}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* ── Status dots ── */}
+          <div className="absolute bottom-3 left-0 right-0 flex justify-around px-8">
             {AGENTS.map(a => (
               <div key={a.id} className="flex items-center gap-1.5 rounded-full px-2.5 py-1"
-                style={{ background: 'rgba(6,9,20,0.88)', border: `1px solid ${statuses[a.id] !== 'idle' ? `${a.accent}40` : 'rgba(255,255,255,0.06)'}`, backdropFilter: 'blur(12px)' }}>
+                style={{ background: 'rgba(5,7,18,0.92)', border: `1px solid ${statuses[a.id] !== 'idle' ? `${a.accent}45` : 'rgba(255,255,255,0.06)'}`, backdropFilter: 'blur(16px)' }}>
                 <motion.div className="h-1.5 w-1.5 rounded-full" style={{ background: a.accent }}
                   animate={{ opacity: statuses[a.id] === 'thinking' ? [1, 0.2, 1] : statuses[a.id] === 'done' ? 1 : 0.2 }}
                   transition={{ duration: 0.7, repeat: statuses[a.id] === 'thinking' ? Infinity : 0 }}
@@ -1216,35 +2242,38 @@ Write the complete, polished final deliverable:`,
           </AnimatePresence>
         </div>
 
-        {/* ── RIGHT: Control panel ─────────────────────────────────── */}
-        <div className="w-[360px] flex flex-col shrink-0" style={{ background: 'rgba(255,255,255,0.012)' }}>
+        {/* ── RIGHT: Glass panel ─────────────────────────────────────── */}
+        <div className="w-[340px] flex flex-col shrink-0 relative overflow-hidden"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.045)', backdropFilter: 'blur(32px) saturate(140%)' }}>
 
-          {/* Output — fills available space, scrollable */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
+          {/* Foggy aura background layers */}
+          <div className="absolute inset-0 pointer-events-none" style={{ background: 'rgba(4,5,16,0.42)' }} />
+          {/* Indigo aura — top */}
+          <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-72 h-56 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(ellipse at center, rgba(99,102,241,0.13) 0%, rgba(99,102,241,0.04) 50%, transparent 75%)', filter: 'blur(32px)' }} />
+          {/* Cyan aura — mid */}
+          <div className="absolute top-1/3 -right-8 w-56 h-64 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(ellipse at center, rgba(6,182,212,0.09) 0%, rgba(6,182,212,0.03) 50%, transparent 75%)', filter: 'blur(40px)' }} />
+          {/* Emerald aura — bottom */}
+          <div className="absolute -bottom-12 left-8 w-60 h-48 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(ellipse at center, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 55%, transparent 80%)', filter: 'blur(40px)' }} />
+          {/* Fine fog veil */}
+          <div className="absolute inset-0 pointer-events-none opacity-60"
+            style={{ background: 'linear-gradient(180deg, rgba(99,102,241,0.04) 0%, transparent 40%, rgba(16,185,129,0.03) 100%)' }} />
+          {/* Left rim glow */}
+          <div className="absolute left-0 top-0 bottom-0 w-px pointer-events-none"
+            style={{ background: 'linear-gradient(180deg, rgba(99,102,241,0.25), rgba(6,182,212,0.12) 50%, rgba(16,185,129,0.15))' }} />
+
+          {/* Output feed — transparent, scrollable */}
+          <div className="relative z-10 flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-2.5" style={{ scrollbarWidth: 'none' }}>
 
             {/* Empty state */}
             {outputs.length === 0 && phase === 'idle' && (
-              <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-4">
-                <div className="flex gap-3">
-                  {AGENTS.map((a, i) => (
-                    <motion.div key={a.id}
-                      className="h-12 w-12 rounded-2xl flex items-center justify-center"
-                      style={{ background: a.accentDim, border: `1px solid ${a.accent}30` }}
-                      animate={{ y: [0, -5, 0] }}
-                      transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}>
-                      <a.Icon style={{ width: 20, height: 20, color: a.accent }} />
-                    </motion.div>
-                  ))}
-                </div>
-                <div>
-                  <p className="text-[13px] font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.55)' }}>Your AI team is ready</p>
-                  <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                    Built for deep work — not quick answers. The team runs 5 rounds of real dialogue before Synth writes the final deliverable.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                  <Bot className="h-3 w-3" /> 3 Groq models · <FlaskConical className="h-3 w-3" /> parallel strategy
-                </div>
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
+                <p className="text-[13px] font-light" style={{ color: 'rgba(255,255,255,0.3)' }}>Team is ready</p>
+                <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.12)' }}>
+                  Type a task and launch to begin.
+                </p>
               </div>
             )}
 
@@ -1258,58 +2287,61 @@ Write the complete, polished final deliverable:`,
                 .split('\n')[0].replace(/[^a-z0-9 ]/gi, '').trim().slice(0, 40).replace(/\s+/g, '_').toLowerCase() || 'workspace_output';
 
               const formats = detectFormats(o.text, lastTask);
-
               const doDownload = (fmt: ExportFormat) => {
                 const meta = FORMAT_META.find(m => m.ext === fmt)!;
                 triggerDownload(buildContent(o.text, fmt, lastTask), `${slug}.${fmt}`, meta.mime);
               };
 
               return (
-                <motion.div key={o.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                  className="rounded-2xl p-4"
+                <motion.div key={o.id}
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.22 }}
+                  className="rounded-2xl p-3.5"
                   style={{
-                    background: isFinal ? a.accentDim : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${isFinal ? `${a.accent}35` : 'rgba(255,255,255,0.06)'}`,
-                    boxShadow: isFinal ? `0 0 40px ${a.accent}14` : 'none',
+                    background: isFinal
+                      ? `linear-gradient(135deg,${a.accent}14,${a.accent}08)`
+                      : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${isFinal ? `${a.accent}30` : 'rgba(255,255,255,0.06)'}`,
+                    backdropFilter: 'blur(20px)',
+                    boxShadow: isFinal ? `0 0 32px ${a.accent}10, inset 0 1px 0 rgba(255,255,255,0.06)` : 'inset 0 1px 0 rgba(255,255,255,0.03)',
                   }}>
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="h-7 w-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: a.accentDim }}>
-                      <a.Icon style={{ width: 14, height: 14, color: a.accent }} />
+                  {/* Header row */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${a.accent}18` }}>
+                      <a.Icon style={{ width: 12, height: 12, color: a.accent }} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[12px] font-bold text-white">{a.name}</span>
-                      {isFinal && <span className="ml-2 text-[9px] font-bold uppercase tracking-wider" style={{ color: a.accent }}>Final Answer</span>}
-                    </div>
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                    <span className="text-[11px] font-bold flex-1" style={{ color: isFinal ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)' }}>{a.name}</span>
+                    {isFinal && <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full" style={{ color: a.accent, background: `${a.accent}18`, border: `1px solid ${a.accent}30` }}>Final</span>}
+                    <CheckCircle2 style={{ width: 13, height: 13, color: '#34d399', opacity: 0.8, flexShrink: 0 }} />
                   </div>
 
-                  {/* Content: only show inline if short. Large = download only, no preview. */}
+                  {/* Inline content (short only) */}
                   {!isLarge && (
-                    <p className={`text-[12px] leading-relaxed whitespace-pre-wrap mb-3 ${isFinal ? 'text-slate-200' : 'text-slate-500 line-clamp-4'}`}>
+                    <p className="text-[11px] leading-relaxed whitespace-pre-wrap mb-2.5"
+                      style={{ color: isFinal ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)', display: '-webkit-box', WebkitLineClamp: isFinal ? 999 : 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {o.text}
                     </p>
                   )}
 
-                  {/* Smart format download strip */}
+                  {/* Export strip */}
                   {(isLarge || isFinal) && (
-                    <div className={isLarge ? '' : 'mt-3 pt-3'} style={isLarge ? {} : { borderTop: `1px solid ${a.accent}20` }}>
-                      <p className="text-[9px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                        Export as
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
+                    <div className={!isLarge ? 'pt-2 mt-2' : ''} style={!isLarge ? { borderTop: `1px solid ${a.accent}15` } : {}}>
+                      <p className="text-[8px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'rgba(255,255,255,0.18)' }}>Export</p>
+                      <div className="flex flex-wrap gap-1">
                         {formats.map(fmt => {
                           const meta = FORMAT_META.find(m => m.ext === fmt)!;
                           const isPrimary = fmt === formats[0];
                           return (
                             <button key={fmt} onClick={() => doDownload(fmt)}
-                              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all hover:scale-105 active:scale-95"
+                              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-bold transition-all hover:scale-105 active:scale-95"
                               style={{
-                                background: isPrimary ? `${a.accent}25` : 'rgba(255,255,255,0.05)',
-                                color: isPrimary ? a.accent : 'rgba(255,255,255,0.45)',
-                                border: `1px solid ${isPrimary ? `${a.accent}50` : 'rgba(255,255,255,0.1)'}`,
+                                background: isPrimary ? `${a.accent}20` : 'rgba(255,255,255,0.04)',
+                                color: isPrimary ? a.accent : 'rgba(255,255,255,0.3)',
+                                border: `1px solid ${isPrimary ? `${a.accent}40` : 'rgba(255,255,255,0.08)'}`,
+                                backdropFilter: 'blur(8px)',
                               }}>
-                              <span>{meta.icon}</span>
-                              {meta.label}
+                              {meta.icon} {meta.label}
                             </button>
                           );
                         })}
@@ -1321,95 +2353,135 @@ Write the complete, polished final deliverable:`,
             })}
 
             {/* Live synth stream */}
-            {streaming && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                className="rounded-2xl p-4"
-                style={{ background: AGENTS[2].accentDim, border: `1px solid ${AGENTS[2].accent}35`, boxShadow: `0 0 40px ${AGENTS[2].accent}12` }}>
-                <div className="flex items-center gap-2.5 mb-2.5">
-                  <div className="h-7 w-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: AGENTS[2].accentDim }}>
-                    <Orbit style={{ width: 14, height: 14, color: AGENTS[2].accent }} />
+            <AnimatePresence>
+              {streaming && (
+                <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  className="rounded-2xl p-3.5"
+                  style={{ background: `linear-gradient(135deg,${AGENTS[2].accent}12,${AGENTS[2].accent}06)`, border: `1px solid ${AGENTS[2].accent}28`, backdropFilter: 'blur(20px)', boxShadow: `0 0 24px ${AGENTS[2].accent}10` }}>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <div className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${AGENTS[2].accent}20` }}>
+                      <Orbit style={{ width: 12, height: 12, color: AGENTS[2].accent }} />
+                    </div>
+                    <span className="text-[11px] font-bold text-white/70 flex-1">Synth</span>
+                    <motion.div className="flex gap-0.5" animate={{ opacity: [1, 0.25, 1] }} transition={{ duration: 0.75, repeat: Infinity }}>
+                      {[0,1,2].map(i => <div key={i} className="h-1 w-1 rounded-full" style={{ background: AGENTS[2].accent }} />)}
+                    </motion.div>
                   </div>
-                  <span className="text-[12px] font-bold text-white flex-1">Synth <span className="text-[9px] font-bold uppercase tracking-wider ml-1" style={{ color: AGENTS[2].accent }}>writing…</span></span>
-                  <motion.div className="flex gap-1" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.8, repeat: Infinity }}>
-                    {[0, 1, 2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full" style={{ background: AGENTS[2].accent }} />)}
-                  </motion.div>
-                </div>
-                {/* Show a live word/char counter instead of dumping text */}
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                    <motion.div className="h-full rounded-full" style={{ background: AGENTS[2].accent }}
-                      animate={{ width: [`${Math.min((streaming.length / 40), 100)}%`] }}
-                      transition={{ duration: 0.3 }}
-                    />
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-1 h-px rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                      <motion.div className="h-full rounded-full" style={{ background: `linear-gradient(90deg,${AGENTS[2].accent},${AGENTS[2].accent}80)` }}
+                        animate={{ width: `${Math.min(Math.round(streaming.length / 40), 100)}%` }}
+                        transition={{ duration: 0.35 }} />
+                    </div>
+                    <span className="text-[9px] font-semibold tabular-nums shrink-0" style={{ color: AGENTS[2].accent }}>
+                      {streaming.length.toLocaleString()}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-semibold tabular-nums" style={{ color: AGENTS[2].accent }}>
-                    {streaming.length.toLocaleString()} chars
-                  </span>
-                </div>
-              </motion.div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Thinking indicator */}
-            {isRunning && !streaming && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="flex items-center gap-3 rounded-2xl px-4 py-3"
-                style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                {(() => {
-                  const a = AGENTS.find(x => statuses[x.id] === 'thinking') ?? AGENTS[0];
-                  return (
-                    <>
-                      <div className="h-7 w-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: a.accentDim }}>
-                        <a.Icon style={{ width: 13, height: 13, color: a.accent }} />
-                      </div>
-                      <span className="text-[12px] font-medium flex-1 text-slate-500">{a.name} is thinking…</span>
-                      <motion.div className="flex gap-1" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1, repeat: Infinity }}>
-                        {[0, 1, 2].map(i => <div key={i} className="h-1 w-1 rounded-full bg-slate-700" />)}
-                      </motion.div>
-                    </>
-                  );
-                })()}
-              </motion.div>
-            )}
+            <AnimatePresence>
+              {isRunning && !streaming && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5"
+                  style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)', backdropFilter: 'blur(12px)' }}>
+                  {(() => {
+                    const a = AGENTS.find(x => statuses[x.id] === 'thinking') ?? AGENTS[0];
+                    return (
+                      <>
+                        <div className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${a.accent}18` }}>
+                          <a.Icon style={{ width: 12, height: 12, color: a.accent }} />
+                        </div>
+                        <span className="text-[11px] flex-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{a.name} is thinking…</span>
+                        <motion.div className="flex gap-0.5" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 0.9, repeat: Infinity }}>
+                          {[0,1,2].map(i => <div key={i} className="h-1 w-1 rounded-full" style={{ background: `${a.accent}80` }} />)}
+                        </motion.div>
+                      </>
+                    );
+                  })()}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div ref={bottomRef} />
           </div>
 
-          {/* Input — pinned to bottom */}
-          <div className="p-4 shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(12px)' }}>
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isRunning) run(); }}
-              placeholder="Give the team a task to research…"
-              rows={2}
-              className="w-full resize-none rounded-xl px-3.5 py-2.5 text-[13px] text-white placeholder-slate-700 outline-none transition-all"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', caretColor: '#818cf8', lineHeight: 1.5 }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'rgba(129,140,248,0.45)'; }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
-            />
-            <div className="flex items-center gap-2 mt-2">
-              {isRunning ? (
-                <button onClick={reset}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2 text-[13px] font-semibold transition-colors"
-                  style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171' }}>
-                  <X className="h-3.5 w-3.5" /> Stop
-                </button>
-              ) : (
-                <button onClick={run} disabled={!input.trim()}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2 text-[13px] font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ background: input.trim() ? 'linear-gradient(135deg,#6366f1,#818cf8)' : 'rgba(99,102,241,0.15)', color: 'white', boxShadow: input.trim() ? '0 0 20px rgba(99,102,241,0.3)' : 'none' }}>
-                  <Zap className="h-3.5 w-3.5" />
-                  {phase === 'done' ? 'Run Again' : 'Launch Team'}
-                  <span className="text-[10px] opacity-50 ml-0.5">⌘↵</span>
-                </button>
-              )}
-              {!isRunning && outputs.length > 0 && (
-                <button onClick={reset}
-                  className="p-2 rounded-xl transition-colors text-slate-600 hover:text-slate-300 hover:bg-white/5"
-                  style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <X className="h-4 w-4" />
-                </button>
-              )}
+          {/* ── Glass input bar — same language as main chat ── */}
+          <div className="relative z-10 px-3 pb-4 pt-2 shrink-0">
+            {/* Gradient border ring */}
+            <div className="rounded-2xl p-px transition-all duration-500"
+              style={{
+                background: input.trim()
+                  ? 'linear-gradient(135deg,rgba(129,140,248,0.55),rgba(34,211,238,0.3),rgba(129,140,248,0.2))'
+                  : 'linear-gradient(135deg,rgba(255,255,255,0.09),rgba(255,255,255,0.04))',
+              }}>
+              <div className="relative rounded-[14px] overflow-hidden"
+                style={{
+                  background: 'rgba(4,6,14,0.45)',
+                  backdropFilter: 'blur(40px) saturate(160%)',
+                  boxShadow: input.trim()
+                    ? 'inset 0 1.5px 0 rgba(255,255,255,0.12), 0 8px 32px rgba(0,0,0,0.4)'
+                    : 'inset 0 1px 0 rgba(255,255,255,0.07)',
+                }}>
+
+                {/* Top caustic rim */}
+                <div className="absolute top-0 left-[8%] right-[8%] h-px pointer-events-none"
+                  style={{ background: input.trim()
+                    ? 'linear-gradient(90deg,transparent,rgba(255,255,255,0.45) 30%,rgba(255,255,255,0.45) 70%,transparent)'
+                    : 'linear-gradient(90deg,transparent,rgba(255,255,255,0.14) 40%,rgba(255,255,255,0.14) 60%,transparent)',
+                    filter: 'blur(0.3px)' }} />
+
+                {/* Glass refraction */}
+                <div className="absolute inset-0 pointer-events-none"
+                  style={{ background: 'linear-gradient(130deg,rgba(255,255,255,0.04) 0%,transparent 50%,rgba(255,255,255,0.01) 100%)', mixBlendMode: 'overlay' }} />
+
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isRunning) run(); }}
+                  placeholder="Give the team a task…"
+                  rows={2}
+                  disabled={isRunning}
+                  className="relative z-10 w-full resize-none px-4 pt-3.5 pb-2 text-[13px] text-white placeholder-white/20 outline-none bg-transparent leading-relaxed"
+                  style={{ caretColor: '#818cf8', fontFamily: 'inherit' }}
+                />
+
+                {/* Action row */}
+                <div className="relative z-10 flex items-center gap-2 px-3 pb-3">
+                  <span className="text-[9px] font-semibold uppercase tracking-widest flex-1" style={{ color: 'rgba(255,255,255,0.14)' }}>
+                    {isRunning ? 'Team is working…' : phase === 'done' ? 'Run again anytime' : '⌘↵ to launch'}
+                  </span>
+
+                  {/* Clear / stop */}
+                  <AnimatePresence>
+                    {(isRunning || outputs.length > 0) && (
+                      <motion.button initial={{ opacity:0, scale:0.8 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.8 }}
+                        onClick={reset}
+                        className="h-7 w-7 rounded-full flex items-center justify-center transition-all"
+                        style={{ background: isRunning ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)', border: isRunning ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.08)' }}>
+                        <X style={{ width: 11, height: 11, color: isRunning ? '#f87171' : 'rgba(255,255,255,0.35)' }} />
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Launch button */}
+                  <motion.button
+                    onClick={isRunning ? reset : run}
+                    disabled={!isRunning && !input.trim()}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex items-center gap-1.5 px-3.5 h-8 rounded-full text-[11px] font-bold transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+                    style={isRunning
+                      ? { background: 'rgba(239,68,68,0.18)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }
+                      : { background: input.trim() ? 'linear-gradient(135deg,#6366f1,#818cf8)' : 'rgba(99,102,241,0.12)', border: input.trim() ? 'none' : '1px solid rgba(99,102,241,0.2)', color: 'white', boxShadow: input.trim() ? '0 0 18px rgba(99,102,241,0.4)' : 'none' }}>
+                    {isRunning
+                      ? <><X style={{ width: 10, height: 10 }} /> Stop</>
+                      : <><Zap style={{ width: 10, height: 10 }} /> {phase === 'done' ? 'Again' : 'Launch'}</>
+                    }
+                  </motion.button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

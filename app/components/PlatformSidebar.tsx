@@ -235,7 +235,7 @@ export function PlatformSidebar({
             }}
           >
             <Layers3 className="w-4 h-4 shrink-0 text-violet-500" />
-            Workspace
+            Mission Team
           </button>
         </div>
 

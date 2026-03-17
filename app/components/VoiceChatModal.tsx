@@ -1,0 +1,918 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Mic, X, Volume2, VolumeX, RotateCcw } from 'lucide-react';
+import { BLEUMR_VOICE_CONTEXT } from '../services/BleumrLore';
+import * as THREE from 'three';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
+
+interface Turn {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+interface VoiceChatModalProps {
+  apiKey: string;
+  deepgramKey?: string;
+  onClose: () => void;
+  systemPrompt?: string;
+}
+
+// ─── Status labels ─────────────────────────────────────────────────────────
+
+const STATUS: Record<VoiceState, string> = {
+  idle:       'Tap to speak',
+  listening:  'Listening…',
+  processing: 'Thinking…',
+  speaking:   'Speaking…',
+};
+
+// ─── Per-state sphere theme ────────────────────────────────────────────────
+
+const THEME: Record<VoiceState, { hue: number; sat: string; light: string; glow: string }> = {
+  idle:       { hue: 248, sat: '70%', light: '60%', glow: 'rgba(99,102,241,0.45)'   },
+  listening:  { hue: 0,   sat: '80%', light: '58%', glow: 'rgba(239,68,68,0.55)'    },
+  processing: { hue: 38,  sat: '85%', light: '55%', glow: 'rgba(245,158,11,0.5)'    },
+  speaking:   { hue: 160, sat: '75%', light: '55%', glow: 'rgba(52,211,153,0.55)'   },
+};
+
+// ─── Best-effort natural female voice picker ──────────────────────────────
+
+function pickFemaleVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis?.getVoices() ?? [];
+
+  // Ordered priority list — neural / enhanced voices first, then standard female names
+  const PRIORITY = [
+    // macOS neural enhanced
+    'Ava (Enhanced)', 'Nicky (Enhanced)', 'Allison (Enhanced)', 'Susan (Enhanced)',
+    'Zoe (Enhanced)', 'Zoe',
+    // macOS standard
+    'Ava', 'Nicky', 'Allison', 'Samantha', 'Victoria', 'Susan',
+    // Windows neural (Edge / system)
+    'Microsoft Aria Online (Natural)',
+    'Microsoft Jenny Online (Natural)',
+    'Microsoft Ana Online (Natural)',
+    'Microsoft Michelle Online (Natural)',
+    'Microsoft Aria',
+    'Microsoft Jenny',
+    'Microsoft Zira',
+    // Chrome Google voices
+    'Google US English',
+    // iOS / Safari / Android
+    'Karen', 'Moira', 'Tessa', 'Veena',
+  ];
+
+  for (const name of PRIORITY) {
+    const match = voices.find(v => v.name === name || v.name.startsWith(name));
+    if (match) return match;
+  }
+
+  // Fallback — any English voice whose name looks female
+  const FEMALE_NAMES = /\b(Ava|Emma|Aria|Jenny|Zira|Karen|Moira|Samantha|Nicky|Victoria|Susan|Michelle|Laura|Linda|Tessa|Alice|Allison|Zoe|Ana|Sarah)\b/i;
+  const femaleMatch = voices.find(v => v.lang.startsWith('en') && FEMALE_NAMES.test(v.name));
+  if (femaleMatch) return femaleMatch;
+
+  return voices.find(v => v.lang.startsWith('en')) ?? null;
+}
+
+// ─── Accent colors per voice state ────────────────────────────────────────
+function stateColor(vs: VoiceState): THREE.Color {
+  if (vs === 'listening')  return new THREE.Color(0xff2222);
+  if (vs === 'processing') return new THREE.Color(0xf59e0b);
+  if (vs === 'speaking')   return new THREE.Color(0x34d399);
+  return new THREE.Color(0x818cf8);
+}
+
+// ─── Ultra-Realistic 3D Chrome Sphere (Three.js / WebGL) ──────────────────
+// PBR metalness=1 roughness~0.05 — real environment map, real lighting.
+// Sphere displaces vertices per-frame driven by audio volume.
+
+function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; volume: number }) {
+  const mountRef  = useRef<HTMLDivElement>(null);
+  const stateRef  = useRef({ voiceState, volume });
+  const mouseRef  = useRef({ x: 0, y: 0 }); // normalized -1..1 relative to sphere center
+  stateRef.current = { voiceState, volume };
+
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+
+    const W = 380, H = 380;
+
+    // ── Renderer ──────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(W, H);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.6;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    el.appendChild(renderer.domElement);
+
+    // ── Scene & camera ────────────────────────────────────────────────────
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
+    camera.position.set(0, 0, 3.8);
+
+    // ── Environment map — procedural studio HDRI (dark void + lights) ────
+    // Build a CubeRenderTarget environment by rendering a box interior
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+
+    // Sky sphere — near-black but the panels are bright
+    const envScene = new THREE.Scene();
+    const envGeo   = new THREE.SphereGeometry(10, 8, 6);
+    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0x000000 });
+    envScene.add(new THREE.Mesh(envGeo, envMat));
+
+    // Top panel (simulates ceiling strip light) — bright white
+    const topPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(5, 1.5),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+    );
+    topPanel.position.set(0, 7, -4);
+    topPanel.lookAt(0, 0, 0);
+    envScene.add(topPanel);
+
+    // Left panel — warm soft
+    const leftPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.5, 3),
+      new THREE.MeshBasicMaterial({ color: 0xccddff, side: THREE.DoubleSide })
+    );
+    leftPanel.position.set(-7, 1, -3);
+    leftPanel.lookAt(0, 0, 0);
+    envScene.add(leftPanel);
+
+    // Right panel — very dim
+    const rightPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 2),
+      new THREE.MeshBasicMaterial({ color: 0x112233, side: THREE.DoubleSide })
+    );
+    rightPanel.position.set(7, -1, -3);
+    rightPanel.lookAt(0, 0, 0);
+    envScene.add(rightPanel);
+
+    const envTexture = pmremGenerator.fromScene(envScene as any).texture;
+    scene.environment = envTexture;
+
+    // ── Sphere geometry — high-res for displacement ───────────────────────
+    const SEGS = 96;
+    const geo  = new THREE.SphereGeometry(1, SEGS, SEGS);
+    // Store original vertex positions for displacement
+    const origPos = geo.attributes.position.array.slice() as Float32Array;
+
+    // ── PBR Black Mercury material ────────────────────────────────────────
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(0x050508),
+      metalness: 1.0,
+      roughness: 0.04,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04,
+      envMapIntensity: 5.0,
+      reflectivity: 1.0,
+    });
+
+    const sphere = new THREE.Mesh(geo, mat);
+    scene.add(sphere);
+
+    // ── Lighting (supplements env map) ───────────────────────────────────
+    // Key light — single coherent source, strong contrast for deep self-shadow
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
+    keyLight.position.set(-1.8, 3.0, 2.2);
+    scene.add(keyLight);
+
+    // Faint rim — barely separates silhouette from bg
+    const rimLight = new THREE.DirectionalLight(0x8899aa, 0.30);
+    rimLight.position.set(1.0, -1.5, -2.5);
+    scene.add(rimLight);
+
+    // Near-zero ambient — dark side stays deeply shadowed
+    scene.add(new THREE.AmbientLight(0x020204, 1));
+
+    // ── Orbiting point light — bright white, slowly orbits sphere ────────
+    const orbitLight = new THREE.PointLight(0xffffff, 4.0, 8);
+    scene.add(orbitLight);
+
+    // ── Accent point light — state color tints the dark surface ──────────
+    const accentLight = new THREE.PointLight(0x818cf8, 0.6, 5);
+    accentLight.position.set(0.5, 0.5, 2.2);
+    scene.add(accentLight);
+
+    // ── Animation loop ────────────────────────────────────────────────────
+    let raf: number;
+    let t = 0;
+    let targetRotX = 0, targetRotY = 0;
+    let currentRotX = 0, currentRotY = 0;
+
+    const animate = () => {
+      raf = requestAnimationFrame(animate);
+      const { voiceState: vs, volume: vol } = stateRef.current;
+
+      // Smooth cursor parallax — sphere lazily follows mouse
+      const { x: mx, y: my } = mouseRef.current;
+      targetRotX = my * 0.35;
+      targetRotY = mx * 0.5;
+      currentRotX += (targetRotX - currentRotX) * 0.06;
+      currentRotY += (targetRotY - currentRotY) * 0.06;
+
+      // Time always advances — idle gentle churn, speaking = aggressive
+      const speed = vs === 'idle' ? 0.018 : vs === 'processing' ? 0.030 : 0.022 + vol * 0.05;
+      t += speed;
+
+      // ── Sphere vertex displacement — strong always, explosive when speaking ─
+      const pos = geo.attributes.position.array as Float32Array;
+
+      // Idle: clearly visible large rolls of liquid.
+      // Speaking: amplitude driven by real audio volume — surface heaves dramatically.
+      const ampBase = vs === 'idle'
+        ? 0.20
+        : vs === 'speaking'
+          ? 0.22 + vol * 0.30
+          : vs === 'processing'
+            ? 0.18
+            : 0.20 + vol * 0.16; // listening
+
+      for (let i = 0; i < pos.length; i += 3) {
+        const ox = origPos[i], oy = origPos[i + 1], oz = origPos[i + 2];
+        const len = Math.sqrt(ox * ox + oy * oy + oz * oz);
+        const nx = ox / len, ny = oy / len, nz = oz / len;
+
+        // 4 low-freq harmonics — broad liquid bulges, not spiky stars
+        const d = ampBase * (
+          Math.sin(nx * 1.6 + t * 0.8) * Math.cos(ny * 1.4 + t * 0.6) * 1.00 +
+          Math.sin(ny * 2.2 + t * 1.0) * Math.cos(nz * 1.9 + t * 0.75) * 0.60 +
+          Math.cos(nz * 1.3 + t * 1.2) * Math.sin(nx * 1.8 + t * 0.55) * 0.35 +
+          Math.sin(nx * 2.8 + t * 1.4) * Math.cos(ny * 2.5 + t * 1.10) * 0.18
+        );
+
+        pos[i]     = ox + nx * d;
+        pos[i + 1] = oy + ny * d;
+        pos[i + 2] = oz + nz * d;
+      }
+      geo.attributes.position.needsUpdate = true;
+      geo.computeVertexNormals();
+
+      // ── Rotation — auto-spin + cursor parallax ───────────────────────
+      sphere.rotation.y += vs === 'idle' ? 0.005 : 0.007 + vol * 0.015;
+      // Blend auto wobble with cursor tilt
+      sphere.rotation.x  = Math.sin(t * 0.4) * 0.08 + currentRotX;
+      sphere.rotation.z  = Math.cos(t * 0.28) * 0.04 + currentRotY * 0.3;
+
+      // ── Orbiting point light position ─────────────────────────────────
+      const orbitAngle = t * 0.4;
+      orbitLight.position.set(
+        Math.cos(orbitAngle) * 2.2,
+        0.8 + Math.sin(orbitAngle * 0.5) * 0.6,
+        Math.sin(orbitAngle) * 2.2
+      );
+
+      // ── Accent light — always on at idle, blazing when active ─────────
+      const targetColor = stateColor(vs);
+      accentLight.color.lerp(targetColor, 0.06);
+      // Always some accent so color is visible at idle
+      accentLight.intensity = THREE.MathUtils.lerp(
+        accentLight.intensity,
+        vs === 'idle' ? 0.6 : 1.2 + vol * 3.5,
+        0.06
+      );
+
+      // ── Roughness — stays in the glossy range ─────────────────────────
+      mat.roughness = THREE.MathUtils.lerp(
+        mat.roughness,
+        vs === 'idle' ? 0.04 : 0.02 + (1 - vol) * 0.03,
+        0.04
+      );
+
+      renderer.render(scene, camera);
+    };
+
+    // ── Cursor parallax — sphere tilts toward mouse ───────────────────────
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect();
+      const rx = ((e.clientX - rect.left) / rect.width  - 0.5) * 2;
+      const ry = ((e.clientY - rect.top)  / rect.height - 0.5) * 2;
+      mouseRef.current = { x: rx, y: ry };
+    };
+    // Track globally so cursor anywhere on the modal moves the sphere
+    window.addEventListener('mousemove', onMouseMove);
+
+    // Force an immediate render so it's never blank on open
+    renderer.render(scene, camera);
+    animate();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('mousemove', onMouseMove);
+      renderer.dispose();
+      geo.dispose();
+      mat.dispose();
+      envTexture.dispose();
+      pmremGenerator.dispose();
+      if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={mountRef}
+      style={{ width: 380, height: 380 }}
+      className="pointer-events-none"
+    />
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────
+
+export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: VoiceChatModalProps) {
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [turns, setTurns]           = useState<Turn[]>([]);
+  const [liveText, setLiveText]     = useState('');
+  const [muted, setMuted]           = useState(false);
+  const [volume, setVolume]         = useState(0); // 0–1, from analyser
+
+  const voiceStateRef = useRef<VoiceState>('idle');
+  const mutedRef      = useRef(false);
+  const closedRef     = useRef(false); // true after modal is closed — blocks all callbacks
+  const streamRef     = useRef<MediaStream | null>(null);
+  const audioCtxRef   = useRef<AudioContext | null>(null);
+  const analyserRef   = useRef<AnalyserNode | null>(null);
+  const recorderRef   = useRef<MediaRecorder | null>(null);
+  const chunksRef     = useRef<Blob[]>([]);
+  const animRef       = useRef<number>(0);
+  const silentRef     = useRef(0);
+  const scrollRef     = useRef<HTMLDivElement>(null);
+  const historyRef    = useRef<{ role: string; content: string }[]>([]);
+  const volAnimRef       = useRef<number>(0); // for speaking fake volume / deepgram analyser
+  const audioElemRef     = useRef<HTMLAudioElement | null>(null);
+  const audioBlobUrlRef  = useRef<string | null>(null);
+  const audioCtxSpkRef   = useRef<AudioContext | null>(null);
+
+  const setVS = (s: VoiceState) => { voiceStateRef.current = s; setVoiceState(s); };
+
+  // ── Cleanup ────────────────────────────────────────────────────────────────
+  const stopSpeaking = useCallback(() => {
+    // Stop Deepgram audio element
+    if (audioElemRef.current) {
+      audioElemRef.current.pause();
+      audioElemRef.current.src = '';
+      audioElemRef.current = null;
+    }
+    if (audioBlobUrlRef.current) {
+      URL.revokeObjectURL(audioBlobUrlRef.current);
+      audioBlobUrlRef.current = null;
+    }
+    audioCtxSpkRef.current?.close().catch(() => {});
+    audioCtxSpkRef.current = null;
+    // Stop Web Speech fallback
+    window.speechSynthesis?.cancel();
+    cancelAnimationFrame(volAnimRef.current);
+  }, []);
+
+  const cleanup = useCallback(() => {
+    closedRef.current = true;          // block all async callbacks immediately
+    cancelAnimationFrame(animRef.current);
+    stopSpeaking();
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    audioCtxRef.current?.close().catch(() => {});
+    streamRef.current   = null;
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  }, [stopSpeaking]);
+
+  useEffect(() => () => cleanup(), [cleanup]);
+
+  // ── Close with full cleanup ────────────────────────────────────────────────
+  const handleClose = useCallback(() => {
+    cleanup();
+    onClose();
+  }, [cleanup, onClose]);
+
+  // ── Scroll transcript to bottom ────────────────────────────────────────────
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [turns, liveText]);
+
+  // ── Preload voices (Chrome needs this call early) ─────────────────────────
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.speechSynthesis?.getVoices();
+    const handler = () => window.speechSynthesis?.getVoices();
+    window.speechSynthesis?.addEventListener('voiceschanged', handler);
+    return () => window.speechSynthesis?.removeEventListener('voiceschanged', handler);
+  }, []);
+
+  // ── Volume analyser loop ───────────────────────────────────────────────────
+  const startAnalyser = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const bufLen = analyser.frequencyBinCount;
+    const data   = new Uint8Array(bufLen);
+    const SILENCE_THRESHOLD = 10;
+    const SILENCE_FRAMES    = 45; // ~1.8 s
+
+    const tick = () => {
+      animRef.current = requestAnimationFrame(tick);
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((s, v) => s + v, 0) / bufLen;
+      setVolume(avg / 255);
+
+      if (voiceStateRef.current === 'listening') {
+        if (avg < SILENCE_THRESHOLD) {
+          if (++silentRef.current >= SILENCE_FRAMES) stopListening();
+        } else {
+          silentRef.current = 0;
+        }
+      }
+    };
+    tick();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Volume loop driven by real audio analyser (Deepgram playback) ─────────
+  const startSpeakingAnalyser = useCallback((source: AudioNode, ctx: AudioContext) => {
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.75;
+    source.connect(analyser);
+    analyser.connect(ctx.destination);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((s, v) => s + v, 0) / data.length;
+      setVolume(avg / 255);
+      volAnimRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+  }, []);
+
+  // ── Fallback oscillation when no audio analyser available ─────────────────
+  const startFakeOscillation = useCallback(() => {
+    const tick = () => {
+      if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
+      setVolume(0.25 + Math.random() * 0.55);
+      volAnimRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+  }, []);
+
+  // ── Start listening ────────────────────────────────────────────────────────
+  const startListening = useCallback(async () => {
+    if (voiceStateRef.current === 'listening' || voiceStateRef.current === 'processing') return;
+    window.speechSynthesis?.cancel();
+    cancelAnimationFrame(volAnimRef.current);
+    setLiveText('');
+    silentRef.current = 0;
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch {
+      alert('Microphone access is required for voice chat.');
+      return;
+    }
+    streamRef.current = stream;
+
+    const audioCtx  = new AudioContext();
+    audioCtxRef.current = audioCtx;
+    const source    = audioCtx.createMediaStreamSource(stream);
+    const analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    source.connect(analyser);
+    analyserRef.current = analyser;
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    chunksRef.current = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.onstop = handleRecordingStop;
+    recorder.start(100);
+    recorderRef.current = recorder;
+
+    setVS('listening');
+    startAnalyser();
+  }, [startAnalyser]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Stop listening ─────────────────────────────────────────────────────────
+  const stopListening = useCallback(() => {
+    if (voiceStateRef.current !== 'listening') return;
+    setVS('processing');
+    recorderRef.current?.stop();
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    cancelAnimationFrame(animRef.current);
+    setVolume(0);
+  }, []);
+
+  // ── Recording complete → Whisper STT ──────────────────────────────────────
+  const handleRecordingStop = useCallback(async () => {
+    if (closedRef.current) return;
+    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    if (blob.size < 1000) { setVS('idle'); return; }
+
+    let userText = '';
+    try {
+      const form = new FormData();
+      form.append('file', blob, 'recording.webm');
+      form.append('model', 'whisper-large-v3');
+      form.append('language', 'en');
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+      });
+      if (res.ok) userText = ((await res.json()).text ?? '').trim();
+    } catch { /* fall through */ }
+
+    if (!userText) { setVS('idle'); return; }
+
+    setLiveText(userText);
+    setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
+    const updated = [...historyRef.current, { role: 'user', content: userText }];
+    historyRef.current = updated;
+    await getAIResponse(updated);
+  }, [apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Get AI response ────────────────────────────────────────────────────────
+  const getAIResponse = useCallback(async (history: { role: string; content: string }[]) => {
+    if (closedRef.current) return;
+    setVS('processing');
+    setLiveText('');
+
+    const sysPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally.`
+      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}`;
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'system', content: sysPrompt }, ...history],
+          max_tokens: 280,
+          temperature: 0.75,
+        }),
+      });
+      if (!res.ok) throw new Error('AI error');
+      const d = await res.json();
+      const reply = d.choices?.[0]?.message?.content?.trim()
+        ?? 'I had trouble with that — could you try again?';
+
+      historyRef.current = [...history, { role: 'assistant', content: reply }];
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: reply }]);
+
+      if (!mutedRef.current) speakText(reply);
+      else setVS('idle');
+    } catch {
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: 'Something went wrong. Try again.' }]);
+      setVS('idle');
+    }
+  }, [apiKey, systemPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── TTS — Deepgram Aura (primary) / Web Speech (fallback) ─────────────────
+  const speakText = useCallback(async (text: string) => {
+    setVS('speaking');
+    stopSpeaking(); // cancel any previous playback
+
+    // ── Deepgram Aura path ──────────────────────────────────────────────────
+    if (deepgramKey) {
+      try {
+        const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-asteria-en', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${deepgramKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!res.ok) throw new Error(`Deepgram TTS error ${res.status}`);
+
+        const blob    = await res.blob();
+        const url     = URL.createObjectURL(blob);
+        audioBlobUrlRef.current = url;
+
+        // Play via Web Audio so we can tap the analyser for sphere visuals
+        const ctx  = new AudioContext();
+        audioCtxSpkRef.current = ctx;
+        const arrayBuf = await blob.arrayBuffer();
+        const decoded  = await ctx.decodeAudioData(arrayBuf);
+        const source   = ctx.createBufferSource();
+        source.buffer  = decoded;
+        startSpeakingAnalyser(source, ctx);
+        source.start(0);
+
+        source.onended = () => {
+          cancelAnimationFrame(volAnimRef.current);
+          ctx.close().catch(() => {});
+          audioCtxSpkRef.current = null;
+          URL.revokeObjectURL(url);
+          audioBlobUrlRef.current = null;
+          if (closedRef.current) return;   // modal already closed — stop here
+          setVS('idle');
+          setVolume(0);
+          setTimeout(() => {
+            if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
+          }, 700);
+        };
+
+        return; // success — skip Web Speech fallback
+      } catch (err) {
+        console.warn('Deepgram TTS failed, falling back to Web Speech:', err);
+        stopSpeaking();
+      }
+    }
+
+    // ── Web Speech API fallback ─────────────────────────────────────────────
+    startFakeOscillation();
+
+    const trySpeak = () => {
+      const utter   = new SpeechSynthesisUtterance(text);
+      utter.rate    = 0.96;
+      utter.pitch   = 1.02;
+      utter.volume  = 1.0;
+      const voice = pickFemaleVoice();
+      if (voice) utter.voice = voice;
+
+      utter.onend = () => {
+        if (closedRef.current) return;   // modal closed — stop here
+        setVS('idle');
+        setVolume(0);
+        cancelAnimationFrame(volAnimRef.current);
+        setTimeout(() => {
+          if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
+        }, 700);
+      };
+      utter.onerror = () => {
+        if (closedRef.current) return;
+        setVS('idle');
+        setVolume(0);
+        cancelAnimationFrame(volAnimRef.current);
+      };
+      window.speechSynthesis.speak(utter);
+    };
+
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.addEventListener('voiceschanged', trySpeak, { once: true });
+    } else {
+      trySpeak();
+    }
+  }, [deepgramKey, startListening, startSpeakingAnalyser, startFakeOscillation, stopSpeaking]);
+
+  // ── Orb click ─────────────────────────────────────────────────────────────
+  const handleOrbClick = () => {
+    if (voiceState === 'idle')           startListening();
+    else if (voiceState === 'listening') stopListening();
+    else if (voiceState === 'speaking')  { stopSpeaking(); setVS('idle'); setVolume(0); }
+  };
+
+  // ── Toggle mute ───────────────────────────────────────────────────────────
+  const toggleMute = () => {
+    const next = !muted;
+    mutedRef.current = next;
+    setMuted(next);
+    if (next) stopSpeaking();
+  };
+
+  // ── Clear conversation ────────────────────────────────────────────────────
+  const clearConversation = () => {
+    stopSpeaking();
+    setTurns([]);
+    historyRef.current = [];
+    setLiveText('');
+    setVS('idle');
+    setVolume(0);
+  };
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+  const theme    = THEME[voiceState];
+  const isActive = voiceState !== 'idle';
+
+  // Sphere scale driven by volume
+  const sphereScale = voiceState === 'idle'
+    ? 1
+    : voiceState === 'processing'
+      ? 1.04
+      : 1 + volume * 0.22;
+
+  // Glow intensity driven by volume
+  const glowSpread = voiceState === 'idle' ? 32 : 32 + volume * 80;
+  const glowOpacity = voiceState === 'idle' ? 0.4 : 0.4 + volume * 0.5;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22 }}
+      className="fixed inset-0 z-[99999] flex flex-col items-center justify-center"
+      style={{
+        background: 'radial-gradient(ellipse at 50% 40%, rgba(22,22,32,0.98) 0%, rgba(10,10,14,0.99) 55%, rgba(4,4,6,1) 100%)',
+        backdropFilter: 'blur(48px)',
+      }}
+      /* Click outside the inner panel → close */
+      onClick={handleClose}
+    >
+      {/* Ambient glows — two color-reactive orbs */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full"
+          animate={{ scale: [1, 1.18, 1], opacity: [0.14, 0.26, 0.14] }}
+          transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+          style={{ background: `radial-gradient(circle, hsla(${theme.hue},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
+        <motion.div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full"
+          animate={{ scale: [1, 1.22, 1], opacity: [0.10, 0.20, 0.10] }}
+          transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 2.5 }}
+          style={{ background: `radial-gradient(circle, hsla(${(theme.hue + 30) % 360},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
+      </div>
+
+      {/* Inner panel — clicks don't bubble up to backdrop */}
+      <div
+        className="relative flex flex-col w-full h-full"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ── Header ────────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <motion.div
+              className="w-2 h-2 rounded-full"
+              animate={isActive ? { opacity: [1, 0.4, 1] } : { opacity: 1 }}
+              transition={{ duration: 1.4, repeat: Infinity }}
+              style={{ background: isActive ? '#34d399' : '#374151', boxShadow: isActive ? '0 0 8px rgba(52,211,153,0.8)' : 'none' }} />
+            <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>Voice Chat</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={clearConversation}
+              className="p-2 rounded-xl transition-colors hover:bg-white/8"
+              style={{ color: '#475569' }} title="Clear conversation">
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            <button onClick={toggleMute}
+              className="p-2 rounded-xl transition-colors hover:bg-white/8"
+              style={{ color: muted ? '#ef4444' : '#475569' }} title={muted ? 'Unmute' : 'Mute'}>
+              {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <button onClick={handleClose}
+              className="p-2 rounded-xl transition-colors hover:bg-white/8"
+              style={{ color: '#475569' }}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Transcript ─────────────────────────────────────────────────────── */}
+        <div ref={scrollRef}
+          className="absolute left-1/2 -translate-x-1/2 overflow-y-auto flex flex-col gap-2 px-1"
+          style={{ top: 72, bottom: 290, width: 440, scrollbarWidth: 'none' }}>
+          <AnimatePresence initial={false}>
+            {turns.map(turn => (
+              <motion.div key={turn.id}
+                initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${turn.role === 'user' ? 'self-end' : 'self-start'}`}
+                style={turn.role === 'user' ? {
+                  background: 'rgba(99,102,241,0.18)',
+                  border: '1px solid rgba(99,102,241,0.28)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)',
+                } : {
+                  background: 'rgba(255,255,255,0.055)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+                }}>
+                {turn.role === 'assistant' && (
+                  <p className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: '#34d399' }}>JUMARI</p>
+                )}
+                <p className="text-[13px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.75)' }}>
+                  {turn.text}
+                </p>
+              </motion.div>
+            ))}
+            {voiceState === 'processing' && liveText && (
+              <motion.div key="live"
+                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                className="self-end max-w-[85%] rounded-2xl px-3.5 py-2.5"
+                style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>{liveText}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* ── Mercury sphere — centered in the void ─────────────────────────── */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+
+          {/* Status */}
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={voiceState}
+              initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="text-[11px] font-medium tracking-[0.18em] uppercase"
+              style={{ color: 'rgba(255,255,255,0.28)' }}>
+              {STATUS[voiceState]}
+            </motion.p>
+          </AnimatePresence>
+
+          {/* Void container — click target wraps the sphere */}
+          <motion.div
+            onClick={handleOrbClick}
+            className="relative flex items-center justify-center cursor-pointer select-none"
+            style={{ width: 380, height: 380 }}
+            animate={{ scale: sphereScale }}
+            transition={{ type: 'spring', stiffness: 180, damping: 22 }}
+            whileHover={{ scale: sphereScale * 1.03 }}
+            whileTap={{ scale: sphereScale * 0.96 }}
+          >
+            {/* Ambient outer glow — glowing ring using box-shadow */}
+            <motion.div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                borderRadius: '50%',
+                background: 'transparent',
+                filter: `blur(${20 + volume * 30}px)`,
+                boxShadow: `0 0 ${40 + volume * 60}px ${20 + volume * 40}px hsla(${theme.hue},${theme.sat},${theme.light},${0.15 + volume * 0.25})`,
+              }}
+            />
+
+            {/* No orbit ring — state communicated by sphere displacement only */}
+
+            {/* Listening ripples */}
+            <AnimatePresence>
+              {voiceState === 'listening' && [0, 1, 2].map(i => (
+                <motion.div
+                  key={`rip-${i}`}
+                  className="absolute rounded-full pointer-events-none"
+                  style={{
+                    width: 120 + volume * 50, height: 120 + volume * 50,
+                    border: `1px solid hsla(${theme.hue},${theme.sat},${theme.light},${0.4 - i * 0.1})`,
+                  }}
+                  animate={{ scale: [1, 1.9 + i * 0.2], opacity: [0.5, 0] }}
+                  transition={{ duration: 1.4 + i * 0.3, repeat: Infinity, delay: i * 0.5, ease: 'easeOut' }}
+                />
+              ))}
+            </AnimatePresence>
+
+            {/* Speaking slow ripples */}
+            <AnimatePresence>
+              {voiceState === 'speaking' && [0, 1].map(i => (
+                <motion.div
+                  key={`srip-${i}`}
+                  className="absolute rounded-full pointer-events-none"
+                  style={{
+                    width: 120, height: 120,
+                    border: `1px solid hsla(${theme.hue},${theme.sat},${theme.light},${0.3 - i * 0.08})`,
+                  }}
+                  animate={{ scale: [1, 1.6 + i * 0.15], opacity: [0.35, 0] }}
+                  transition={{ duration: 2.4 + i * 0.5, repeat: Infinity, delay: i * 0.9, ease: 'easeOut' }}
+                />
+              ))}
+            </AnimatePresence>
+
+            {/* The Black Matter particle canvas */}
+            <BlackMatterSphere voiceState={voiceState} volume={volume} />
+
+            {/* State icon overlay — centered on sphere */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <AnimatePresence mode="wait">
+                {voiceState === 'idle' && (
+                  <motion.div key="mic" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
+                    <Mic className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.45)', filter: 'drop-shadow(0 0 6px rgba(148,130,255,0.5))' }} />
+                  </motion.div>
+                )}
+                {voiceState === 'listening' && (
+                  <motion.div key="rec" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
+                    <motion.div className="w-4 h-4 rounded-full"
+                      style={{ background: '#ef4444', boxShadow: '0 0 16px rgba(239,68,68,0.8)' }}
+                      animate={{ scale: [1, 1.35, 1] }}
+                      transition={{ duration: 0.5, repeat: Infinity }} />
+                  </motion.div>
+                )}
+                {voiceState === 'processing' && (
+                  <motion.div key="proc" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
+                    {/* No icon on sphere during processing — sphere behavior communicates state */}
+                  </motion.div>
+                )}
+                {voiceState === 'speaking' && (
+                  <motion.div key="vol" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
+                    <Volume2 className="w-8 h-8" style={{ color: 'rgba(255,255,255,0.55)', filter: 'drop-shadow(0 0 8px rgba(52,211,153,0.7))' }} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+
+          {/* Hint */}
+          <p className="text-[10px] text-center" style={{ color: 'rgba(255,255,255,0.15)' }}>
+            {voiceState === 'listening'  ? 'pause or tap to send'
+            : voiceState === 'speaking'  ? 'tap to interrupt'
+            : voiceState === 'processing' ? ''
+            : 'click anywhere outside to exit · tap to speak'}
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}

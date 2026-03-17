@@ -5,6 +5,8 @@
  * - Image analysis via Google Gemini (free tier)
  */
 
+import { BLEUMR_FULL_CONTEXT } from './BleumrLore';
+
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_ENDPOINT = 'https://api.groq.com/openai/v1/models';
 
@@ -536,6 +538,7 @@ Address the user by their first name when it feels natural. Use their profile in
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
   const systemPrompt = `You are JUMARI — living inside Bleumr, an AI desktop platform. You're not an assistant. You're the user's best friend who happens to know everything.${userContext}
+${BLEUMR_FULL_CONTEXT}
 
 Today's date: ${todayStr}
 

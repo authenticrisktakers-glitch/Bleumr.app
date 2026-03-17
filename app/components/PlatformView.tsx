@@ -42,6 +42,7 @@ interface PlatformViewProps {
   onOpenSettings: () => void;
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
+  onOpenVoiceChat?: () => void;
   onSchedule?: (text: string) => void;
   agentStep?: number;
   agentTotalSteps?: number;
@@ -235,6 +236,7 @@ export const PlatformView = memo(function PlatformView({
   onOpenSettings,
   onOpenScheduler,
   onOpenWorkspace,
+  onOpenVoiceChat,
   onSchedule,
   agentStep = 0,
   agentTotalSteps = 50,
@@ -652,15 +654,12 @@ export const PlatformView = memo(function PlatformView({
                     </button>
                     <button
                       type="button"
-                      onClick={handleVoiceToggle}
+                      onClick={() => onOpenVoiceChat?.()}
                       disabled={isAgentWorking}
-                      className={`p-1.5 rounded-full disabled:opacity-50 transition-colors ${
-                        isListening
-                          ? 'text-red-400 bg-red-400/10 hover:bg-red-400/20'
-                          : 'text-white/30 hover:text-sky-300 hover:bg-white/5'
-                      }`}
+                      className="p-1.5 rounded-full disabled:opacity-50 transition-colors text-white/30 hover:text-indigo-400 hover:bg-indigo-400/10"
+                      title="Voice chat"
                     >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      <Mic className="w-4 h-4" />
                     </button>
                     <button
                       type="submit"

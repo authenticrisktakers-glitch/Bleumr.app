@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, ShieldAlert, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home } from 'lucide-react';
+import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, ShieldAlert, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home, Volume2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Resizable } from 're-resizable';
 import orbitLogo from 'figma:asset/54880fbad4bd9a1a3b62b3ccc000931000c0afc2.png';
@@ -94,6 +94,7 @@ const DEFAULT_CONFIG: OrbitConfig = {
 };
 
 const SYSTEM_PROMPT = `You are JUMARI — a world-class AI agent living inside Bleumr. You have two modes: conversation and browser control. You complete every task the user gives you, no exceptions, no refusals.
+${BLEUMR_FULL_CONTEXT}
 
 ---
 
@@ -177,7 +178,9 @@ import { PlatformView } from './components/PlatformView';
 import { JumariApprovalModal } from './components/JumariApprovalModal';
 import { Onboarding } from './components/Onboarding';
 import { SchedulerPage, SchedulingToast, addScheduleEvent } from './components/CalendarPage';
+import { BLEUMR_FULL_CONTEXT } from './services/BleumrLore';
 import { WorkspacePage } from './components/WorkspacePage';
+import { VoiceChatModal } from './components/VoiceChatModal';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
 export default function App() {
@@ -198,6 +201,7 @@ export default function App() {
   });
   const [secureApiKey, setSecureApiKey] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
+  const [deepgramKey, setDeepgramKey] = useState('');
   const perplexityKey = ''; // Perplexity removed
   const [chatThreads, setChatThreads] = useState<ChatThreadMeta[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
@@ -249,6 +253,7 @@ export default function App() {
       }
     });
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); /* falls back to baked-in default */ });
+    SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
 
     // Load persisted chat threads and auto-restore the most recent conversation
     const threads = loadThreadsMeta();
@@ -279,6 +284,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showScheduler, setShowScheduler] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [showVoiceChat, setShowVoiceChat] = useState(false);
   const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
@@ -4104,6 +4110,7 @@ export default function App() {
             onOpenSettings={() => setShowSettings(true)}
             onOpenScheduler={() => setShowScheduler(true)}
             onOpenWorkspace={() => setShowWorkspace(true)}
+            onOpenVoiceChat={() => setShowVoiceChat(true)}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
             agentTotalSteps={agentTotalSteps}
@@ -4942,6 +4949,27 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Deepgram Voice Key */}
+                <div className="space-y-2 pt-4 border-t border-slate-800">
+                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <Volume2 className="w-4 h-4 text-violet-400" />
+                    Deepgram Voice Key
+                  </label>
+                  <p className="text-xs text-slate-500">Powers the natural female voice in Voice Chat. Get a free key at <span className="text-violet-400">deepgram.com</span> — no credit card needed.</p>
+                  <input
+                    type="password"
+                    value={deepgramKey}
+                    onChange={e => setDeepgramKey(e.target.value)}
+                    placeholder="paste Deepgram API key here"
+                    className="w-full bg-white/5 border border-white/10 rounded-sm px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-violet-400/50"
+                  />
+                  {deepgramKey && (
+                    <p className="text-[11px] text-violet-400/70 flex items-center gap-1">
+                      ✓ Voice Chat will use Deepgram Aura (aura-asteria-en)
+                    </p>
+                  )}
+                </div>
+
                 {/* Approve All Actions */}
                 <div className="space-y-3 pt-4 border-t border-slate-800">
                   <div className="flex items-start justify-between gap-3">
@@ -5058,6 +5086,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     SecureStorage.set('orbit_api_key', secureApiKey);
+                    SecureStorage.set('orbit_deepgram_key', deepgramKey);
                     setShowSettings(false);
                   }}
                   className="px-4 py-1.5 text-xs font-medium tracking-wide text-white/90 transition-all hover:text-white"
@@ -5273,6 +5302,17 @@ export default function App() {
             initialTask={workspaceAutoTask ?? undefined}
           />
         </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Voice Chat */}
+    <AnimatePresence>
+      {showVoiceChat && (
+        <VoiceChatModal
+          apiKey={secureApiKey}
+          deepgramKey={deepgramKey}
+          onClose={() => setShowVoiceChat(false)}
+        />
       )}
     </AnimatePresence>
     </AgentErrorBoundary>
