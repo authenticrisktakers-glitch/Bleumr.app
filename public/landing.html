@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bleumr — Intelligence in Motion</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --indigo:  #818cf8;
+    --cyan:    #22d3ee;
+    --emerald: #34d399;
+    --bg:      #04060e;
+  }
+
+  html { scroll-behavior: auto; }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px; height: 60px;
+    background: rgba(4,6,14,0.7);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .nav-logo {
+    font-size: 15px; font-weight: 800; letter-spacing: .18em;
+    color: #fff; text-transform: uppercase;
+  }
+  .nav-dl {
+    padding: 8px 20px; border-radius: 99px; font-size: 13px; font-weight: 600;
+    background: var(--indigo); color: #fff; border: none; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .nav-dl:hover { opacity: .85; }
+
+  /* ── Hero ── */
+  #hero {
+    height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    position: relative; overflow: hidden;
+  }
+  #hero-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: .55; pointer-events: none;
+  }
+  .hero-content { position: relative; z-index: 2; padding: 0 20px; }
+  .hero-eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--indigo); margin-bottom: 24px;
+  }
+  .hero-h1 {
+    font-size: clamp(52px, 8vw, 96px); font-weight: 800; line-height: 1.04;
+    letter-spacing: -.03em; margin-bottom: 24px;
+    background: linear-gradient(160deg, #fff 30%, rgba(129,140,248,.7));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .hero-sub {
+    font-size: clamp(16px, 2vw, 20px); color: rgba(255,255,255,.45);
+    max-width: 480px; margin: 0 auto 40px; line-height: 1.6;
+  }
+  .hero-ctas { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn-primary {
+    padding: 14px 32px; border-radius: 99px; font-size: 15px; font-weight: 600;
+    background: linear-gradient(135deg, var(--indigo), #6366f1);
+    color: #fff; border: none; cursor: pointer;
+    box-shadow: 0 0 40px rgba(99,102,241,.4);
+    transition: transform .15s, box-shadow .15s;
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 60px rgba(99,102,241,.6); }
+  .btn-ghost {
+    padding: 14px 32px; border-radius: 99px; font-size: 15px; font-weight: 600;
+    background: rgba(255,255,255,.06); color: rgba(255,255,255,.7);
+    border: 1px solid rgba(255,255,255,.12); cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,.1); }
+
+  /* ── Scroll Sequence ── */
+  #seq-wrap { height: 550vh; position: relative; }
+
+  #seq-sticky {
+    position: sticky; top: 0; height: 100vh;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+  }
+
+  #seq-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block;
+  }
+
+  /* Text panels — each fades in/out over its scroll window */
+  .seq-panel {
+    position: absolute; z-index: 10; pointer-events: none;
+    opacity: 0; transform: translateY(30px);
+    transition: opacity .08s, transform .08s;   /* near-instant, driven by JS */
+    max-width: 460px;
+  }
+  .seq-panel.left  { left: 8vw; }
+  .seq-panel.right { right: 8vw; text-align: right; }
+  .seq-panel.center { left: 50%; transform: translateX(-50%) translateY(30px); text-align: center; }
+  .seq-panel.center.visible { transform: translateX(-50%) translateY(0); }
+  .seq-panel.visible { opacity: 1; transform: translateY(0); }
+
+  .panel-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .panel-h2 {
+    font-size: clamp(28px, 4vw, 48px); font-weight: 800; line-height: 1.1;
+    letter-spacing: -.02em; margin-bottom: 14px;
+  }
+  .panel-body {
+    font-size: 16px; color: rgba(255,255,255,.45); line-height: 1.65;
+  }
+
+  /* ── Features ── */
+  #features {
+    padding: 140px 40px;
+    background: linear-gradient(180deg, var(--bg) 0%, #060a18 100%);
+  }
+  .section-label {
+    text-align: center; font-size: 11px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase;
+    color: var(--indigo); margin-bottom: 16px;
+  }
+  .section-title {
+    text-align: center; font-size: clamp(32px, 4vw, 52px); font-weight: 800;
+    letter-spacing: -.025em; margin-bottom: 72px;
+    background: linear-gradient(135deg, #fff, rgba(255,255,255,.6));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1100px; margin: 0 auto; }
+  .card {
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 24px; padding: 40px 36px;
+    opacity: 0; transform: translateY(40px);
+    transition: opacity .6s ease, transform .6s ease;
+  }
+  .card.visible { opacity: 1; transform: translateY(0); }
+  .card-icon {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; margin-bottom: 24px;
+  }
+  .card h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+  .card p  { font-size: 15px; color: rgba(255,255,255,.42); line-height: 1.65; }
+
+  /* ── CTA ── */
+  #cta {
+    padding: 160px 40px; text-align: center;
+    background: radial-gradient(ellipse 80% 60% at 50% 50%, rgba(99,102,241,.12), transparent);
+  }
+  #cta h2 {
+    font-size: clamp(36px, 5vw, 64px); font-weight: 800; letter-spacing: -.03em;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, #fff 40%, var(--cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  #cta p { color: rgba(255,255,255,.35); margin-bottom: 44px; font-size: 16px; }
+  .btn-cta {
+    padding: 18px 48px; border-radius: 99px; font-size: 17px; font-weight: 700;
+    background: linear-gradient(135deg, var(--indigo), var(--cyan));
+    color: #fff; border: none; cursor: pointer;
+    box-shadow: 0 0 60px rgba(99,102,241,.45), 0 0 120px rgba(34,211,238,.2);
+    transition: transform .15s, box-shadow .15s;
+  }
+  .btn-cta:hover { transform: translateY(-3px); box-shadow: 0 0 80px rgba(99,102,241,.6), 0 0 160px rgba(34,211,238,.3); }
+
+  /* ── Footer ── */
+  footer {
+    padding: 32px 40px; display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid rgba(255,255,255,.05);
+    font-size: 13px; color: rgba(255,255,255,.25);
+  }
+  footer span:first-child { font-weight: 800; letter-spacing: .15em; text-transform: uppercase; color: rgba(255,255,255,.4); }
+
+  /* scroll-hint arrow */
+  .scroll-hint {
+    position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    opacity: .4; font-size: 11px; letter-spacing: .15em; text-transform: uppercase;
+    animation: bounce 2s ease-in-out infinite;
+  }
+  @keyframes bounce { 0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(6px)} }
+  .scroll-hint svg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-logo">Bleumr</div>
+  <button class="nav-dl">Download</button>
+</nav>
+
+<!-- Hero -->
+<section id="hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="hero-content">
+    <div class="hero-eyebrow">Introducing Bleumr 1.0</div>
+    <h1 class="hero-h1">Intelligence,<br>in Motion.</h1>
+    <p class="hero-sub">The AI platform that thinks with you, works for you, and lives on your desktop.</p>
+    <div class="hero-ctas">
+      <button class="btn-primary">Download for Mac</button>
+      <button class="btn-ghost">Watch Demo</button>
+    </div>
+  </div>
+  <div class="scroll-hint">
+    Scroll
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M8 3v10M4 9l4 4 4-4"/>
+    </svg>
+  </div>
+</section>
+
+<!-- Scroll Sequence -->
+<section id="seq-wrap">
+  <div id="seq-sticky">
+    <canvas id="seq-canvas"></canvas>
+
+    <div class="seq-panel center" id="p0">
+      <div class="panel-tag" style="color:var(--indigo)">Meet Bleumr</div>
+      <div class="panel-h2">A new kind<br>of intelligence.</div>
+    </div>
+
+    <div class="seq-panel left" id="p1">
+      <div class="panel-tag" style="color:var(--indigo)">JUMARI</div>
+      <div class="panel-h2">Your AI<br>best friend.</div>
+      <p class="panel-body">Talks like a human, thinks like a genius. No filter, no corporate tone — just the real thing.</p>
+    </div>
+
+    <div class="seq-panel right" id="p2">
+      <div class="panel-tag" style="color:var(--cyan)">Workspace</div>
+      <div class="panel-h2">Three agents,<br>one answer.</div>
+      <p class="panel-body">Planner, Researcher, and Synth work together across five rounds of deep collaboration.</p>
+    </div>
+
+    <div class="seq-panel left" id="p3">
+      <div class="panel-tag" style="color:var(--emerald)">Browser Agent</div>
+      <div class="panel-h2">The internet<br>on autopilot.</div>
+      <p class="panel-body">Browses, clicks, fills, and navigates — while you watch it happen live.</p>
+    </div>
+
+    <div class="seq-panel center" id="p4">
+      <div class="panel-tag" style="color:var(--cyan)">Available Now</div>
+      <div class="panel-h2">Think<br>differently.</div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="section-label">Everything you need</div>
+  <div class="section-title">Built for the way you think</div>
+  <div class="cards">
+    <div class="card" style="transition-delay:.0s">
+      <div class="card-icon" style="background:rgba(129,140,248,.15)">🧠</div>
+      <h3>JUMARI</h3>
+      <p>Your AI best friend. Talks like a real person, remembers you, and helps with absolutely everything. Zero refusals.</p>
+    </div>
+    <div class="card" style="transition-delay:.1s">
+      <div class="card-icon" style="background:rgba(34,211,238,.15)">🔬</div>
+      <h3>Workspace</h3>
+      <p>Three AI agents run five rounds of real dialogue before delivering a polished, professional deliverable.</p>
+    </div>
+    <div class="card" style="transition-delay:.2s">
+      <div class="card-icon" style="background:rgba(52,211,153,.15)">🌐</div>
+      <h3>Browser Agent</h3>
+      <p>A full built-in browser where JUMARI can see, click, scroll, and interact with any website on your behalf.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+  <h2>Ready to think<br>differently?</h2>
+  <p>Free to start. macOS only.</p>
+  <button class="btn-cta">Download Bleumr</button>
+</section>
+
+<!-- Footer -->
+<footer>
+  <span>Bleumr</span>
+  <span>© 2026 Bleumr. All rights reserved.</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// SPHERE ENGINE — shared by hero + sequence canvas
+// ─────────────────────────────────────────────────────────────────────────────
+const TOTAL_FRAMES = 300;
+const STAR_COUNT   = 900;
+const NEBULA_COUNT = 4;
+
+// Pre-generate sphere points (Fibonacci distribution — even, no poles cluster)
+const spherePts = Array.from({ length: STAR_COUNT }, (_, i) => {
+  const phi   = Math.acos(1 - (2 * (i + 0.5)) / STAR_COUNT);
+  const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+  return {
+    sinPhi:   Math.sin(phi),
+    cosPhi:   Math.cos(phi),
+    basePhi:  theta,
+    sz:       (i % 7 === 0) ? 1.8 : (i % 3 === 0) ? 1.1 : 0.55,
+    bright:   i % 5 === 0,
+    col:      ['#ffffff','#ffffff','#baddff','#818cf8','#67e8f9','#a5b4fc'][i % 6],
+  };
+});
+
+// Background star field (fixed positions, deterministic)
+const bgStars = Array.from({ length: 280 }, (_, i) => ({
+  x:    (Math.sin(i * 127.1) * 0.5 + 0.5),
+  y:    (Math.sin(i * 311.7 + 1.3) * 0.5 + 0.5),
+  r:    (i % 11 === 0) ? 1.4 : (i % 5 === 0) ? 0.9 : 0.5,
+  base: Math.sin(i * 73.3),  // for twinkle
+}));
+
+// Nebula cloud configs (stable)
+const nebulas = [
+  { ox: -0.28, oy: -0.18, w: 0.55, h: 0.30, col: 'rgba(99,102,241,', rot: -0.3  },
+  { ox:  0.22, oy:  0.20, w: 0.48, h: 0.25, col: 'rgba(34,211,238,',  rot:  0.4  },
+  { ox: -0.20, oy:  0.25, w: 0.40, h: 0.20, col: 'rgba(129,140,248,', rot: -0.15 },
+  { ox:  0.30, oy: -0.22, w: 0.38, h: 0.18, col: 'rgba(52,211,153,',  rot:  0.25 },
+];
+
+// ── Draw a single frame to a canvas context ──────────────────────────────────
+// progress: 0–1  (controls everything — sphere size, star density, nebula opacity)
+// rotation: radians (sphere spin angle)
+function drawSphere(ctx, W, H, progress, rotation, opts = {}) {
+  const { bgOpacity = 1, sphereScale = 1 } = opts;
+
+  const cx = W / 2;
+  const cy = H / 2;
+  const baseR  = Math.min(W, H) * 0.32 * sphereScale;
+  const R      = baseR * Math.min(1, progress * 2.2);  // sphere grows in
+  const perspective = R * 2.6;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // ── Deep space background ────────────────────────────────────────────────
+  if (bgOpacity > 0) {
+    ctx.globalAlpha = bgOpacity;
+    const bg = ctx.createRadialGradient(cx, cy * 0.9, 0, cx, cy, Math.max(W, H) * 0.75);
+    bg.addColorStop(0,   `rgba(8, 14, 48, 1)`);
+    bg.addColorStop(0.5, `rgba(4,  8,  22, 1)`);
+    bg.addColorStop(1,   `rgba(2,  4,  12, 1)`);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  const t = performance.now() * 0.001;
+
+  // ── Background star field ─────────────────────────────────────────────────
+  const starOpacity = Math.min(1, progress * 1.8);
+  for (const s of bgStars) {
+    const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 1.3 + s.base * 8));
+    ctx.globalAlpha = starOpacity * twinkle * 0.75;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // ── Nebula clouds ─────────────────────────────────────────────────────────
+  const nebulaOp = Math.max(0, (progress - 0.2) * 1.6);
+  if (nebulaOp > 0) {
+    ctx.save();
+    ctx.filter = 'blur(52px)';
+    for (const n of nebulas) {
+      const pulse = 0.6 + 0.4 * Math.sin(t * 0.5 + n.rot * 5);
+      ctx.globalAlpha = nebulaOp * 0.55 * pulse;
+      ctx.save();
+      ctx.translate(cx + n.ox * W, cy + n.oy * H);
+      ctx.rotate(n.rot);
+      ctx.scale(1, n.h / n.w);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, n.w * W * 0.5);
+      g.addColorStop(0,   n.col + '0.9)');
+      g.addColorStop(0.5, n.col + '0.4)');
+      g.addColorStop(1,   n.col + '0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, n.w * W * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // ── Orbital rings ─────────────────────────────────────────────────────────
+  const ringOp = Math.max(0, (progress - 0.45) * 2.5);
+  if (ringOp > 0) {
+    const rings = [
+      { rx: R * 1.55, ry: R * 0.42, rot: -0.42, col: 'rgba(129,140,248,' },
+      { rx: R * 1.85, ry: R * 0.28, rot:  0.28, col: 'rgba(34,211,238,'  },
+    ];
+    for (const r of rings) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(r.rot + rotation * 0.12);
+      ctx.scale(1, r.ry / r.rx);
+      ctx.beginPath();
+      ctx.arc(0, 0, r.rx, 0, Math.PI * 2);
+      ctx.strokeStyle = r.col + (ringOp * 0.45) + ')';
+      ctx.lineWidth = 1.2 / (r.ry / r.rx);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ── Sphere glow (behind stars) ────────────────────────────────────────────
+  if (R > 5) {
+    ctx.save();
+    ctx.filter = 'blur(32px)';
+    const glowPulse = 0.7 + 0.3 * Math.sin(t * 0.8);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.3);
+    glow.addColorStop(0,   `rgba(60, 80, 200, ${0.7 * glowPulse})`);
+    glow.addColorStop(0.5, `rgba(30, 50, 140, ${0.35 * glowPulse})`);
+    glow.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = Math.min(1, progress * 1.5);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.filter = 'none';
+    ctx.restore();
+  }
+
+  // ── Sphere dots ───────────────────────────────────────────────────────────
+  if (R > 5) {
+    ctx.globalCompositeOperation = 'lighter';
+    const sphereProgress = Math.min(1, progress * 2.5);
+
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const s = spherePts[i];
+      const show = i / STAR_COUNT < sphereProgress;
+      if (!show) continue;
+
+      const angle = s.basePhi + rotation;
+      const x = R * s.sinPhi * Math.cos(angle);
+      const y = R * s.cosPhi;
+      const z = R * s.sinPhi * Math.sin(angle);
+
+      if (z < -R * 0.1) continue;
+
+      const scale   = perspective / (perspective - z);
+      const px      = cx + x * scale;
+      const py      = cy + y * scale;
+      const zRatio  = (z + R) / (2 * R);
+      const dx      = Math.abs(px - cx) / R;
+      const dy      = Math.abs(py - cy) / R;
+      const edge    = Math.min(1, (dx + dy) * 0.75);
+
+      let op = zRatio * 0.85 + edge * 0.4;
+      let sz = s.sz * scale * 0.85;
+
+      if (s.bright) {
+        op  = Math.min(1, op * 2.2);
+        sz *= 1 + 0.35 * Math.sin(t * 3.1 + s.basePhi);
+        ctx.shadowBlur  = sz * 5;
+        ctx.shadowColor = s.col;
+      }
+
+      ctx.globalAlpha = Math.max(0, Math.min(0.95, op));
+      ctx.fillStyle   = s.col;
+      ctx.beginPath();
+      ctx.arc(px, py, sz, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HERO — animated rotating sphere (runs on RAF)
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const canvas = document.getElementById('hero-canvas');
+  const ctx    = canvas.getContext('2d');
+  let W, H;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = canvas.offsetWidth; H = canvas.offsetHeight;
+    canvas.width  = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const ROT_SPEED = (2 * Math.PI) / 38000;
+  let start = null;
+
+  function heroLoop(ts) {
+    if (!start) start = ts;
+    const rot = (ts - start) * ROT_SPEED;
+    drawSphere(ctx, W, H, 1, rot, { bgOpacity: 0, sphereScale: 1.05 });
+    requestAnimationFrame(heroLoop);
+  }
+  requestAnimationFrame(heroLoop);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCROLL SEQUENCE — instant frame updates on scroll
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const canvas = document.getElementById('seq-canvas');
+  const ctx    = canvas.getContext('2d');
+  const wrap   = document.getElementById('seq-wrap');
+  let W, H, dpr;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = canvas.offsetWidth; H = canvas.offsetHeight;
+    canvas.width  = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawFrame(currentFrame);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Text panels: [id, showStart, showEnd] — progress thresholds
+  const panels = [
+    ['p0', 0.00, 0.16],
+    ['p1', 0.22, 0.40],
+    ['p2', 0.44, 0.62],
+    ['p3', 0.64, 0.80],
+    ['p4', 0.84, 1.00],
+  ];
+
+  let currentFrame = 0;
+
+  // Animation properties driven by frame (0–299)
+  function frameToProgress(f) { return f / (TOTAL_FRAMES - 1); }
+
+  function drawFrame(f) {
+    const p   = frameToProgress(f);
+    // Rotation accumulates as frames advance
+    const rot = p * Math.PI * 5;
+    drawSphere(ctx, W, H, p, rot, { bgOpacity: 1, sphereScale: 1 });
+  }
+
+  function updatePanels(progress) {
+    for (const [id, s, e] of panels) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const visible = progress >= s && progress <= e;
+      // Fade position within window for smooth entry/exit
+      let op = 0, ty = 20;
+      if (visible) {
+        const span   = e - s;
+        const local  = (progress - s) / span;
+        const fadeIn  = Math.min(1, local / 0.2);
+        const fadeOut = Math.min(1, (1 - local) / 0.2);
+        op = Math.min(fadeIn, fadeOut);
+        ty = (1 - op) * 22;
+      }
+      el.style.opacity   = op;
+      const isCenter = el.classList.contains('center');
+      el.style.transform = isCenter
+        ? `translateX(-50%) translateY(${ty}px)`
+        : `translateY(${ty}px)`;
+    }
+  }
+
+  function onScroll() {
+    const wrapTop    = wrap.getBoundingClientRect().top + window.scrollY;
+    const scrollable = wrap.offsetHeight - window.innerHeight;
+    const progress   = Math.max(0, Math.min(1, (window.scrollY - wrapTop) / scrollable));
+    const frame      = Math.round(progress * (TOTAL_FRAMES - 1));
+    if (frame !== currentFrame) {
+      currentFrame = frame;
+      drawFrame(frame);
+    }
+    updatePanels(progress);
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  drawFrame(0);
+  updatePanels(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature cards — fade in on scroll via IntersectionObserver
+// ─────────────────────────────────────────────────────────────────────────────
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.15 });
+document.querySelectorAll('.card').forEach(c => io.observe(c));
+</script>
+</body>
+</html>

@@ -178,7 +178,7 @@ import { JumariApprovalModal } from './components/JumariApprovalModal';
 import { Onboarding } from './components/Onboarding';
 import { SchedulerPage, SchedulingToast, addScheduleEvent } from './components/CalendarPage';
 import { WorkspacePage } from './components/WorkspacePage';
-import { getProfile, saveProfile, clearProfile, UserProfile } from './services/UserProfile';
+import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
 export default function App() {
   const [appMode, setAppMode] = useState<'platform' | 'browser'>('platform');
@@ -205,7 +205,23 @@ export default function App() {
 
   // ── User Profile & Onboarding ─────────────────────────────────────────────
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => getProfile());
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !getProfile());
+  // Start hidden — async restore below will reveal onboarding only if truly new device
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+
+  // ── On mount: restore profile from Electron store if localStorage was wiped ──
+  useEffect(() => {
+    restoreProfileFromStore().then(({ profile, everOnboarded }) => {
+      if (profile) {
+        setUserProfile(profile);
+        setShowOnboarding(false);
+      } else if (!everOnboarded) {
+        // Truly new device — show onboarding
+        setShowOnboarding(true);
+      }
+      // everOnboarded && !profile = cleared profile via "Add New Profile"
+      // handled separately by handleAddNewProfile
+    });
+  }, []);
 
   const handleOnboardingComplete = useCallback((profile: UserProfile) => {
     setUserProfile(profile);
@@ -250,6 +266,7 @@ export default function App() {
             ? { ...m, content: m.content
                 .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
                 .replace(/<open>[\s\S]*?<\/open>/gi, '')
+                .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
                 .trimEnd() }
             : m
         );
@@ -262,6 +279,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showScheduler, setShowScheduler] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
   const [agentStep, setAgentStep] = useState(0);
@@ -448,6 +466,7 @@ export default function App() {
         ? { ...m, content: m.content
             .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
             .replace(/<open>[\s\S]*?<\/open>/gi, '')
+            .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
             .trimEnd() }
         : m
     );
@@ -3011,9 +3030,10 @@ export default function App() {
         // Remove complete hidden blocks
         let s = content
           .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
-          .replace(/<open>[\s\S]*?<\/open>/gi, '');
-        // Hide partial opening tags still mid-stream (e.g. "<schedule" without closing)
-        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '');
+          .replace(/<open>[\s\S]*?<\/open>/gi, '')
+          .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '');
+        // Hide partial opening tags still mid-stream
+        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '');
         return s.trimEnd();
       };
 
@@ -3176,8 +3196,21 @@ export default function App() {
                return false;
              };
 
+             // Parse <workspace> tag — opens Workspace with the task auto-submitted
+             const parseWorkspaceFromRaw = (raw: string) => {
+               const match = raw.match(/<workspace>([\s\S]*?)<\/workspace>/i);
+               if (!match) return;
+               const task = match[1].trim();
+               if (!task) return;
+               setTimeout(() => {
+                 setWorkspaceAutoTask(task);
+                 setShowWorkspace(true);
+               }, 800);
+             };
+
              // Run parsers against raw (unstripped) content — display content is already clean
              parseScheduleFromRaw(rawContent);
+             parseWorkspaceFromRaw(rawContent);
              const didOpenHtml = openHtmlInBrowser(rawContent);
 
              // If the model dumped raw HTML as its response, replace display with a clean message
@@ -5235,8 +5268,9 @@ export default function App() {
           style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
         >
           <WorkspacePage
-            onClose={() => setShowWorkspace(false)}
+            onClose={() => { setShowWorkspace(false); setWorkspaceAutoTask(null); }}
             apiKey={secureApiKey}
+            initialTask={workspaceAutoTask ?? undefined}
           />
         </motion.div>
       )}

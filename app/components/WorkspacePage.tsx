@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Search, Layers3, X, Zap, CheckCircle2, Bot, FlaskConical, Orbit, Sparkles } from 'lucide-react';
+import { InlineStarSphere } from './InlineStarSphere';
 
 // ─── Agent config ─────────────────────────────────────────────────────────────
 const AGENTS = [
@@ -55,18 +56,61 @@ type AgentId = 'planner' | 'researcher' | 'synth';
 type AgentStatus = 'idle' | 'thinking' | 'done';
 type Phase = 'idle' | 'planning' | 'researching' | 'synthesizing' | 'done';
 interface AgentOutput { id: AgentId; text: string }
-interface WorkspacePageProps { onClose: () => void; apiKey: string }
+interface WorkspacePageProps { onClose: () => void; apiKey: string; initialTask?: string }
 
 // ─── Seated character SVG ─────────────────────────────────────────────────────
-// Shows upper body only — desk overlaps lower half to create seated illusion
-function SeatedCharacter({ agent, status, selected, onClick }: {
+// What each agent says they're doing at each phase — makes bubbles feel like real convo
+const AGENT_PHASE_LABEL: Record<string, Record<string, string>> = {
+  planner: {
+    planning_1:    'Mapping the strategy…',
+    planning_2:    'Revising based on research…',
+    default:       'Thinking…',
+  },
+  researcher: {
+    researching_1: 'Challenging assumptions…',
+    researching_2: 'Validating the revision…',
+    default:       'Digging deep…',
+  },
+  synth: {
+    synthesizing:  'Composing the final answer…',
+    default:       'Synthesizing…',
+  },
+};
+
+function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLabel }: {
   agent: typeof AGENTS[number];
   status: AgentStatus;
   selected: boolean;
   onClick: () => void;
+  streamText?: string;
+  phaseLabel?: string;
 }) {
   const thinking = status === 'thinking';
   const done = status === 'done';
+
+  // Extract the last complete sentence from the stream so it reads like
+  // the agent is actually communicating a thought, not dumping raw tokens.
+  const bubbleText = (() => {
+    if (!streamText || streamText.length < 8) return '';
+    const clean = streamText.replace(/\s+/g, ' ').replace(/[#*`>_~]/g, '').trim();
+    // Find the last complete sentence (ends with . ! ?)
+    const sentenceEnd = /[.!?]/g;
+    let lastIdx = -1;
+    let m: RegExpExecArray | null;
+    while ((m = sentenceEnd.exec(clean)) !== null) lastIdx = m.index;
+    if (lastIdx > 20) {
+      // Walk back to find the sentence start (after previous . ! ?)
+      const prev = clean.lastIndexOf('.', lastIdx - 1);
+      const prev2 = clean.lastIndexOf('!', lastIdx - 1);
+      const prev3 = clean.lastIndexOf('?', lastIdx - 1);
+      const start = Math.max(prev, prev2, prev3);
+      const sentence = clean.slice(start > 0 ? start + 2 : 0, lastIdx + 1).trim();
+      if (sentence.length > 8 && sentence.length <= 120) return sentence;
+    }
+    // Fallback: last clean chunk of words, max 90 chars
+    return clean.slice(-90).replace(/^\S+\s/, '').trim();
+  })();
+  const hasBubbleText = bubbleText.length > 6;
 
   return (
     <motion.button
@@ -75,10 +119,82 @@ function SeatedCharacter({ agent, status, selected, onClick }: {
       className="relative flex flex-col items-center outline-none select-none"
       style={{ cursor: 'pointer' }}
     >
-      {/* Thought bubble */}
-      <AnimatePresence>
-        {thinking && (
-          <motion.div key="bubble"
+      {/* Speech / thought bubble */}
+      <AnimatePresence mode="wait">
+        {thinking && hasBubbleText && (
+          <motion.div key="speech"
+            initial={{ opacity: 0, y: 6, scale: 0.88 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.88, y: 4 }}
+            transition={{ duration: 0.18 }}
+            className="absolute pointer-events-none"
+            style={{
+              bottom: '115%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 180,
+              zIndex: 50,
+            }}
+          >
+            {/* Bubble body */}
+            <div className="relative rounded-2xl px-3 py-2.5"
+              style={{
+                background: `linear-gradient(135deg, rgba(10,12,28,0.97), rgba(6,8,20,0.97))`,
+                border: `1px solid ${agent.accent}55`,
+                boxShadow: `0 4px 24px rgba(0,0,0,0.6), 0 0 0 1px ${agent.accent}18, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                backdropFilter: 'blur(16px)',
+              }}
+            >
+              {/* Accent top bar */}
+              <div className="absolute top-0 left-4 right-4 h-px rounded-full"
+                style={{ background: `linear-gradient(90deg, transparent, ${agent.accent}80, transparent)` }} />
+
+              {/* Phase label — what this agent is currently doing */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <motion.div className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: agent.accent }}
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 0.7, repeat: Infinity }}
+                />
+                <span className="text-[8px] font-semibold" style={{ color: agent.accent }}>
+                  {phaseLabel || agent.name}
+                </span>
+              </div>
+
+              {/* Last complete thought from stream */}
+              <p className="text-[10.5px] leading-snug" style={{ color: 'rgba(255,255,255,0.82)', wordBreak: 'break-word', fontStyle: 'normal' }}>
+                "{bubbleText}"
+                <motion.span
+                  animate={{ opacity: [1, 0, 1] }}
+                  transition={{ duration: 0.55, repeat: Infinity }}
+                  style={{ color: agent.accent, fontWeight: 700, fontStyle: 'normal', marginLeft: 2 }}
+                >▋</motion.span>
+              </p>
+            </div>
+
+            {/* Bubble tail pointing down to character */}
+            <div className="absolute left-1/2 -translate-x-1/2"
+              style={{
+                bottom: -7,
+                width: 0, height: 0,
+                borderLeft: '6px solid transparent',
+                borderRight: '6px solid transparent',
+                borderTop: `8px solid ${agent.accent}55`,
+              }}
+            />
+            <div className="absolute left-1/2 -translate-x-1/2"
+              style={{
+                bottom: -6,
+                width: 0, height: 0,
+                borderLeft: '5px solid transparent',
+                borderRight: '5px solid transparent',
+                borderTop: '7px solid rgba(6,8,20,0.97)',
+              }}
+            />
+          </motion.div>
+        )}
+
+        {thinking && !hasBubbleText && (
+          <motion.div key="dots"
             initial={{ opacity: 0, y: 4, scale: 0.85 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
@@ -93,6 +209,7 @@ function SeatedCharacter({ agent, status, selected, onClick }: {
             ))}
           </motion.div>
         )}
+
         {done && (
           <motion.div key="check"
             initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
@@ -385,21 +502,164 @@ function Desk({ agent, status }: { agent: typeof AGENTS[number]; status: AgentSt
   );
 }
 
-// ─── Floating doc ─────────────────────────────────────────────────────────────
-function FloatingDoc({ x, y, rot, delay }: { x: number; y: number; rot: number; delay: number }) {
-  return (
-    <motion.div className="absolute pointer-events-none"
-      style={{ left: x, top: y }}
-      animate={{ y: [0, -8, 0], rotate: [rot, rot + 5, rot] }}
-      transition={{ duration: 5 + delay * 0.7, repeat: Infinity, delay, ease: 'easeInOut' }}
-    >
-      <div style={{ width: 36, height: 48, borderRadius: 10, background: 'linear-gradient(145deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(4px)' }}>
-        {[52, 40, 48, 32].map((w, i) => (
-          <div key={i} className="mx-auto rounded-full" style={{ marginTop: i === 0 ? 9 : 5, height: 1.5, width: `${w}%`, background: 'rgba(255,255,255,0.28)' }} />
-        ))}
-      </div>
-    </motion.div>
-  );
+// ─── Smart download helpers ───────────────────────────────────────────────────
+type ExportFormat = 'md' | 'html' | 'csv' | 'json' | 'txt';
+
+interface FormatMeta { ext: ExportFormat; label: string; mime: string; icon: string }
+const FORMAT_META: FormatMeta[] = [
+  { ext: 'md',   label: '.md',   mime: 'text/markdown',  icon: '📝' },
+  { ext: 'html', label: '.html', mime: 'text/html',       icon: '📊' },
+  { ext: 'csv',  label: '.csv',  mime: 'text/csv',        icon: '📋' },
+  { ext: 'json', label: '.json', mime: 'application/json',icon: '🗂' },
+  { ext: 'txt',  label: '.txt',  mime: 'text/plain',      icon: '📄' },
+];
+
+/** Detect which formats are most relevant given content + original task */
+function detectFormats(text: string, task: string): ExportFormat[] {
+  const hasMarkdownTable = /\|.+\|.+\|/.test(text);
+  const hasHeaders       = /^#{1,4}\s/m.test(text);
+  const hasBullets       = /^[-*]\s/m.test(text) || /^\d+\.\s/m.test(text);
+  const hasCodeBlock     = /```/.test(text);
+  const taskLc           = task.toLowerCase();
+  const wantsChart       = /graph|chart|visual|dashboard|plot|report|data|analytic/i.test(taskLc);
+  const wantsData        = /table|spreadsheet|csv|data|dataset|numbers|metrics|kpi/i.test(taskLc);
+  const wantsJson        = /json|api|schema|struct|object/i.test(taskLc);
+  const wantsPlan        = /plan|strategy|roadmap|outline|doc|report|business|proposal/i.test(taskLc);
+
+  const out: ExportFormat[] = [];
+  if (hasHeaders || hasBullets || wantsPlan) out.push('md');
+  if (wantsChart || hasMarkdownTable)        out.push('html');
+  if (hasMarkdownTable || wantsData)         out.push('csv');
+  if (wantsJson)                             out.push('json');
+  out.push('txt'); // always available
+  return [...new Set(out)] as ExportFormat[];
+}
+
+/** Parse first markdown table → { headers, rows } */
+function parseMarkdownTable(text: string) {
+  const lines = text.split('\n');
+  const tStart = lines.findIndex(l => /\|.+\|/.test(l));
+  if (tStart === -1) return null;
+  const tableLines = lines.slice(tStart).filter(l => /\|.+\|/.test(l) && !/^[\s|:-]+$/.test(l));
+  if (tableLines.length < 2) return null;
+  const headers = tableLines[0].split('|').map(s => s.trim()).filter(Boolean);
+  const rows    = tableLines.slice(1).map(l => l.split('|').map(s => s.trim()).filter(Boolean));
+  return { headers, rows };
+}
+
+/** Build the blob content for a given format */
+function buildContent(text: string, format: ExportFormat, task: string): string {
+  if (format === 'txt' || format === 'md') return text;
+
+  if (format === 'csv') {
+    const parsed = parseMarkdownTable(text);
+    if (parsed) {
+      const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
+      return [parsed.headers, ...parsed.rows].map(r => r.map(escape).join(',')).join('\n');
+    }
+    // Fallback: convert each line to a single-column CSV
+    return text.split('\n').map(l => `"${l.replace(/"/g, '""')}"`).join('\n');
+  }
+
+  if (format === 'json') {
+    return JSON.stringify({ task, generated: new Date().toISOString(), content: text }, null, 2);
+  }
+
+  if (format === 'html') {
+    const parsed = parseMarkdownTable(text);
+    const chartScript = parsed ? (() => {
+      const numeric = parsed.headers.slice(1).filter((_, ci) =>
+        parsed.rows.some(r => !isNaN(parseFloat(r[ci + 1]))));
+      if (numeric.length === 0) return '';
+      const labels = JSON.stringify(parsed.rows.map(r => r[0]));
+      const datasets = JSON.stringify(numeric.map((h, ci) => ({
+        label: h,
+        data: parsed.rows.map(r => parseFloat(r[ci + 1]) || 0),
+        backgroundColor: ['#818cf8','#22d3ee','#34d399','#f59e0b','#f87171'][ci % 5] + 'cc',
+        borderColor:     ['#818cf8','#22d3ee','#34d399','#f59e0b','#f87171'][ci % 5],
+        borderWidth: 2,
+      })));
+      return `
+<div style="max-width:700px;margin:40px auto 0">
+  <canvas id="chart" height="320"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  new Chart(document.getElementById('chart'), {
+    type: 'bar',
+    data: { labels: ${labels}, datasets: ${datasets} },
+    options: { responsive:true, plugins:{ legend:{ labels:{ color:'#e2e8f0' } } }, scales:{ x:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } }, y:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' }, beginAtZero:true } } }
+  });
+</script>`;
+    })() : '';
+
+    // Simple markdown → HTML (headers, bullets, code, bold, paragraphs)
+    const md2html = (md: string) => md
+      .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+      .replace(/(<li>[\s\S]+?<\/li>)/g, '<ul>$1</ul>')
+      .replace(/\n{2,}/g, '</p><p>')
+      .replace(/^(?!<[h|u|p|l|c|p])(.+)$/gm, '$1')
+      .replace(/\|(.+)\|/g, (m) => {
+        const cells = m.split('|').map(s => s.trim()).filter(Boolean);
+        return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+      });
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${task.slice(0, 60)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#04060e;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:48px 32px;max-width:860px;margin:0 auto;line-height:1.7}
+  h1{font-size:2rem;font-weight:800;color:#fff;margin-bottom:8px;background:linear-gradient(135deg,#818cf8,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  h2{font-size:1.3rem;font-weight:700;color:#c7d2fe;margin:32px 0 12px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:6px}
+  h3{font-size:1.05rem;font-weight:600;color:#a5b4fc;margin:24px 0 8px}
+  h4{font-size:.95rem;font-weight:600;color:#94a3b8;margin:16px 0 6px}
+  p{margin:12px 0;color:#cbd5e1}
+  ul,ol{margin:10px 0 10px 24px;color:#cbd5e1}
+  li{margin:4px 0}
+  strong{color:#e2e8f0}
+  code{background:rgba(99,102,241,0.15);color:#a5b4fc;padding:2px 6px;border-radius:4px;font-size:.88em}
+  pre{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;overflow-x:auto;margin:16px 0}
+  pre code{background:none;color:#e2e8f0;padding:0}
+  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:.9rem}
+  th,td{padding:10px 14px;border:1px solid rgba(255,255,255,0.08);text-align:left}
+  th{background:rgba(99,102,241,0.18);color:#c7d2fe;font-weight:600}
+  tr:nth-child(even){background:rgba(255,255,255,0.025)}
+  .meta{font-size:.75rem;color:rgba(255,255,255,0.25);margin-bottom:40px}
+  .badge{display:inline-block;background:rgba(99,102,241,0.2);color:#818cf8;border:1px solid rgba(99,102,241,0.3);border-radius:6px;padding:2px 10px;font-size:.72rem;font-weight:700;letter-spacing:.06em;margin-bottom:16px}
+</style>
+</head>
+<body>
+<span class="badge">BLEUMR RESEARCH CENTER</span>
+<h1>${task}</h1>
+<p class="meta">Generated ${new Date().toLocaleString()} · Bleumr Workspace · 3-agent synthesis</p>
+<div>${md2html(text)}</div>
+${chartScript}
+</body>
+</html>`;
+  }
+
+  return text;
+}
+
+function triggerDownload(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── Data packet traveling between agents ─────────────────────────────────────
@@ -415,10 +675,10 @@ function DataPacket({ fromPct, toPct, color, delay = 0 }: { fromPct: string; toP
 
 // ─── Phase rail ───────────────────────────────────────────────────────────────
 const PHASES: { key: Phase; label: string; color: string }[] = [
-  { key: 'planning', label: 'Plan', color: '#818cf8' },
-  { key: 'researching', label: 'Research', color: '#22d3ee' },
-  { key: 'synthesizing', label: 'Compose', color: '#34d399' },
-  { key: 'done', label: 'Done', color: '#34d399' },
+  { key: 'planning',     label: 'Plan',     color: '#818cf8' },
+  { key: 'researching',  label: 'Research', color: '#22d3ee' },
+  { key: 'synthesizing', label: 'Compose',  color: '#34d399' },
+  { key: 'done',         label: 'Done',     color: '#34d399' },
 ];
 
 function PhaseRail({ phase }: { phase: Phase }) {
@@ -451,19 +711,39 @@ function PhaseRail({ phase }: { phase: Phase }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
+export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePageProps) {
   const [input, setInput] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [statuses, setStatuses] = useState<Record<AgentId, AgentStatus>>({ planner: 'idle', researcher: 'idle', synth: 'idle' });
   const [outputs, setOutputs] = useState<AgentOutput[]>([]);
   const [streaming, setStreaming] = useState('');
+  const [agentStreaming, setAgentStreaming] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
+  const [agentPhaseLabel, setAgentPhaseLabel] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
   const [selected, setSelected] = useState<AgentId | null>(null);
+  const [lastTask, setLastTask] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const autoRunFired = useRef(false);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [outputs, streaming]);
 
+  // Auto-run when arriving from a JUMARI chat handoff
+  useEffect(() => {
+    if (initialTask && !autoRunFired.current && apiKey) {
+      autoRunFired.current = true;
+      setInput(initialTask);
+      // Slight delay so the page is fully mounted before firing
+      setTimeout(() => {
+        setInput('');
+        runWithTask(initialTask);
+      }, 600);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTask, apiKey]);
+
   const setStatus = (id: AgentId, s: AgentStatus) => setStatuses(p => ({ ...p, [id]: s }));
+  const appendAgentStream = (id: AgentId, tok: string) => setAgentStreaming(p => ({ ...p, [id]: p[id] + tok }));
+  const clearAgentStream  = (id: AgentId) => setAgentStreaming(p => ({ ...p, [id]: '' }));
 
   // ── Groq call (supports streaming) ────────────────────────────────────────
   const groq = useCallback(async (
@@ -505,12 +785,13 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
     return out;
   }, [apiKey]);
 
-  // ── Run the 3-model pipeline ───────────────────────────────────────────────
-  const run = useCallback(async () => {
-    if (!input.trim() || !apiKey) return;
-    const task = input.trim();
-    setInput(''); setOutputs([]); setStreaming('');
+  // ── Core pipeline — accepts task string directly ───────────────────────────
+  const runWithTask = useCallback(async (task: string) => {
+    if (!task.trim() || !apiKey) return;
+    setLastTask(task);
+    setOutputs([]); setStreaming('');
     setStatuses({ planner: 'idle', researcher: 'idle', synth: 'idle' });
+    setAgentStreaming({ planner: '', researcher: '', synth: '' });
 
     abortRef.current?.abort();
     const ctrl = new AbortController();
@@ -518,71 +799,166 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
     const { signal } = ctrl;
 
     try {
-      // ── Round 1: Planner proposes initial strategy ───────────────────
+      // ── Round 1: Planner — deep initial breakdown ─────────────────────
       setPhase('planning');
       setStatus('planner', 'thinking');
+      setAgentPhaseLabel(p => ({ ...p, planner: 'Mapping the strategy…' }));
+      clearAgentStream('planner');
 
       const plan = await groq(
         AGENTS[0].model,
         [
-          { role: 'system', content: `You are Planner, one of three AI agents working as a team on a shared task. Your job is to open the collaboration by proposing a clear strategic plan. Think deeply. Produce a numbered execution plan (4–6 steps) that covers the full scope of the task. Be specific. No fluff.` },
-          { role: 'user', content: `Team task: ${task}\n\nPropose your plan:` },
+          {
+            role: 'system',
+            content: `You are Planner — the strategic architect on a three-agent research team (Planner, Researcher, Synth). This is NOT a quick-answer tool. The team is built for deep, thorough, collaborative work. Your job in this first round is to:
+1. Fully understand the scope and hidden complexity of the task.
+2. Break it into a detailed, numbered execution plan (6–10 steps minimum). Each step must be specific — not vague headings.
+3. Flag at least 3 assumptions you're making that Researcher should verify or challenge.
+4. Identify what information would change the plan if it were different.
+Think like a senior consultant drafting a project brief. No shortcuts.`,
+          },
+          { role: 'user', content: `TASK: ${task}\n\nDraft your full strategic plan and flag your assumptions for Researcher:` },
         ],
         signal,
+        (tok) => appendAgentStream('planner', tok),
       );
 
       setStatus('planner', 'done');
+      clearAgentStream('planner');
       setOutputs(p => [...p, { id: 'planner', text: plan }]);
 
-      // ── Round 2: Researcher challenges and enriches the plan ─────────
+      // ── Round 2: Researcher — deep critique + evidence ────────────────
       setPhase('researching');
       setStatus('researcher', 'thinking');
+      setAgentPhaseLabel(p => ({ ...p, researcher: 'Challenging the plan…' }));
+      clearAgentStream('researcher');
 
       const research = await groq(
         AGENTS[1].model,
         [
-          { role: 'system', content: `You are Researcher, one of three AI agents working as a team. Planner has laid out a strategy. Your job is to: (1) identify any gaps or weak assumptions in the plan, (2) gather and supply all relevant facts, data, examples, case studies, and context needed to execute it well. Be comprehensive and rigorous. Push back on the plan where needed and fill in what's missing.` },
-          { role: 'user', content: `Team task: ${task}\n\nPlanner's strategy:\n${plan}\n\nYour research, analysis, and critique:` },
+          {
+            role: 'system',
+            content: `You are Researcher — the evidence and critical thinking expert on a three-agent team. Planner has laid out a strategic plan. Your job is thorough and challenging — not supportive cheerleading:
+1. Challenge every assumption Planner stated. State whether each is valid, partially valid, or wrong, and explain why with specifics.
+2. Identify gaps, risks, edge cases, and overlooked factors in the plan. Be brutal but constructive.
+3. Provide concrete supporting material: real-world examples, known failure modes, relevant data points, industry patterns, or case studies.
+4. Propose at least 2 alternative angles or approaches Planner may not have considered.
+5. End with a prioritized list of corrections Planner must incorporate in the revision.
+This is deep research, not a summary. Be exhaustive.`,
+          },
+          { role: 'user', content: `TASK: ${task}\n\n=== PLANNER'S PLAN ===\n${plan}\n\nProvide your full research, critique, and corrections:` },
         ],
         signal,
+        (tok) => appendAgentStream('researcher', tok),
       );
 
       setStatus('researcher', 'done');
+      clearAgentStream('researcher');
       setOutputs(p => [...p, { id: 'researcher', text: research }]);
 
-      // ── Round 3: Planner refines based on Researcher's findings ──────
+      // ── Round 3: Planner — absorbs research, revises deeply ──────────
       setPhase('planning');
       setStatus('planner', 'thinking');
+      setAgentPhaseLabel(p => ({ ...p, planner: 'Revising after research…' }));
+      clearAgentStream('planner');
 
       const refinedPlan = await groq(
         AGENTS[0].model,
         [
-          { role: 'system', content: `You are Planner revisiting your strategy after Researcher's input. Absorb their findings, address gaps they identified, and produce a REVISED final execution plan. Make it sharper, more detailed, and grounded in the research. Keep it numbered and actionable.` },
-          { role: 'user', content: `Task: ${task}\n\nYour original plan:\n${plan}\n\nResearcher's findings and critique:\n${research}\n\nRevised final plan:` },
+          {
+            role: 'system',
+            content: `You are Planner in your second pass. Researcher has challenged your assumptions, added evidence, and flagged gaps. You must now:
+1. Explicitly address every correction Researcher raised — either incorporate it or explain why you disagree.
+2. Produce a significantly improved, detailed revised plan. This should be substantially different from and better than your first draft.
+3. Incorporate the evidence and examples Researcher provided where they strengthen the plan.
+4. Add implementation specifics: timelines, metrics for success, resource requirements, risk mitigations.
+Do not just tweak the original — rebuild it properly with everything you now know.`,
+          },
+          { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL PLAN ===\n${plan}\n\n=== RESEARCHER'S CRITIQUE & FINDINGS ===\n${research}\n\nWrite your substantially revised and improved plan:` },
         ],
         signal,
+        (tok) => appendAgentStream('planner', tok),
       );
 
       setStatus('planner', 'done');
-      setOutputs(p => [...p, { id: 'planner', text: `[Revised]\n${refinedPlan}` }]);
+      clearAgentStream('planner');
+      setOutputs(p => [...p, { id: 'planner', text: `[Revised Plan]\n${refinedPlan}` }]);
 
-      // ── Round 4: Synth composes the final answer from the full conversation ──
+      // ── Round 4: Researcher — validates revision, final intelligence ──
+      setPhase('researching');
+      setStatus('researcher', 'thinking');
+      setAgentPhaseLabel(p => ({ ...p, researcher: 'Validating the revision…' }));
+      clearAgentStream('researcher');
+
+      const finalResearch = await groq(
+        AGENTS[1].model,
+        [
+          {
+            role: 'system',
+            content: `You are Researcher in your second pass. Planner has revised their strategy based on your critique. Now:
+1. Validate the revision — did Planner actually address your concerns? Call out anything still missing or weak.
+2. Add your final layer of intelligence: the deepest, most specific facts, data, or context that will make the final output exceptional.
+3. Provide any structured data (tables, comparisons, benchmarks) that Synth should include in the final deliverable.
+4. Write a brief "team verdict" — 2–3 sentences summarizing what you both agree the best path forward is.
+This is your last input before Synth writes the final answer. Make it count.`,
+          },
+          { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL RESEARCH ===\n${research}\n\n=== PLANNER'S REVISED PLAN ===\n${refinedPlan}\n\nFinal validation, additional intelligence, and team verdict:` },
+        ],
+        signal,
+        (tok) => appendAgentStream('researcher', tok),
+      );
+
+      setStatus('researcher', 'done');
+      clearAgentStream('researcher');
+      setOutputs(p => [...p, { id: 'researcher', text: `[Final Intelligence]\n${finalResearch}` }]);
+
+      // ── Round 5: Synth — reads full dialogue, writes the deliverable ──
       setPhase('synthesizing');
       setStatus('synth', 'thinking');
+      setAgentPhaseLabel(p => ({ ...p, synth: 'Writing the final answer…' }));
+      clearAgentStream('synth');
       let full = '';
       setStreaming('');
 
       await groq(
         AGENTS[2].model,
         [
-          { role: 'system', content: `You are Synth, the final agent in the team. You have the full conversation between Planner and Researcher — their strategies, research, critiques, and revised plan. Your job is to synthesize everything into the best possible final deliverable for the user. Write it as a complete, polished, professional output. Use markdown (headers, bullets, tables, code blocks) where it helps clarity. Do not summarize — actually deliver the full answer.` },
-          { role: 'user', content: `Task: ${task}\n\n--- PLANNER (initial) ---\n${plan}\n\n--- RESEARCHER ---\n${research}\n\n--- PLANNER (revised) ---\n${refinedPlan}\n\nWrite the final comprehensive answer:` },
+          {
+            role: 'system',
+            content: `You are Synth — the final composer on the team. You have just read a complete multi-round collaboration between Planner and Researcher: two full planning passes and two research passes. Your job is to synthesize everything into a single, world-class deliverable. This is NOT a summary — it is the final product.
+Rules:
+- Use the best ideas from both agents across all rounds.
+- Write at professional consultant quality: structured, specific, actionable.
+- Use rich markdown formatting: ## headers, bullet lists, numbered steps, tables, code blocks where appropriate.
+- Include concrete examples, metrics, timelines, and data where available.
+- Length matters here — this is a deep-work output. Be thorough, not brief.
+- End with a "Next Steps" section with 3–5 immediately actionable items.`,
+          },
+          {
+            role: 'user',
+            content: `TASK: ${task}
+
+=== PLANNER — ROUND 1 ===
+${plan}
+
+=== RESEARCHER — ROUND 1 ===
+${research}
+
+=== PLANNER — ROUND 2 (REVISED) ===
+${refinedPlan}
+
+=== RESEARCHER — ROUND 2 (FINAL INTELLIGENCE) ===
+${finalResearch}
+
+Write the complete, polished final deliverable:`,
+          },
         ],
         signal,
-        (tok) => { full += tok; setStreaming(s => s + tok); },
+        (tok) => { full += tok; setStreaming(s => s + tok); appendAgentStream('synth', tok); },
       );
 
       setStatus('synth', 'done');
+      clearAgentStream('synth');
       setOutputs(p => [...p, { id: 'synth', text: full }]);
       setStreaming('');
       setPhase('done');
@@ -593,12 +969,22 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
       setPhase('idle');
       setStatuses({ planner: 'idle', researcher: 'idle', synth: 'idle' });
     }
-  }, [input, apiKey, groq]);
+  }, [apiKey, groq]);
+
+  // Thin wrapper so the Launch button can still call run() reading from input state
+  const run = useCallback(() => {
+    if (!input.trim()) return;
+    const task = input.trim();
+    setInput('');
+    runWithTask(task);
+  }, [input, runWithTask]);
 
   const reset = () => {
     abortRef.current?.abort();
     setPhase('idle');
     setStatuses({ planner: 'idle', researcher: 'idle', synth: 'idle' });
+    setAgentStreaming({ planner: '', researcher: '', synth: '' });
+    setAgentPhaseLabel({ planner: '', researcher: '', synth: '' });
     setOutputs([]); setStreaming(''); setInput('');
   };
 
@@ -633,8 +1019,8 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
 
           {/* Windows — moving starfield, space-station view */}
           {([
-            { style: { left: 24 }, nebulaColor: 'rgba(99,102,241,0.18)', planetColor: ['#818cf8','#312e81'], planetGlow: '#818cf8', dir: -1 },
-            { style: { right: 24 }, nebulaColor: 'rgba(52,211,153,0.14)', planetColor: ['#34d399','#064e3b'], planetGlow: '#34d399', dir: 1 },
+            { style: { left: 24 }, nebulaColor: 'rgba(99,102,241,0.18)', dir: -1 },
+            { style: { right: 24 }, nebulaColor: 'rgba(52,211,153,0.14)', dir: 1 },
           ] as const).map((w, wi) => (
             <div key={wi} className="absolute top-4 rounded-2xl overflow-hidden"
               style={{ width: 94, height: 124, ...w.style, background: '#010308', border: '1px solid rgba(255,255,255,0.12)', boxShadow: 'inset 0 0 30px rgba(0,0,10,0.8), 0 0 0 1px rgba(255,255,255,0.04)' }}>
@@ -684,16 +1070,6 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                 transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut', delay: wi * 2 }}
               />
 
-              {/* Planet orbiting slowly */}
-              <motion.div className="absolute rounded-full"
-                style={{ width: 18, height: 18, bottom: '16%', right: '12%', background: `radial-gradient(circle at 35% 30%, ${w.planetColor[0]}, ${w.planetColor[1]})`, boxShadow: `0 0 12px ${w.planetGlow}60` }}
-                animate={{ y: [0, -8, 0], x: [0, w.dir * 4, 0] }}
-                transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                {/* Planet ring */}
-                <div className="absolute inset-0 rounded-full" style={{ border: `1px solid ${w.planetGlow}40`, transform: 'scale(1.6) rotate(-25deg)', borderRadius: '50%' }} />
-              </motion.div>
-
               {/* Shooting star */}
               <motion.div className="absolute rounded-full"
                 style={{ width: 20, height: 1, top: '30%', left: '-20%', background: `linear-gradient(90deg, transparent, white)`, opacity: 0 }}
@@ -721,47 +1097,8 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                 border: '1px solid rgba(255,255,255,0.06)',
               }}>
 
-              {/* The SVG mark — orbital rings around a core */}
-              <svg width="38" height="38" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                  <radialGradient id="core-grad" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#818cf8" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#4f46e5" stopOpacity="0.4" />
-                  </radialGradient>
-                </defs>
-                {/* Outer ring */}
-                <motion.circle cx="19" cy="19" r="17" stroke="rgba(129,140,248,0.25)" strokeWidth="0.8" fill="none"
-                  animate={{ rotate: [0, 360] }}
-                  transition={{ duration: 18, repeat: Infinity, ease: 'linear' }}
-                  style={{ transformOrigin: '19px 19px' }}
-                />
-                {/* Tilted orbital ring */}
-                <motion.ellipse cx="19" cy="19" rx="17" ry="6" stroke="rgba(34,211,238,0.3)" strokeWidth="0.8" fill="none"
-                  animate={{ rotate: [0, -360] }}
-                  transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
-                  style={{ transformOrigin: '19px 19px' }}
-                />
-                {/* Inner ring */}
-                <circle cx="19" cy="19" r="10" stroke="rgba(129,140,248,0.15)" strokeWidth="0.6" fill="none" />
-                {/* Core */}
-                <circle cx="19" cy="19" r="4.5" fill="url(#core-grad)" />
-                <motion.circle cx="19" cy="19" r="4.5" fill="none" stroke="#818cf8" strokeWidth="0.8"
-                  animate={{ opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 2.4, repeat: Infinity }}
-                />
-                {/* Orbiting dot on outer ring */}
-                <motion.circle cx="36" cy="19" r="2" fill="#818cf8"
-                  animate={{ rotate: [0, 360] }}
-                  transition={{ duration: 18, repeat: Infinity, ease: 'linear' }}
-                  style={{ transformOrigin: '19px 19px' }}
-                />
-                {/* Orbiting dot on tilted ring */}
-                <motion.circle cx="36" cy="19" r="1.5" fill="#22d3ee"
-                  animate={{ rotate: [0, -360] }}
-                  transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
-                  style={{ transformOrigin: '19px 19px' }}
-                />
-              </svg>
+              {/* App sphere */}
+              <InlineStarSphere size={54} />
 
               {/* Wordmark */}
               <div className="mt-2.5 flex flex-col items-center gap-0.5">
@@ -775,7 +1112,7 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                 </motion.span>
                 <span className="tracking-[0.18em] text-[7px] font-semibold uppercase"
                   style={{ color: 'rgba(129,140,248,0.4)', letterSpacing: '0.2em' }}>
-                  RESEARCH CENTER
+                  WORKSPACE
                 </span>
               </div>
 
@@ -796,12 +1133,6 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
             </div>
           </div>
 
-          {/* Floating papers */}
-          <FloatingDoc x={28} y={140} rot={-7} delay={0} />
-          <FloatingDoc x={130} y={108} rot={4} delay={1.3} />
-          <FloatingDoc x={300} y={95} rot={-4} delay={0.8} />
-          <FloatingDoc x={430} y={118} rot={6} delay={2} />
-
           {/* Data packets traveling between agents when collaborating */}
           <AnimatePresence>
             {statuses.researcher === 'thinking' && (
@@ -821,6 +1152,8 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                   status={statuses[agent.id]}
                   selected={selected === agent.id}
                   onClick={() => setSelected(p => p === agent.id ? null : agent.id)}
+                  streamText={agentStreaming[agent.id]}
+                  phaseLabel={agentPhaseLabel[agent.id]}
                 />
                 {/* Desk overlaps character bottom — seated illusion */}
                 <Desk agent={agent} status={statuses[agent.id]} />
@@ -906,7 +1239,7 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                 <div>
                   <p className="text-[13px] font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.55)' }}>Your AI team is ready</p>
                   <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                    Planner maps the task → Researcher digs deep → Synth writes the final answer. Three models, one result.
+                    Built for deep work — not quick answers. The team runs 5 rounds of real dialogue before Synth writes the final deliverable.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.2)' }}>
@@ -921,14 +1254,14 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
               const isFinal = o.id === 'synth';
               const isLarge = o.text.length > 700;
 
-              const downloadFile = () => {
-                const slug = (outputs.find(x => x.id === 'planner')?.text ?? 'workspace')
-                  .split('\n')[0].replace(/[^a-z0-9 ]/gi, '').trim().slice(0, 40).replace(/\s+/g, '_').toLowerCase() || 'workspace_output';
-                const blob = new Blob([o.text], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a2 = document.createElement('a');
-                a2.href = url; a2.download = `${slug}.txt`;
-                a2.click(); URL.revokeObjectURL(url);
+              const slug = (outputs.find(x => x.id === 'planner')?.text ?? 'workspace')
+                .split('\n')[0].replace(/[^a-z0-9 ]/gi, '').trim().slice(0, 40).replace(/\s+/g, '_').toLowerCase() || 'workspace_output';
+
+              const formats = detectFormats(o.text, lastTask);
+
+              const doDownload = (fmt: ExportFormat) => {
+                const meta = FORMAT_META.find(m => m.ext === fmt)!;
+                triggerDownload(buildContent(o.text, fmt, lastTask), `${slug}.${fmt}`, meta.mime);
               };
 
               return (
@@ -947,30 +1280,41 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                       <span className="text-[12px] font-bold text-white">{a.name}</span>
                       {isFinal && <span className="ml-2 text-[9px] font-bold uppercase tracking-wider" style={{ color: a.accent }}>Final Answer</span>}
                     </div>
-                    {/* Download button for large outputs */}
-                    {isLarge && (
-                      <button onClick={downloadFile}
-                        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors"
-                        style={{ background: `${a.accent}20`, color: a.accent, border: `1px solid ${a.accent}40` }}>
-                        ↓ .txt
-                      </button>
-                    )}
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
                   </div>
-                  {/* Large outputs: show short preview + download prompt */}
-                  {isFinal && isLarge ? (
-                    <div>
-                      <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-slate-200 line-clamp-6">{o.text}</p>
-                      <button onClick={downloadFile}
-                        className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl py-2 text-[12px] font-semibold transition-colors"
-                        style={{ background: `${a.accent}15`, border: `1px solid ${a.accent}30`, color: a.accent }}>
-                        <span>↓</span> Download full output as .txt
-                      </button>
-                    </div>
-                  ) : (
-                    <p className={`text-[12px] leading-relaxed whitespace-pre-wrap ${isFinal ? 'text-slate-200' : 'text-slate-500 line-clamp-4'}`}>
+
+                  {/* Content: only show inline if short. Large = download only, no preview. */}
+                  {!isLarge && (
+                    <p className={`text-[12px] leading-relaxed whitespace-pre-wrap mb-3 ${isFinal ? 'text-slate-200' : 'text-slate-500 line-clamp-4'}`}>
                       {o.text}
                     </p>
+                  )}
+
+                  {/* Smart format download strip */}
+                  {(isLarge || isFinal) && (
+                    <div className={isLarge ? '' : 'mt-3 pt-3'} style={isLarge ? {} : { borderTop: `1px solid ${a.accent}20` }}>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                        Export as
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {formats.map(fmt => {
+                          const meta = FORMAT_META.find(m => m.ext === fmt)!;
+                          const isPrimary = fmt === formats[0];
+                          return (
+                            <button key={fmt} onClick={() => doDownload(fmt)}
+                              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all hover:scale-105 active:scale-95"
+                              style={{
+                                background: isPrimary ? `${a.accent}25` : 'rgba(255,255,255,0.05)',
+                                color: isPrimary ? a.accent : 'rgba(255,255,255,0.45)',
+                                border: `1px solid ${isPrimary ? `${a.accent}50` : 'rgba(255,255,255,0.1)'}`,
+                              }}>
+                              <span>{meta.icon}</span>
+                              {meta.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                 </motion.div>
               );
@@ -990,7 +1334,18 @@ export function WorkspacePage({ onClose, apiKey }: WorkspacePageProps) {
                     {[0, 1, 2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full" style={{ background: AGENTS[2].accent }} />)}
                   </motion.div>
                 </div>
-                <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-slate-200">{streaming}</p>
+                {/* Show a live word/char counter instead of dumping text */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                    <motion.div className="h-full rounded-full" style={{ background: AGENTS[2].accent }}
+                      animate={{ width: [`${Math.min((streaming.length / 40), 100)}%`] }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                  <span className="text-[10px] font-semibold tabular-nums" style={{ color: AGENTS[2].accent }}>
+                    {streaming.length.toLocaleString()} chars
+                  </span>
+                </div>
               </motion.div>
             )}
 
