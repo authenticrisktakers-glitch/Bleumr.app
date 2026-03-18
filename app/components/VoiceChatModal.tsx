@@ -100,14 +100,14 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     const el = mountRef.current;
     if (!el) return;
 
-    const W = 380, H = 380;
+    const W = 280, H = 280;
 
     // ── Renderer ──────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.4;
+    renderer.toneMappingExposure = 0.85;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     el.appendChild(renderer.domElement);
 
@@ -121,57 +121,63 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
 
-    // Sky sphere — silver-grey so metallic surface reads as chrome silver everywhere
-    const envScene = new THREE.Scene();
-    const envGeo   = new THREE.SphereGeometry(10, 8, 6);
-    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xc8c8c8 });
-    envScene.add(new THREE.Mesh(envGeo, envMat));
+    // ── Mercury studio environment — smooth canvas gradient (no sharp edges) ─
+    // Flat planes in a scene reflect as hard-edged rectangles on a perfect mirror.
+    // Solution: paint a smooth equirectangular gradient on a canvas → PMREM.
+    // Recipe: silver-grey base + soft white arc top-left + cool blue left fill +
+    // darker floor so the sphere reads as a silver ball against the modal.
+    const envCanvas = document.createElement('canvas');
+    envCanvas.width = 512; envCanvas.height = 256;
+    const ec = envCanvas.getContext('2d')!;
 
-    // Top panel — large bright white (creates the main chrome highlight strip)
-    const topPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(8, 2.5),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-    );
-    topPanel.position.set(0, 7, -2);
-    topPanel.lookAt(0, 0, 0);
-    envScene.add(topPanel);
+    // Base: very dark charcoal — mercury body is mostly dark (like real Hg photos)
+    ec.fillStyle = '#282832';
+    ec.fillRect(0, 0, 512, 256);
 
-    // Left panel — cool blue-white (secondary chrome reflection)
-    const leftPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(3, 5),
-      new THREE.MeshBasicMaterial({ color: 0xddeeff, side: THREE.DoubleSide })
-    );
-    leftPanel.position.set(-7, 1, -2);
-    leftPanel.lookAt(0, 0, 0);
-    envScene.add(leftPanel);
+    // Silver sheen — upper half gets a cool medium grey lift (the "metal" feel)
+    const midFill = ec.createLinearGradient(0, 0, 0, 256);
+    midFill.addColorStop(0, 'rgba(110,112,128,0.6)');
+    midFill.addColorStop(0.45, 'rgba(80,82,96,0.3)');
+    midFill.addColorStop(1, 'rgba(20,20,28,0)');
+    ec.fillStyle = midFill;
+    ec.fillRect(0, 0, 512, 256);
 
-    // Right panel — dark, creates contrast dent shadows
-    const rightPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(4, 6),
-      new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide })
-    );
-    rightPanel.position.set(7, -1, -3);
-    rightPanel.lookAt(0, 0, 0);
-    envScene.add(rightPanel);
+    // Primary highlight — tight hot spot top-left (the key mercury specular)
+    const hiGrad = ec.createRadialGradient(108, 52, 0, 108, 52, 100);
+    hiGrad.addColorStop(0, 'rgba(255,255,255,1)');
+    hiGrad.addColorStop(0.15, 'rgba(240,240,250,0.9)');
+    hiGrad.addColorStop(0.4, 'rgba(180,182,200,0.5)');
+    hiGrad.addColorStop(0.8, 'rgba(100,102,116,0.1)');
+    hiGrad.addColorStop(1, 'rgba(40,40,50,0)');
+    ec.fillStyle = hiGrad;
+    ec.fillRect(0, 0, 512, 256);
 
-    // Bottom panel — medium grey ground bounce
-    const bottomPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(6, 3),
-      new THREE.MeshBasicMaterial({ color: 0x666666, side: THREE.DoubleSide })
-    );
-    bottomPanel.position.set(0, -7, -2);
-    bottomPanel.lookAt(0, 0, 0);
-    envScene.add(bottomPanel);
+    // Secondary highlight — small right-of-center (gives spherical curvature depth)
+    const hi2 = ec.createRadialGradient(340, 85, 0, 340, 85, 55);
+    hi2.addColorStop(0, 'rgba(210,212,225,0.55)');
+    hi2.addColorStop(1, 'rgba(40,40,50,0)');
+    ec.fillStyle = hi2;
+    ec.fillRect(0, 0, 512, 256);
 
-    // Back panel — dark so sphere has depth contrast in center
-    const backPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(6, 6),
-      new THREE.MeshBasicMaterial({ color: 0x080808, side: THREE.DoubleSide })
-    );
-    backPanel.position.set(0, 0, -9);
-    envScene.add(backPanel);
+    // Blue-cool left tint — mercury characteristic cool-blue shadow tone
+    const blueGrad = ec.createRadialGradient(0, 128, 0, 0, 128, 220);
+    blueGrad.addColorStop(0, 'rgba(70,88,148,0.5)');
+    blueGrad.addColorStop(0.6, 'rgba(70,88,148,0.15)');
+    blueGrad.addColorStop(1, 'rgba(40,40,50,0)');
+    ec.fillStyle = blueGrad;
+    ec.fillRect(0, 0, 512, 256);
 
-    const envTexture = pmremGenerator.fromScene(envScene as any).texture;
+    // Dark floor — pulls bottom hemisphere toward black for contrast
+    const floorGrad = ec.createLinearGradient(0, 150, 0, 256);
+    floorGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    floorGrad.addColorStop(1, 'rgba(12,12,18,0.8)');
+    ec.fillStyle = floorGrad;
+    ec.fillRect(0, 0, 512, 256);
+
+    const envCanvasTex = new THREE.CanvasTexture(envCanvas);
+    envCanvasTex.mapping = THREE.EquirectangularReflectionMapping;
+    const envTexture = pmremGenerator.fromEquirectangular(envCanvasTex).texture;
+    envCanvasTex.dispose();
     scene.environment = envTexture;
 
     // ── Sphere geometry — high-res for displacement ───────────────────────
@@ -180,48 +186,44 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     // Store original vertex positions for displacement
     const origPos = geo.attributes.position.array.slice() as Float32Array;
 
-    // ── Silver Chrome Mercury material ─────────────────────────────────────
-    // Slightly lowered metalness so the silver color shows through on dark areas.
-    // Roughness 0.06 scatters the env reflection broadly — reads as silver, not mirror-black.
+    // ── Liquid Mercury material — near-perfect mirror metal ──────────────
+    // Actual mercury: metalness 1.0, near-zero roughness, silver-grey color.
+    // The dark-background + soft-box env gives the classic mercury look:
+    // dark surface with a bright curved white highlight band.
     const mat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0xe8e8ec),   // bright silver-white base
-      metalness: 0.92,                    // slightly below 1 so color contributes
-      roughness: 0.06,                    // scatter env slightly — silver sheen not black mirror
+      color: new THREE.Color(0xc4c4cc),   // mercury silver-blue base tint
+      metalness: 1.0,
+      roughness: 0.03,                    // near-perfect mirror, tiny scatter for realism
       clearcoat: 1.0,
-      clearcoatRoughness: 0.03,
-      envMapIntensity: 6.0,
+      clearcoatRoughness: 0.01,
+      envMapIntensity: 1.6,               // balanced — not blown out, not dark
       reflectivity: 1.0,
     });
 
     const sphere = new THREE.Mesh(geo, mat);
     scene.add(sphere);
 
-    // ── Lighting — chrome needs strong directional contrast ──────────────
-    // Key light — sharp, bright, creates the main chrome glint
-    const keyLight = new THREE.DirectionalLight(0xffffff, 5.0);
-    keyLight.position.set(-2.0, 3.2, 2.5);
+    // ── Lighting — mirrors studio soft-box photography of real mercury ───
+    // Key: top-left directional — mirrors the env highlight strip position
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    keyLight.position.set(-1.5, 3.5, 2.5);
     scene.add(keyLight);
 
-    // Fill light — cool blue-silver, from below-right
-    const fillLight = new THREE.DirectionalLight(0xaabbdd, 1.2);
-    fillLight.position.set(2.0, -1.8, 1.8);
+    // Cool grey fill from right — matches the right fill panel
+    const fillLight = new THREE.DirectionalLight(0xaab0c8, 0.7);
+    fillLight.position.set(3.5, 0.5, 1.5);
     scene.add(fillLight);
 
-    // Rim light — separates chrome silhouette from dark background
-    const rimLight = new THREE.DirectionalLight(0xccddff, 0.8);
-    rimLight.position.set(1.5, -1.2, -3.0);
-    scene.add(rimLight);
+    // Very low ambient — mercury isn't pitch black in shadows, just dark silver
+    scene.add(new THREE.AmbientLight(0x888896, 0.15));
 
-    // Very low ambient — lets the dents stay dark for visible depth
-    scene.add(new THREE.AmbientLight(0x111114, 1));
-
-    // ── Orbiting point light — creates moving chrome glint on surface ─────
-    const orbitLight = new THREE.PointLight(0xffffff, 6.0, 8);
+    // ── Orbiting point light — rolling glint across the liquid surface ────
+    const orbitLight = new THREE.PointLight(0xffffff, 2.5, 6);
     scene.add(orbitLight);
 
-    // ── Accent point light — state color tints the chrome ────────────────
-    const accentLight = new THREE.PointLight(0x818cf8, 1.2, 5);
-    accentLight.position.set(0.5, 0.5, 2.5);
+    // ── Accent point light — voice state color (idle=indigo, speak=green…) ─
+    const accentLight = new THREE.PointLight(0x818cf8, 0.8, 5);
+    accentLight.position.set(0.0, 0.0, 2.8);
     scene.add(accentLight);
 
     // ── Animation loop ────────────────────────────────────────────────────
@@ -248,28 +250,40 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
       // ── Sphere vertex displacement — strong always, explosive when speaking ─
       const pos = geo.attributes.position.array as Float32Array;
 
-      // Chrome warp dents — more amplitude for visible deformations.
-      // Speaking: heaves dramatically with audio volume.
-      const ampBase = vs === 'idle'
-        ? 0.28
-        : vs === 'speaking'
-          ? 0.30 + vol * 0.38
-          : vs === 'processing'
-            ? 0.24
-            : 0.26 + vol * 0.20; // listening
+      // ── Realistic liquid mercury displacement ──────────────────────────
+      // Layered harmonics at 3 scales (like real fluid surface tension):
+      //   Tier 1 — 2 very slow large-scale bulges (overall blob shape)
+      //   Tier 2 — 4 medium ripples (the visible warp dents)
+      //   Tier 3 — 3 fast small detail ripples (surface tension micro-detail)
+      // Very subtle warp dents — mostly sphere with slight organic breathing
+      const s1 = vs === 'idle' ? 0.045 : vs === 'speaking' ? 0.055 + vol * 0.10 : 0.038;
+      const s2 = vs === 'idle' ? 0.022 : vs === 'speaking' ? 0.028 + vol * 0.06 : 0.018;
+      const s3 = vs === 'idle' ? 0.007 : vs === 'speaking' ? 0.010 + vol * 0.025 : 0.005;
 
       for (let i = 0; i < pos.length; i += 3) {
         const ox = origPos[i], oy = origPos[i + 1], oz = origPos[i + 2];
         const len = Math.sqrt(ox * ox + oy * oy + oz * oz);
         const nx = ox / len, ny = oy / len, nz = oz / len;
 
-        // 4 low-freq harmonics — broad liquid warp bulges and dents
-        const d = ampBase * (
-          Math.sin(nx * 1.6 + t * 0.8) * Math.cos(ny * 1.4 + t * 0.6) * 1.00 +
-          Math.sin(ny * 2.2 + t * 1.0) * Math.cos(nz * 1.9 + t * 0.75) * 0.65 +
-          Math.cos(nz * 1.3 + t * 1.2) * Math.sin(nx * 1.8 + t * 0.55) * 0.40 +
-          Math.sin(nx * 2.8 + t * 1.4) * Math.cos(ny * 2.5 + t * 1.10) * 0.22
+        // Tier 1 — slow macro bulges (mercury blob overall shape)
+        const d1 = s1 * (
+          Math.sin(nx * 1.2 + t * 0.45) * Math.cos(ny * 1.1 + t * 0.35) * 1.0 +
+          Math.cos(nz * 1.0 + t * 0.38) * Math.sin(nx * 0.9 + t * 0.28) * 0.7
         );
+        // Tier 2 — medium warp dents (the main visible deformations)
+        const d2 = s2 * (
+          Math.sin(nx * 2.4 + t * 0.90) * Math.cos(ny * 2.1 + t * 0.70) * 1.0 +
+          Math.sin(ny * 3.0 + t * 1.10) * Math.cos(nz * 2.6 + t * 0.85) * 0.8 +
+          Math.cos(nz * 2.2 + t * 0.95) * Math.sin(nx * 2.8 + t * 0.75) * 0.6 +
+          Math.sin(nx * 3.5 + t * 1.20) * Math.cos(ny * 3.2 + t * 1.00) * 0.4
+        );
+        // Tier 3 — fast micro ripples (liquid surface tension detail)
+        const d3 = s3 * (
+          Math.sin(nx * 5.5 + t * 2.20) * Math.cos(ny * 5.0 + t * 1.90) * 1.0 +
+          Math.cos(nz * 6.0 + t * 2.50) * Math.sin(nx * 5.5 + t * 2.10) * 0.7 +
+          Math.sin(ny * 7.0 + t * 3.00) * Math.cos(nz * 6.5 + t * 2.60) * 0.4
+        );
+        const d = d1 + d2 + d3;
 
         pos[i]     = ox + nx * d;
         pos[i + 1] = oy + ny * d;
@@ -305,7 +319,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
       // ── Roughness — stays in the glossy range ─────────────────────────
       mat.roughness = THREE.MathUtils.lerp(
         mat.roughness,
-        vs === 'idle' ? 0.04 : 0.02 + (1 - vol) * 0.03,
+        vs === 'idle' ? 0.03 : 0.015 + (1 - vol) * 0.015,
         0.04
       );
 
@@ -341,7 +355,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
   return (
     <div
       ref={mountRef}
-      style={{ width: 380, height: 380 }}
+      style={{ width: 280, height: 280 }}
       className="pointer-events-none"
     />
   );
@@ -844,7 +858,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           <motion.div
             onClick={handleOrbClick}
             className="relative flex items-center justify-center cursor-pointer select-none"
-            style={{ width: 380, height: 380 }}
+            style={{ width: 280, height: 280 }}
             animate={{ scale: sphereScale }}
             transition={{ type: 'spring', stiffness: 180, damping: 22 }}
             whileHover={{ scale: sphereScale * 1.03 }}
