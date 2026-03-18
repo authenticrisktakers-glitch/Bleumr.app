@@ -250,15 +250,19 @@ export default function App() {
 
   useEffect(() => {
     SecureStorage.get('orbit_api_key').then(key => {
-      if (key) {
-        setSecureApiKey(key);
-      } else {
-        // Fall back to .env key (dev only — never ship a key in .env to production)
-        const envKey = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
-        if (envKey) {
-          setSecureApiKey(envKey);
-          SecureStorage.set('orbit_api_key', envKey);
-        }
+      const resolvedKey = key || (import.meta.env.VITE_GROQ_API_KEY as string | undefined) || '';
+      if (resolvedKey) {
+        setSecureApiKey(resolvedKey);
+        if (!key) SecureStorage.set('orbit_api_key', resolvedKey);
+        // Auto-switch engine to cloud when an API key is available and user hasn't picked yet
+        setConfig(prev => {
+          if (prev.engine === 'local') {
+            const updated = { ...prev, engine: 'cloud' as const };
+            try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
+            return updated;
+          }
+          return prev;
+        });
       }
     });
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
@@ -1757,12 +1761,12 @@ export default function App() {
       }
       else if (part.match(/open first (\d+) (?:website|link|result)/i)) {
         const count = ScriptSanitizer.escapeForJS(RegExp.$1);
-        queue.push({ type: 'inject_script', thought: `Opening top ${count} results.`, plan: `Scan DOM for top links and call window.open.`, script: `
+        // Collect links and return them as JSON — the agent loop will open them as Bleumr tabs via IPC
+        queue.push({ type: 'inject_script', thought: `Collecting top ${count} links to open as Bleumr tabs.`, plan: `Scan DOM for top links and return their URLs.`, script: `
             const links = Array.from(document.querySelectorAll('a')).filter(a => a.href && a.href.startsWith('http') && !a.href.includes('google.com/search') && !a.href.includes('google.com/url'));
             const toOpen = links.slice(0, parseInt('${count}', 10));
-            toOpen.forEach((link, idx) => setTimeout(() => window.open(link.href, '_blank'), idx * 500));
-            return "Opened " + toOpen.length + " results in new background windows.";
-        `, desc: `Batch open ${count} tabs` });
+            return JSON.stringify({ open_urls: toOpen.map(l => l.href) });
+        `, desc: `Collect top ${count} links` });
       }
 
       // --- Writing & Editing ---
@@ -3831,8 +3835,20 @@ export default function App() {
                     result = `Execution failed: ${execError.message}`;
                 }
                 
+                // Handle open_urls payload — open URLs as Bleumr tabs instead of window.open
+                try {
+                  const parsed = JSON.parse(result);
+                  if (parsed?.open_urls && Array.isArray(parsed.open_urls)) {
+                    for (const u of parsed.open_urls.slice(0, 5)) {
+                      await createTab(u);
+                      await new Promise(r => setTimeout(r, 300));
+                    }
+                    result = `Opened ${parsed.open_urls.length} links as Bleumr tabs.`;
+                  }
+                } catch { /* not JSON — that's fine */ }
+
                 systemResult = `Script Execution: ${result}`;
-                
+
                 // Add visible code execution block to chat
                 currentMessages = [...currentMessages, {
                   id: Date.now().toString() + '-script',

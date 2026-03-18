@@ -216,7 +216,25 @@ app.whenReady().then(() => {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // DevTools: only open via View menu or keyboard shortcut, not automatically
+  // Block all popup windows from the renderer — window.open() must never open Chrome or a new Electron window.
+  // Any http/https URL is routed into a new Bleumr browser tab instead.
+  mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+    if (openUrl && (openUrl.startsWith('http://') || openUrl.startsWith('https://'))) {
+      // Route to a Bleumr tab — same behaviour as WebContentsView tabs
+      createTab(openUrl)
+    }
+    return { action: 'deny' }
+  })
+
+  // Prevent the renderer window itself from navigating away (e.g. a stray location.href assignment)
+  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    const isDevServer = devUrl && navUrl.startsWith(devUrl)
+    const isLocalFile = navUrl.startsWith('file://')
+    if (!isDevServer && !isLocalFile) {
+      event.preventDefault()
+    }
+  })
 
   // ── Auto-updater ────────────────────────────────────────────────────────────
   // Only run in production (not dev server)
