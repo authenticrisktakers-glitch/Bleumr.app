@@ -485,15 +485,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     tick();
   }, []);
 
-  // ── Fallback oscillation when no audio analyser available ─────────────────
-  const startFakeOscillation = useCallback(() => {
-    const tick = () => {
-      if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
-      setVolume(0.25 + Math.random() * 0.55);
-      volAnimRef.current = requestAnimationFrame(tick);
-    };
-    tick();
-  }, []);
+  // startFakeOscillation removed — text-only fallback is used when Deepgram unavailable
 
   // ── Start listening ────────────────────────────────────────────────────────
   const startListening = useCallback(async () => {
@@ -664,41 +656,16 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       }
     }
 
-    // ── Web Speech API fallback ─────────────────────────────────────────────
-    startFakeOscillation();
-
-    const trySpeak = () => {
-      const utter   = new SpeechSynthesisUtterance(text);
-      utter.rate    = 0.96;
-      utter.pitch   = 1.02;
-      utter.volume  = 1.0;
-      const voice = pickFemaleVoice();
-      if (voice) utter.voice = voice;
-
-      utter.onend = () => {
-        if (closedRef.current) return;   // modal closed — stop here
-        setVS('idle');
-        setVolume(0);
-        cancelAnimationFrame(volAnimRef.current);
-        setTimeout(() => {
-          if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
-        }, 700);
-      };
-      utter.onerror = () => {
-        if (closedRef.current) return;
-        setVS('idle');
-        setVolume(0);
-        cancelAnimationFrame(volAnimRef.current);
-      };
-      window.speechSynthesis.speak(utter);
-    };
-
-    if (window.speechSynthesis.getVoices().length === 0) {
-      window.speechSynthesis.addEventListener('voiceschanged', trySpeak, { once: true });
-    } else {
-      trySpeak();
-    }
-  }, [deepgramKey, startListening, startSpeakingAnalyser, startFakeOscillation, stopSpeaking]);
+    // ── No Deepgram key — text-only fallback (no broken TTS) ──────────────
+    // Response is already visible in the transcript. Just go back to idle
+    // so the user can tap to speak again. Never attempt Web Speech — it
+    // produces unreliable or silent output in Electron.
+    setVS('idle');
+    setVolume(0);
+    setTimeout(() => {
+      if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
+    }, 700);
+  }, [deepgramKey, startListening, startSpeakingAnalyser, stopSpeaking]);
 
   // ── Orb click ─────────────────────────────────────────────────────────────
   const handleOrbClick = () => {
