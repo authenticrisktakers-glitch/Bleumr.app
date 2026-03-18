@@ -506,6 +506,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
     const audioCtx  = new AudioContext();
     audioCtxRef.current = audioCtx;
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
     const source    = audioCtx.createMediaStreamSource(stream);
     const analyser  = audioCtx.createAnalyser();
     analyser.fftSize = 256;
@@ -628,6 +629,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         // Play via Web Audio so we can tap the analyser for sphere visuals
         const ctx  = new AudioContext();
         audioCtxSpkRef.current = ctx;
+        // Electron autoplay policy suspends AudioContext — must resume before decoding
+        if (ctx.state === 'suspended') await ctx.resume();
         const arrayBuf = await blob.arrayBuffer();
         const decoded  = await ctx.decodeAudioData(arrayBuf);
         const source   = ctx.createBufferSource();
