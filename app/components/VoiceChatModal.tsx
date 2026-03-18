@@ -107,7 +107,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.6;
+    renderer.toneMappingExposure = 2.2;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     el.appendChild(renderer.domElement);
 
@@ -121,38 +121,47 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
 
-    // Sky sphere — near-black but the panels are bright
+    // Sky sphere — very dark for chrome contrast
     const envScene = new THREE.Scene();
     const envGeo   = new THREE.SphereGeometry(10, 8, 6);
-    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0x000000 });
+    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0x050505 });
     envScene.add(new THREE.Mesh(envGeo, envMat));
 
-    // Top panel (simulates ceiling strip light) — bright white
+    // Top panel — large bright white (creates the main chrome highlight strip)
     const topPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(5, 1.5),
+      new THREE.PlaneGeometry(8, 2.5),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
     );
-    topPanel.position.set(0, 7, -4);
+    topPanel.position.set(0, 7, -2);
     topPanel.lookAt(0, 0, 0);
     envScene.add(topPanel);
 
-    // Left panel — warm soft
+    // Left panel — cool blue-white (secondary chrome reflection)
     const leftPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.5, 3),
-      new THREE.MeshBasicMaterial({ color: 0xccddff, side: THREE.DoubleSide })
+      new THREE.PlaneGeometry(3, 5),
+      new THREE.MeshBasicMaterial({ color: 0xddeeff, side: THREE.DoubleSide })
     );
-    leftPanel.position.set(-7, 1, -3);
+    leftPanel.position.set(-7, 1, -2);
     leftPanel.lookAt(0, 0, 0);
     envScene.add(leftPanel);
 
-    // Right panel — very dim
+    // Right panel — dim fill
     const rightPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 2),
-      new THREE.MeshBasicMaterial({ color: 0x112233, side: THREE.DoubleSide })
+      new THREE.PlaneGeometry(2, 3),
+      new THREE.MeshBasicMaterial({ color: 0x334455, side: THREE.DoubleSide })
     );
     rightPanel.position.set(7, -1, -3);
     rightPanel.lookAt(0, 0, 0);
     envScene.add(rightPanel);
+
+    // Bottom panel — ground bounce, subtle warm-silver
+    const bottomPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 3),
+      new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide })
+    );
+    bottomPanel.position.set(0, -7, -2);
+    bottomPanel.lookAt(0, 0, 0);
+    envScene.add(bottomPanel);
 
     const envTexture = pmremGenerator.fromScene(envScene as any).texture;
     scene.environment = envTexture;
@@ -163,41 +172,48 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     // Store original vertex positions for displacement
     const origPos = geo.attributes.position.array.slice() as Float32Array;
 
-    // ── PBR Black Mercury material ────────────────────────────────────────
+    // ── Silver Chrome Mercury material ─────────────────────────────────────
+    // Silver-white base with near-zero roughness for mirror-like chrome reflections.
+    // The warp dents come from vertex displacement in the animation loop.
     const mat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0x050508),
+      color: new THREE.Color(0xd0d0d8),   // silver-white base
       metalness: 1.0,
-      roughness: 0.04,
+      roughness: 0.02,                    // near-mirror for sharp chrome reflections
       clearcoat: 1.0,
-      clearcoatRoughness: 0.04,
-      envMapIntensity: 5.0,
+      clearcoatRoughness: 0.02,
+      envMapIntensity: 8.0,               // strong env reflections = chrome look
       reflectivity: 1.0,
     });
 
     const sphere = new THREE.Mesh(geo, mat);
     scene.add(sphere);
 
-    // ── Lighting (supplements env map) ───────────────────────────────────
-    // Key light — single coherent source, strong contrast for deep self-shadow
-    const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
-    keyLight.position.set(-1.8, 3.0, 2.2);
+    // ── Lighting — chrome needs strong directional contrast ──────────────
+    // Key light — sharp, bright, creates the main chrome glint
+    const keyLight = new THREE.DirectionalLight(0xffffff, 5.0);
+    keyLight.position.set(-2.0, 3.2, 2.5);
     scene.add(keyLight);
 
-    // Faint rim — barely separates silhouette from bg
-    const rimLight = new THREE.DirectionalLight(0x8899aa, 0.30);
-    rimLight.position.set(1.0, -1.5, -2.5);
+    // Fill light — cool blue-silver, from below-right
+    const fillLight = new THREE.DirectionalLight(0xaabbdd, 1.2);
+    fillLight.position.set(2.0, -1.8, 1.8);
+    scene.add(fillLight);
+
+    // Rim light — separates chrome silhouette from dark background
+    const rimLight = new THREE.DirectionalLight(0xccddff, 0.8);
+    rimLight.position.set(1.5, -1.2, -3.0);
     scene.add(rimLight);
 
-    // Near-zero ambient — dark side stays deeply shadowed
-    scene.add(new THREE.AmbientLight(0x020204, 1));
+    // Very low ambient — lets the dents stay dark for visible depth
+    scene.add(new THREE.AmbientLight(0x111114, 1));
 
-    // ── Orbiting point light — bright white, slowly orbits sphere ────────
-    const orbitLight = new THREE.PointLight(0xffffff, 4.0, 8);
+    // ── Orbiting point light — creates moving chrome glint on surface ─────
+    const orbitLight = new THREE.PointLight(0xffffff, 6.0, 8);
     scene.add(orbitLight);
 
-    // ── Accent point light — state color tints the dark surface ──────────
-    const accentLight = new THREE.PointLight(0x818cf8, 0.6, 5);
-    accentLight.position.set(0.5, 0.5, 2.2);
+    // ── Accent point light — state color tints the chrome ────────────────
+    const accentLight = new THREE.PointLight(0x818cf8, 1.2, 5);
+    accentLight.position.set(0.5, 0.5, 2.5);
     scene.add(accentLight);
 
     // ── Animation loop ────────────────────────────────────────────────────
@@ -224,27 +240,27 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
       // ── Sphere vertex displacement — strong always, explosive when speaking ─
       const pos = geo.attributes.position.array as Float32Array;
 
-      // Idle: clearly visible large rolls of liquid.
-      // Speaking: amplitude driven by real audio volume — surface heaves dramatically.
+      // Chrome warp dents — more amplitude for visible deformations.
+      // Speaking: heaves dramatically with audio volume.
       const ampBase = vs === 'idle'
-        ? 0.20
+        ? 0.28
         : vs === 'speaking'
-          ? 0.22 + vol * 0.30
+          ? 0.30 + vol * 0.38
           : vs === 'processing'
-            ? 0.18
-            : 0.20 + vol * 0.16; // listening
+            ? 0.24
+            : 0.26 + vol * 0.20; // listening
 
       for (let i = 0; i < pos.length; i += 3) {
         const ox = origPos[i], oy = origPos[i + 1], oz = origPos[i + 2];
         const len = Math.sqrt(ox * ox + oy * oy + oz * oz);
         const nx = ox / len, ny = oy / len, nz = oz / len;
 
-        // 4 low-freq harmonics — broad liquid bulges, not spiky stars
+        // 4 low-freq harmonics — broad liquid warp bulges and dents
         const d = ampBase * (
           Math.sin(nx * 1.6 + t * 0.8) * Math.cos(ny * 1.4 + t * 0.6) * 1.00 +
-          Math.sin(ny * 2.2 + t * 1.0) * Math.cos(nz * 1.9 + t * 0.75) * 0.60 +
-          Math.cos(nz * 1.3 + t * 1.2) * Math.sin(nx * 1.8 + t * 0.55) * 0.35 +
-          Math.sin(nx * 2.8 + t * 1.4) * Math.cos(ny * 2.5 + t * 1.10) * 0.18
+          Math.sin(ny * 2.2 + t * 1.0) * Math.cos(nz * 1.9 + t * 0.75) * 0.65 +
+          Math.cos(nz * 1.3 + t * 1.2) * Math.sin(nx * 1.8 + t * 0.55) * 0.40 +
+          Math.sin(nx * 2.8 + t * 1.4) * Math.cos(ny * 2.5 + t * 1.10) * 0.22
         );
 
         pos[i]     = ox + nx * d;
