@@ -266,7 +266,10 @@ export default function App() {
       }
     });
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
-    SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
+    SecureStorage.get('orbit_deepgram_key').then(key => {
+      const resolved = key || (import.meta.env.VITE_DEEPGRAM_API_KEY as string | undefined) || '';
+      if (resolved) setDeepgramKey(resolved);
+    });
 
     // Load persisted chat threads and auto-restore the most recent conversation
     const threads = loadThreadsMeta();
@@ -4300,7 +4303,7 @@ export default function App() {
                        transition={{ duration: 0.6, delay: 0.1 }}
                        className="pointer-events-none drop-shadow-[0_0_30px_rgba(99,102,241,0.3)]"
                      >
-                        <InlineStarSphere key={`sphere-${workSessionId}`} size={140} />
+                        <InlineStarSphere key={`sphere-${workSessionId}`} size={140} paused={showScheduler || showWorkspace || showSettings || showVoiceChat || appMode === 'browser'} />
                      </motion.div>
                   </motion.div>
                 )}
@@ -4662,9 +4665,10 @@ export default function App() {
                   Close
                 </button>
               ) : (
-                <MiniStarSphereButton 
+                <MiniStarSphereButton
                   onClick={() => setIsSidebarOpen(true)}
                   size={32}
+                  paused={showScheduler || showWorkspace || showSettings || showVoiceChat || appMode === 'browser'}
                 />
               )}
             </div>

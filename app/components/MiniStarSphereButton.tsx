@@ -4,14 +4,18 @@ interface MiniStarSphereButtonProps {
   onClick: () => void;
   className?: string;
   size?: number;
+  paused?: boolean;
 }
 
-export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({ 
-  onClick, 
+export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
+  onClick,
   className = '',
-  size = 36 
+  size = 36,
+  paused = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,9 +72,17 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
 
     setupCanvas();
 
+    let lastElapsedMs = 0;
+
     const render = (timestamp: number) => {
+      animationFrameId = requestAnimationFrame(render);
+      if (pausedRef.current) {
+        startTimestamp = timestamp - lastElapsedMs;
+        return;
+      }
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;
+      lastElapsedMs = elapsedMs;
 
       // Dark background matching the header
       ctx.fillStyle = '#111113';
@@ -132,8 +144,6 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
         }
         ctx.globalCompositeOperation = 'source-over';
       }
-      
-      animationFrameId = requestAnimationFrame(render);
     };
 
     animationFrameId = requestAnimationFrame(render);
