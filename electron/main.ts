@@ -193,11 +193,9 @@ app.whenReady().then(() => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      webviewTag: true,
+      sandbox: true,
       preload: join(__dirname, '../preload/index.js'),
-      // Required for Web Speech API (microphone access) to work in the renderer
-      devTools: true,
+      devTools: !app.isPackaged,
     },
   })
 
@@ -255,7 +253,23 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     // Re-create window on macOS dock click
-    app.emit('ready')
+    app.whenReady().then(() => {
+      loadStore()
+      mainWindow = new BrowserWindow({
+        width: 1400, height: 900, minWidth: 900, minHeight: 600,
+        backgroundColor: '#000000', titleBarStyle: 'hiddenInset',
+        webPreferences: {
+          contextIsolation: true, nodeIntegration: false, sandbox: true,
+          preload: join(__dirname, '../preload/index.js'), devTools: !app.isPackaged,
+        },
+      })
+      if (process.env['ELECTRON_RENDERER_URL']) {
+        mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+      } else {
+        mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+      }
+      mainWindow.on('closed', () => { mainWindow = null })
+    })
   }
 })
 
@@ -413,8 +427,39 @@ ipcMain.handle('orbit:system:info', () => ({
   node: process.versions.node,
 }))
 
-// Filesystem
+// Filesystem — path-restricted to safe user directories only
+const BLOCKED_PATH_PATTERNS = [
+  /\/\.ssh\//i, /\\\.ssh\\/i,
+  /\/\.aws\//i, /\\\.aws\\/i,
+  /\/\.gnupg\//i,
+  /\/Keychains\//i,
+  /\/keychain/i,
+  /\/etc\//i,
+  /^\/System\//i,
+  /^\/private\/etc\//i,
+  /^\/Library\/Security/i,
+  /id_rsa/i, /id_ed25519/i, /id_ecdsa/i,
+]
+
+function isPathAllowed(filePath: string): boolean {
+  const allowed = [
+    app.getPath('userData'),
+    app.getPath('documents'),
+    app.getPath('desktop'),
+    app.getPath('downloads'),
+    app.getPath('home'),
+  ]
+  const norm = filePath.replace(/\\/g, '/')
+  const inAllowed = allowed.some(dir => norm.startsWith(dir.replace(/\\/g, '/')))
+  if (!inAllowed) return false
+  return !BLOCKED_PATH_PATTERNS.some(p => p.test(filePath))
+}
+
 ipcMain.handle('orbit:fs:readFile', (_e, filePath: string) => {
+  if (!isPathAllowed(filePath)) {
+    console.warn('[FS] Blocked read attempt:', filePath)
+    return null
+  }
   try {
     return readFileSync(filePath, 'utf-8')
   } catch {
@@ -423,6 +468,10 @@ ipcMain.handle('orbit:fs:readFile', (_e, filePath: string) => {
 })
 
 ipcMain.handle('orbit:fs:writeFile', (_e, filePath: string, content: string) => {
+  if (!isPathAllowed(filePath)) {
+    console.warn('[FS] Blocked write attempt:', filePath)
+    return { success: false, reason: 'Path not permitted' }
+  }
   try {
     writeFileSync(filePath, content, 'utf-8')
     return { success: true }
@@ -432,6 +481,10 @@ ipcMain.handle('orbit:fs:writeFile', (_e, filePath: string, content: string) => 
 })
 
 ipcMain.handle('orbit:fs:listDir', (_e, dirPath: string) => {
+  if (!isPathAllowed(dirPath)) {
+    console.warn('[FS] Blocked listDir attempt:', dirPath)
+    return []
+  }
   try {
     return readdirSync(dirPath)
   } catch {
@@ -439,9 +492,10 @@ ipcMain.handle('orbit:fs:listDir', (_e, dirPath: string) => {
   }
 })
 
-ipcMain.handle('orbit:fs:checkFileExists', (_e, filePath: string) =>
-  existsSync(filePath),
-)
+ipcMain.handle('orbit:fs:checkFileExists', (_e, filePath: string) => {
+  if (!isPathAllowed(filePath)) return false
+  return existsSync(filePath)
+})
 
 // Auto-update: install now and restart
 ipcMain.handle('bleumr:update:install', () => {

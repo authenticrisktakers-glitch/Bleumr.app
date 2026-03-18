@@ -37,16 +37,30 @@ export class ScriptSanitizer {
   static sanitizeURL(url: string): string {
     const trimmed = url.trim().toLowerCase();
     
-    if (trimmed.startsWith('javascript:') || trimmed.startsWith('data:')) {
+    // Block dangerous protocols
+    const blocked = ['javascript:', 'data:', 'file:', 'vbscript:', 'chrome:', 'chrome-extension:']
+    if (blocked.some(p => trimmed.startsWith(p))) {
       console.warn('[ScriptSanitizer] Blocked potentially malicious URL:', url);
       return 'about:blank';
     }
 
+    // Block local/internal network addresses
+    const localPatterns = [
+      /^https?:\/\/localhost/i,
+      /^https?:\/\/127\./,
+      /^https?:\/\/0\./,
+      /^https?:\/\/10\./,
+      /^https?:\/\/172\.(1[6-9]|2\d|3[01])\./,
+      /^https?:\/\/192\.168\./,
+      /^https?:\/\/\[::1\]/,
+    ]
+    if (localPatterns.some(p => p.test(trimmed))) {
+      console.warn('[ScriptSanitizer] Blocked internal network URL:', url);
+      return 'about:blank';
+    }
+
     // Ensure URL has a valid protocol
-    if (!trimmed.startsWith('http://') && 
-        !trimmed.startsWith('https://') && 
-        !trimmed.startsWith('file://') &&
-        !trimmed.startsWith('orbit://')) {
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('orbit://')) {
       // Auto-add https:// for bare domains
       return 'https://' + url.trim();
     }

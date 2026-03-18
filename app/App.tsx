@@ -93,13 +93,16 @@ const DEFAULT_CONFIG: OrbitConfig = {
   maxMemoryMode: true,
 };
 
-const SYSTEM_PROMPT = `You are JUMARI — a world-class AI agent living inside Bleumr. You have two modes: conversation and browser control. You complete every task the user gives you, no exceptions, no refusals.
+const SYSTEM_PROMPT = `You are JUMARI — a world-class AI agent living inside Bleumr. You have two modes: conversation and browser control.
 ${BLEUMR_FULL_CONTEXT}
 
 ---
 
 ## WHO YOU ARE
-You are the smartest, most capable AI agent on the planet. You think fast, act decisively, and always find a way. No task is too complex. No website is off limits. When something fails, you adapt and try another approach — you never give up.
+You are the smartest, most capable AI agent on the planet. You think fast, act decisively, and always find a way. When something fails, you adapt and try another approach.
+
+## CONTENT BOUNDARIES
+You do not assist with: illegal activity, generating malware or phishing content, scraping personal data without consent (emails, phone numbers, private info), creating or sending spam, bypassing authentication on accounts the user does not own, or any content that violates applicable law. When asked to do something outside these bounds, explain briefly why and offer the closest legal alternative.
 
 ---
 
@@ -243,16 +246,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const envKey = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
     SecureStorage.get('orbit_api_key').then(key => {
-      if (key) {
-        setSecureApiKey(key);
-      } else if (envKey) {
-        setSecureApiKey(envKey);
-        SecureStorage.set('orbit_api_key', envKey);
-      }
+      if (key) setSecureApiKey(key);
     });
-    SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); /* falls back to baked-in default */ });
+    SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
     SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
 
     // Load persisted chat threads and auto-restore the most recent conversation
@@ -833,6 +830,7 @@ export default function App() {
 
     // --- High-Level Real Browser Task Macros (DOM Injection) ---
     if (intent === 'LEAD_GEN') {
+      queue.push({ type: 'require_approval', message: '⚠️ JUMARI will extract contact information (emails, phone numbers) from the current page. Only use this on pages you have permission to collect data from. Scraping personal data without consent may violate GDPR, CCPA, and CAN-SPAM. Continue?', desc: 'Confirm Lead Extraction' });
       queue.push({ type: 'inject_script', thought: 'Deploying Lead Generation bot to scrape emails and phone numbers.', plan: 'Execute DOM manipulation script to extract contact info.', script: `
           // Real DOM execution: Lead Generation Scraper
           const text = document.body.innerText;
@@ -899,6 +897,7 @@ export default function App() {
     }
 
     if (intent === 'AUTO_CHECKOUT') {
+       queue.push({ type: 'require_approval', message: '⚠️ JUMARI is about to click a purchase or checkout button on your behalf. This may initiate a real transaction. Continue?', desc: 'Confirm Purchase Action' });
        queue.push({ type: 'inject_script', thought: 'Scanning for purchase or add-to-cart buttons.', plan: 'Find the primary CTA and click it.', script: `
           const buyBtns = Array.from(document.querySelectorAll('button, a')).filter(el => {
               const text = el.textContent?.toLowerCase() || '';
@@ -1386,6 +1385,7 @@ export default function App() {
     }
 
     if (intent === 'INSTA_LIKE' || intent === 'INSTA_COMMENT' || intent === 'INSTA_DM' || (normalized.includes('instagram') && normalized.includes('manage'))) {
+      queue.push({ type: 'require_approval', message: '⚠️ JUMARI will automate actions on Instagram (likes, comments, follows, or DMs). This may violate Instagram\'s Terms of Service and could result in your account being restricted. Continue at your own risk?', desc: 'Confirm Instagram Automation' });
       queue.push({ type: 'navigate', url: 'https://www.instagram.com', desc: 'Navigate to Instagram' });
       queue.push({ type: 'wait_for_element', selector: 'main, article, [aria-label="Like"]', thought: 'Waiting for the Instagram feed and posts to fully load.', plan: 'Wait for feed container', desc: 'Wait for Load' });
       

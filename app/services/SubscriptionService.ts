@@ -84,19 +84,8 @@ class SubscriptionService {
   // ── License key validation ──────────────────────────────────────────────────
 
   async validateLicenseKey(key: string): Promise<SubscriptionTier | null> {
-    // If Supabase isn't set up yet, any key starting with "PRO-" returns pro,
-    // "STELLUR-" returns stellur. Replace this logic after Supabase is live.
-    // ── Dev / admin override keys (remove before public launch) ────────────
-    const DEV_KEYS: Record<string, SubscriptionTier> = {
-      'ORBIT-ADMIN-STELLUR-7X9K': 'stellur',
-      'ORBIT-ADMIN-PRO-3M2N': 'pro',
-    };
-    const upper = key.trim().toUpperCase();
-    if (DEV_KEYS[upper]) return DEV_KEYS[upper];
-
     if (SUPABASE_VALIDATE_URL.includes('REPLACE_WITH_YOUR_PROJECT')) {
-      if (upper.startsWith('STELLUR-')) return 'stellur';
-      if (upper.startsWith('PRO-')) return 'pro';
+      // License server not configured — all keys rejected until Supabase is live
       return null;
     }
 
