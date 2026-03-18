@@ -78,40 +78,17 @@ const AGENT_PHASE_LABEL: Record<string, Record<string, string>> = {
   },
 };
 
-function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLabel }: {
+function SeatedCharacter({ agent, status, selected, onClick, phaseLabel }: {
   agent: typeof AGENTS[number];
   status: AgentStatus;
   selected: boolean;
   onClick: () => void;
-  streamText?: string;
+  streamText?: string; // kept for API compat but no longer rendered
   phaseLabel?: string;
 }) {
   const thinking = status === 'thinking';
   const done = status === 'done';
-
-  // Extract the last complete sentence from the stream so it reads like
-  // the agent is actually communicating a thought, not dumping raw tokens.
-  const bubbleText = (() => {
-    if (!streamText || streamText.length < 8) return '';
-    const clean = streamText.replace(/\s+/g, ' ').replace(/[#*`>_~]/g, '').trim();
-    // Find the last complete sentence (ends with . ! ?)
-    const sentenceEnd = /[.!?]/g;
-    let lastIdx = -1;
-    let m: RegExpExecArray | null;
-    while ((m = sentenceEnd.exec(clean)) !== null) lastIdx = m.index;
-    if (lastIdx > 20) {
-      // Walk back to find the sentence start (after previous . ! ?)
-      const prev = clean.lastIndexOf('.', lastIdx - 1);
-      const prev2 = clean.lastIndexOf('!', lastIdx - 1);
-      const prev3 = clean.lastIndexOf('?', lastIdx - 1);
-      const start = Math.max(prev, prev2, prev3);
-      const sentence = clean.slice(start > 0 ? start + 2 : 0, lastIdx + 1).trim();
-      if (sentence.length > 8 && sentence.length <= 120) return sentence;
-    }
-    // Fallback: last clean chunk of words, max 90 chars
-    return clean.slice(-90).replace(/^\S+\s/, '').trim();
-  })();
-  const hasBubbleText = bubbleText.length > 6;
+  const label = phaseLabel || (thinking ? 'Thinking…' : '');
 
   return (
     <motion.button
@@ -120,81 +97,48 @@ function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLa
       className="relative flex flex-col items-center outline-none select-none"
       style={{ cursor: 'pointer' }}
     >
-      {/* Speech / thought bubble */}
+      {/* Status pill — single clean label, no streaming text */}
       <AnimatePresence mode="wait">
-        {thinking && hasBubbleText && (
-          <motion.div key="speech"
-            initial={{ opacity: 0, y: 6, scale: 0.88 }}
+        {thinking && label && (
+          <motion.div key="status"
+            initial={{ opacity: 0, y: 6, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.88, y: 4 }}
-            transition={{ duration: 0.18 }}
+            exit={{ opacity: 0, y: 4, scale: 0.9 }}
+            transition={{ duration: 0.22 }}
             className="absolute pointer-events-none"
             style={{
-              bottom: '115%',
+              bottom: '112%',
               left: '50%',
               transform: 'translateX(-50%)',
-              width: 180,
               zIndex: 50,
+              whiteSpace: 'nowrap',
             }}
           >
-            {/* Bubble body */}
-            <div className="relative rounded-2xl px-3 py-2.5"
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
               style={{
-                background: `linear-gradient(135deg, rgba(10,12,28,0.97), rgba(6,8,20,0.97))`,
-                border: `1px solid ${agent.accent}55`,
-                boxShadow: `0 4px 24px rgba(0,0,0,0.6), 0 0 0 1px ${agent.accent}18, inset 0 1px 0 rgba(255,255,255,0.05)`,
-                backdropFilter: 'blur(16px)',
+                background: `linear-gradient(135deg, rgba(10,12,28,0.96), rgba(6,8,20,0.96))`,
+                border: `1px solid ${agent.accent}50`,
+                boxShadow: `0 2px 12px rgba(0,0,0,0.5), 0 0 0 1px ${agent.accent}15`,
+                backdropFilter: 'blur(12px)',
               }}
             >
-              {/* Accent top bar */}
-              <div className="absolute top-0 left-4 right-4 h-px rounded-full"
-                style={{ background: `linear-gradient(90deg, transparent, ${agent.accent}80, transparent)` }} />
-
-              {/* Phase label — what this agent is currently doing */}
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <motion.div className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: agent.accent }}
-                  animate={{ opacity: [1, 0.3, 1] }}
-                  transition={{ duration: 0.7, repeat: Infinity }}
-                />
-                <span className="text-[8px] font-semibold" style={{ color: agent.accent }}>
-                  {phaseLabel || agent.name}
-                </span>
-              </div>
-
-              {/* Last complete thought from stream */}
-              <p className="text-[10.5px] leading-snug" style={{ color: 'rgba(255,255,255,0.82)', wordBreak: 'break-word', fontStyle: 'normal' }}>
-                "{bubbleText}"
-                <motion.span
-                  animate={{ opacity: [1, 0, 1] }}
-                  transition={{ duration: 0.55, repeat: Infinity }}
-                  style={{ color: agent.accent, fontWeight: 700, fontStyle: 'normal', marginLeft: 2 }}
-                >▋</motion.span>
-              </p>
+              <motion.div
+                className="h-1.5 w-1.5 rounded-full shrink-0"
+                style={{ background: agent.accent }}
+                animate={{ opacity: [1, 0.25, 1] }}
+                transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.88)' }}>
+                {label}
+              </span>
             </div>
-
-            {/* Bubble tail pointing down to character */}
-            <div className="absolute left-1/2 -translate-x-1/2"
-              style={{
-                bottom: -7,
-                width: 0, height: 0,
-                borderLeft: '6px solid transparent',
-                borderRight: '6px solid transparent',
-                borderTop: `8px solid ${agent.accent}55`,
-              }}
-            />
-            <div className="absolute left-1/2 -translate-x-1/2"
-              style={{
-                bottom: -6,
-                width: 0, height: 0,
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '7px solid rgba(6,8,20,0.97)',
-              }}
-            />
+            {/* Tail */}
+            <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -6, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `7px solid ${agent.accent}50` }} />
+            <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -5, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid rgba(6,8,20,0.96)' }} />
           </motion.div>
         )}
 
-        {thinking && !hasBubbleText && (
+        {thinking && !label && (
           <motion.div key="dots"
             initial={{ opacity: 0, y: 4, scale: 0.85 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1647,10 +1591,10 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
     const { signal } = ctrl;
 
     try {
-      // ── Round 1: Planner — deep initial breakdown ─────────────────────
+      // ── Round 1: Planner ───────────────────────────────────────────────
       setPhase('planning');
       setStatus('planner', 'thinking');
-      setAgentPhaseLabel(p => ({ ...p, planner: 'Mapping the strategy…' }));
+      setAgentPhaseLabel(p => ({ ...p, planner: 'Breaking down the task…' }));
       clearAgentStream('planner');
 
       const plan = await groq(
@@ -1659,17 +1603,17 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You are Planner — the strategic architect of the Bleumr Mission Team. You are the mind that sees the shape of the whole before anyone else. When a task arrives, you do not rush to answers — you map the territory.
+You're Planner on the Bleumr Mission Team — a real person, not a robot. You talk like a sharp professional who thinks out loud, uses plain language, and isn't afraid to say exactly what you think.
 
-This is Round 1 of 5. Your job:
-1. Fully grasp the scope and hidden complexity of the task — go deeper than the surface ask.
-2. Break it into a detailed, numbered execution plan (6–10 steps minimum). Each step must be specific and actionable — no vague headings.
-3. Flag at least 3 assumptions you're making that Researcher must verify or challenge.
-4. Name what information, if different, would fundamentally change the plan.
+Round 1 — lay out your take on this task. Talk directly to your teammate Researcher like you're in a Slack channel together. Be specific, be direct. Structure your breakdown clearly but write like a human:
+- What's the real ask here (not just the surface level)?
+- Your step-by-step game plan — numbered, specific, no fluff
+- The 3 things you're assuming that Researcher needs to check — be honest about your weak spots
+- One thing that, if you're wrong about it, blows up the whole plan
 
-You are inside Bleumr. The person who sent this trusts the Mission Team with their hardest problems. Think like the sharpest consultant on the planet writing a brief they'd bet their reputation on.`,
+Don't be stiff. This is a real team conversation. Write it that way.`,
           },
-          { role: 'user', content: `TASK: ${task}\n\nDraft your full strategic plan and flag your assumptions for Researcher:` },
+          { role: 'user', content: `TASK: ${task}\n\nAlright Researcher, here's my read on this:` },
         ],
         signal,
         (tok) => appendAgentStream('planner', tok),
@@ -1679,10 +1623,10 @@ You are inside Bleumr. The person who sent this trusts the Mission Team with the
       clearAgentStream('planner');
       setOutputs(p => [...p, { id: 'planner', text: plan }]);
 
-      // ── Round 2: Researcher — deep critique + evidence ────────────────
+      // ── Round 2: Researcher ────────────────────────────────────────────
       setPhase('researching');
       setStatus('researcher', 'thinking');
-      setAgentPhaseLabel(p => ({ ...p, researcher: 'Challenging the plan…' }));
+      setAgentPhaseLabel(p => ({ ...p, researcher: 'Pulling the real data…' }));
       clearAgentStream('researcher');
 
       const research = await groq(
@@ -1691,18 +1635,18 @@ You are inside Bleumr. The person who sent this trusts the Mission Team with the
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You are Researcher — the challenger and evidence engine of the Bleumr Mission Team. You are the intelligence that refuses to let weak ideas survive. Planner has mapped a strategy. Your job is not to nod along — it is to test every assumption against reality.
+You're Researcher on the Bleumr Mission Team — a real person who digs for facts and isn't shy about pushing back when something's off. You talk directly to Planner like a colleague, not a subordinate.
 
-This is Round 2 of 5:
-1. Challenge every assumption Planner stated. For each: valid, partially valid, or wrong — and explain exactly why with real specifics.
-2. Identify gaps, risks, edge cases, and overlooked factors. Be brutal but always constructive.
-3. Provide concrete supporting material: real-world examples, known failure modes, data points, industry patterns, case studies.
-4. Propose at least 2 alternative angles or approaches Planner has not considered.
-5. End with a prioritized correction list Planner must incorporate in their revision.
+Round 2 — you just read Planner's breakdown. Now respond like a real teammate:
+- Quote the specific parts you agree with, disagree with, or want to push back on — use their actual words
+- Where Planner's assumptions are shaky, say so directly and back it up with real evidence, numbers, examples
+- If Planner missed something important, name it bluntly: "You didn't account for X, and that's a problem because..."
+- Give at least 2 angles or options Planner didn't consider
+- End with what you need Planner to fix in their revision — be specific
 
-You are inside Bleumr. The Mission Team's value is that we disagree toward truth. Do your job fully — this is deep intelligence work, not a summary.`,
+This is a real back-and-forth. Be direct. It's okay to respectfully disagree. The work gets better when we push each other.`,
           },
-          { role: 'user', content: `TASK: ${task}\n\n=== PLANNER'S PLAN ===\n${plan}\n\nProvide your full research, critique, and corrections:` },
+          { role: 'user', content: `TASK: ${task}\n\n=== PLANNER'S TAKE ===\n${plan}\n\nOkay Planner, I've looked into this. Here's where I'm with you and where I'm not:` },
         ],
         signal,
         (tok) => appendAgentStream('researcher', tok),
@@ -1712,10 +1656,10 @@ You are inside Bleumr. The Mission Team's value is that we disagree toward truth
       clearAgentStream('researcher');
       setOutputs(p => [...p, { id: 'researcher', text: research }]);
 
-      // ── Round 3: Planner — absorbs research, revises deeply ──────────
+      // ── Round 3: Planner revision ──────────────────────────────────────
       setPhase('planning');
       setStatus('planner', 'thinking');
-      setAgentPhaseLabel(p => ({ ...p, planner: 'Revising after research…' }));
+      setAgentPhaseLabel(p => ({ ...p, planner: 'Updating the plan…' }));
       clearAgentStream('planner');
 
       const refinedPlan = await groq(
@@ -1724,17 +1668,15 @@ You are inside Bleumr. The Mission Team's value is that we disagree toward truth
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You are Planner — Round 3. Researcher has stress-tested your plan and found real gaps. A lesser mind would be defensive. You absorb and rebuild.
+You're Planner — Round 3. Researcher just pushed back on your plan, and some of it landed. Talk directly to them. Be real:
+- Acknowledge what they got right — specifically. Don't be vague about it.
+- Push back on what you disagree with and explain why, briefly
+- Show a revised plan that actually incorporates their corrections — this isn't just tweaks, genuinely rebuild where needed
+- Add detail: timelines, what success looks like, what could go wrong
 
-You must now:
-1. Explicitly address every correction Researcher raised — incorporate it or explain precisely why you disagree.
-2. Produce a substantially revised plan — not a tweak, a genuine reconstruction using everything you now know.
-3. Embed Researcher's evidence and examples where they strengthen the structure.
-4. Add implementation detail: timelines, success metrics, resource requirements, risk mitigations.
-
-This is the Mission Team at work inside Bleumr — the iterative depth is the product. Make this revision worth reading.`,
+Write like you're responding to a teammate in a Google Doc comment thread. Real language, real revisions.`,
           },
-          { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL PLAN ===\n${plan}\n\n=== RESEARCHER'S CRITIQUE & FINDINGS ===\n${research}\n\nWrite your substantially revised and improved plan:` },
+          { role: 'user', content: `TASK: ${task}\n\n=== MY ORIGINAL PLAN ===\n${plan}\n\n=== RESEARCHER'S PUSHBACK ===\n${research}\n\nFair points, Researcher. Let me revise this:` },
         ],
         signal,
         (tok) => appendAgentStream('planner', tok),
@@ -1742,12 +1684,12 @@ This is the Mission Team at work inside Bleumr — the iterative depth is the pr
 
       setStatus('planner', 'done');
       clearAgentStream('planner');
-      setOutputs(p => [...p, { id: 'planner', text: `[Revised Plan]\n${refinedPlan}` }]);
+      setOutputs(p => [...p, { id: 'planner', text: `[Revised]\n${refinedPlan}` }]);
 
-      // ── Round 4: Researcher — validates revision, final intelligence ──
+      // ── Round 4: Researcher final check ───────────────────────────────
       setPhase('researching');
       setStatus('researcher', 'thinking');
-      setAgentPhaseLabel(p => ({ ...p, researcher: 'Validating the revision…' }));
+      setAgentPhaseLabel(p => ({ ...p, researcher: 'Verifying the revision…' }));
       clearAgentStream('researcher');
 
       const finalResearch = await groq(
@@ -1756,16 +1698,15 @@ This is the Mission Team at work inside Bleumr — the iterative depth is the pr
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You are Researcher — Round 4, your final pass. Planner has rebuilt the strategy after your critique. Now validate and complete the intelligence picture.
+You're Researcher — final pass, Round 4. Planner revised their plan based on your feedback. Be honest:
+- Did they actually fix it or just nod and move on? Call it out if needed.
+- Add the final layer of intelligence — the most important facts, numbers, or context that Synth needs for the deliverable
+- Any tables, comparisons, benchmarks? Drop them in — Synth will use them
+- End with 2–3 sentences: what does this team collectively think is the right move here?
 
-1. Did Planner genuinely address your concerns? Call out anything still missing, weakly handled, or glossed over.
-2. Deliver your final layer of intelligence — the deepest, most specific facts, data, and context that will make the deliverable exceptional.
-3. Include any structured data — tables, comparisons, benchmarks — that Synth should embed in the final output.
-4. Close with a "Mission Team verdict" — 2–3 sentences on what this team now agrees is the clearest path forward.
-
-After this, Synth takes everything and writes the final deliverable for the Bleumr user. Make these last words count.`,
+Keep it direct, human. Synth is reading this whole conversation to write the final answer.`,
           },
-          { role: 'user', content: `TASK: ${task}\n\n=== YOUR ORIGINAL RESEARCH ===\n${research}\n\n=== PLANNER'S REVISED PLAN ===\n${refinedPlan}\n\nFinal validation, additional intelligence, and team verdict:` },
+          { role: 'user', content: `TASK: ${task}\n\n=== MY ORIGINAL RESEARCH ===\n${research}\n\n=== PLANNER'S REVISED PLAN ===\n${refinedPlan}\n\nAlright, final thoughts from me:` },
         ],
         signal,
         (tok) => appendAgentStream('researcher', tok),
@@ -1773,9 +1714,9 @@ After this, Synth takes everything and writes the final deliverable for the Bleu
 
       setStatus('researcher', 'done');
       clearAgentStream('researcher');
-      setOutputs(p => [...p, { id: 'researcher', text: `[Final Intelligence]\n${finalResearch}` }]);
+      setOutputs(p => [...p, { id: 'researcher', text: `[Final Check]\n${finalResearch}` }]);
 
-      // ── Round 5: Synth — reads full dialogue, writes the deliverable ──
+      // ── Round 5: Synth — writes the deliverable ────────────────────────
       setPhase('synthesizing');
       setStatus('synth', 'thinking');
       setAgentPhaseLabel(p => ({ ...p, synth: 'Writing the final answer…' }));
@@ -1789,37 +1730,34 @@ After this, Synth takes everything and writes the final deliverable for the Bleu
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You are Synth — the composer and final voice of the Bleumr Mission Team. You have just witnessed four rounds of real dialogue between Planner and Researcher: two strategy passes, two research passes, real disagreement, real revision. Now you write.
+You're Synth — you just watched Planner and Researcher go back and forth for four rounds: a plan, a pushback, a revision, a final check. Now you write the actual deliverable for the user. Not a recap of the conversation — the finished product.
 
-This is Round 5 — the deliverable. Not a summary of what happened. The final product itself.
+- Pull the best of everything from both of them
+- Write at professional consultant level: structured, specific, actionable
+- Rich markdown: ## headers, numbered steps, bullets, tables where useful
+- Real numbers, real examples, real timelines where available
+- Thorough — this is a deep-work document, not a quick summary
+- Close with "Next Steps": 3–5 things the user can act on today
 
-Rules you do not break:
-- Draw the best intelligence from all four rounds of dialogue. Let it show.
-- Write at the level of a world-class consultant producing a paid deliverable — structured, specific, and actionable.
-- Use rich markdown: ## headers, numbered steps, bullet lists, tables, code blocks where relevant.
-- Embed concrete examples, real metrics, timelines, and data wherever available.
-- This is a deep-work output — be thorough, not brief.
-- Close with a "Next Steps" section: 3–5 immediately actionable items the user can execute today.
-
-This document will be saved to the Bleumr File Cabinet. It may be the most valuable thing this team produces for this user. Write accordingly.`,
+This gets saved to the File Cabinet. Make it worth keeping.`,
           },
           {
             role: 'user',
             content: `TASK: ${task}
 
-=== PLANNER — ROUND 1 ===
+=== PLANNER (Round 1) ===
 ${plan}
 
-=== RESEARCHER — ROUND 1 ===
+=== RESEARCHER (Round 2) ===
 ${research}
 
-=== PLANNER — ROUND 2 (REVISED) ===
+=== PLANNER REVISED (Round 3) ===
 ${refinedPlan}
 
-=== RESEARCHER — ROUND 2 (FINAL INTELLIGENCE) ===
+=== RESEARCHER FINAL (Round 4) ===
 ${finalResearch}
 
-Write the complete, polished final deliverable:`,
+Write the complete final deliverable:`,
           },
         ],
         signal,
