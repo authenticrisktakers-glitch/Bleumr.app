@@ -611,6 +611,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     // ── Deepgram Aura path ──────────────────────────────────────────────────
     if (deepgramKey) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
         const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-asteria-en', {
           method: 'POST',
           headers: {
@@ -618,7 +620,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ text }),
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
 
         if (!res.ok) throw new Error(`Deepgram TTS error ${res.status}`);
 
@@ -654,20 +658,22 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
         return; // success — skip Web Speech fallback
       } catch (err) {
-        console.warn('Deepgram TTS failed, falling back to Web Speech:', err);
+        console.warn('Deepgram TTS failed — text fallback:', err);
         stopSpeaking();
+        // Fall through to text-only fallback below
       }
     }
 
-    // ── No Deepgram key — text-only fallback (no broken TTS) ──────────────
-    // Response is already visible in the transcript. Just go back to idle
-    // so the user can tap to speak again. Never attempt Web Speech — it
-    // produces unreliable or silent output in Electron.
-    setVS('idle');
-    setVolume(0);
-    setTimeout(() => {
-      if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
-    }, 700);
+    // ── Text-only fallback — Deepgram unavailable or timed out ────────────
+    // Response is already visible in the transcript. Return to idle so
+    // the user can tap to speak again.
+    if (!closedRef.current) {
+      setVS('idle');
+      setVolume(0);
+      setTimeout(() => {
+        if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
+      }, 700);
+    }
   }, [deepgramKey, startListening, startSpeakingAnalyser, stopSpeaking]);
 
   // ── Orb click ─────────────────────────────────────────────────────────────
@@ -743,14 +749,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       >
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <motion.div
-              className="w-2 h-2 rounded-full"
-              animate={isActive ? { opacity: [1, 0.4, 1] } : { opacity: 1 }}
-              transition={{ duration: 1.4, repeat: Infinity }}
-              style={{ background: isActive ? '#34d399' : '#374151', boxShadow: isActive ? '0 0 8px rgba(52,211,153,0.8)' : 'none' }} />
-            <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>Voice Chat</span>
-          </div>
+          <div />
           <div className="flex items-center gap-2">
             <button onClick={clearConversation}
               className="p-2 rounded-xl transition-colors hover:bg-white/8"
@@ -811,7 +810,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         </div>
 
         {/* ── Mercury sphere — centered in the void ─────────────────────────── */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
 
           {/* Status */}
           <AnimatePresence mode="wait">
@@ -827,7 +826,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           {/* Void container — click target wraps the sphere */}
           <motion.div
             onClick={handleOrbClick}
-            className="relative flex items-center justify-center cursor-pointer select-none"
+            className="relative flex items-center justify-center cursor-pointer select-none pointer-events-auto"
             style={{ width: 280, height: 280 }}
             animate={{ scale: sphereScale }}
             transition={{ type: 'spring', stiffness: 180, damping: 22 }}
