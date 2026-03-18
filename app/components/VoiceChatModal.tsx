@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, X, Volume2, VolumeX, RotateCcw } from 'lucide-react';
+import { X, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { BLEUMR_VOICE_CONTEXT } from '../services/BleumrLore';
 import * as THREE from 'three';
 
@@ -884,11 +884,6 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             {/* State icon overlay — centered on sphere */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <AnimatePresence mode="wait">
-                {voiceState === 'idle' && (
-                  <motion.div key="mic" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
-                    <Mic className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.45)', filter: 'drop-shadow(0 0 6px rgba(148,130,255,0.5))' }} />
-                  </motion.div>
-                )}
                 {voiceState === 'listening' && (
                   <motion.div key="rec" initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}>
                     <motion.div className="w-4 h-4 rounded-full"
