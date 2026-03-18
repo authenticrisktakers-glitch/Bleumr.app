@@ -9,9 +9,9 @@ export interface Tab {
 }
 
 export function useBrowserEngine(webviewRefs?: MutableRefObject<{ [key: string]: any }>) {
-  const [tabs, setTabs] = useState<Tab[]>([{ id: 'tab-1', url: 'orbit://home', title: 'Bleumr Home' }]);
-  const [activeTabId, setActiveTabId] = useState('tab-1');
-  const [currentUrl, setCurrentUrl] = useState('orbit://home');
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [activeTabId, setActiveTabId] = useState('');
+  const [currentUrl, setCurrentUrl] = useState('');
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
   const initRef = useRef(false);
 
@@ -76,18 +76,28 @@ export function useBrowserEngine(webviewRefs?: MutableRefObject<{ [key: string]:
 
   const createTab = useCallback(async (url: string) => {
     const sanitizedUrl = ScriptSanitizer.sanitizeURL(url);
-    const newTabId = `tab-${Date.now()}`;
-    const newTab: Tab = {
-      id: newTabId,
-      url: sanitizedUrl,
-      title: 'Loading...',
-    };
 
+    if ((window as any).orbit?.browser) {
+      // In Electron: let main create the tab and return its real tabId.
+      // The renderer MUST use that same ID for all subsequent IPC calls
+      // (navigate, executeJS, etc.) — using a renderer-generated ID breaks
+      // the main-process tabs Map lookup.
+      const result = await (window as any).orbit.browser.open(sanitizedUrl);
+      if (!result?.success || !result.tabId) return null;
+      const mainTabId: string = result.tabId;
+      const newTab: Tab = { id: mainTabId, url: sanitizedUrl, title: 'Loading...' };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(mainTabId);
+      setCurrentUrl(sanitizedUrl);
+      return mainTabId;
+    }
+
+    // Non-Electron fallback (dev preview)
+    const newTabId = `tab-${Date.now()}`;
+    const newTab: Tab = { id: newTabId, url: sanitizedUrl, title: 'Loading...' };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTabId);
     setCurrentUrl(sanitizedUrl);
-
-    await BrowserService.createTab(newTabId, sanitizedUrl);
     return newTabId;
   }, []);
 
@@ -97,11 +107,9 @@ export function useBrowserEngine(webviewRefs?: MutableRefObject<{ [key: string]:
     setTabs(prev => {
       const filtered = prev.filter(t => t.id !== tabId);
       if (filtered.length === 0) {
-        // Always keep at least one tab
-        const homeTab: Tab = { id: 'tab-home', url: 'orbit://home', title: 'Bleumr Home' };
-        setActiveTabId(homeTab.id);
-        setCurrentUrl(homeTab.url);
-        return [homeTab];
+        setActiveTabId('');
+        setCurrentUrl('');
+        return [];
       }
       
       // If closing active tab, switch to the last tab
