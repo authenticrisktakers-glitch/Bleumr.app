@@ -6,8 +6,6 @@ interface InlineStarSphereProps {
   size?: number;
   /** When false, renders a tiny static grey dot — no canvas, no RAF loop */
   active?: boolean;
-  /** When true, freezes animation on last frame without unmounting */
-  paused?: boolean;
 }
 
 // Star count scales with rendered size AND cpu tier — no reason to run
@@ -23,12 +21,9 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
   className = '',
   size = 192,
   active = true,
-  paused = false,
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pausedRef = useRef(paused);
-  pausedRef.current = paused; // always in sync without re-running effect
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -78,20 +73,16 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
 
     let animationFrameId: number;
     let isVisible = true; // assume visible until observer says otherwise
-    let lastElapsedMs = 0; // saved elapsed so rotation doesn't jump on resume
 
     const render = (timestamp: number) => {
-      animationFrameId = requestAnimationFrame(render);
-      // Skip draw when off-screen OR page is inactive — freeze on last frame
-      if (!isVisible || pausedRef.current) {
-        // Advance the virtual origin so time picks up seamlessly on resume
-        startTimestamp = timestamp - lastElapsedMs;
+      if (!isVisible) {
+        // Pause rendering when out of viewport — just reschedule check
+        animationFrameId = requestAnimationFrame(render);
         return;
       }
 
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;
-      lastElapsedMs = elapsedMs;
 
       ctx.clearRect(0, 0, size, size);
 
