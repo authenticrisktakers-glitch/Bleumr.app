@@ -168,7 +168,7 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     >
       <canvas
         ref={canvasRef}
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, willChange: 'contents', transform: 'translateZ(0)' }}
         className="block pointer-events-none"
       />
     </div>

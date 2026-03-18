@@ -151,9 +151,9 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
       aria-label="Open AI Assistant"
       title="Open AI Assistant"
     >
-      <canvas 
-        ref={canvasRef} 
-        style={{ width: size, height: size }}
+      <canvas
+        ref={canvasRef}
+        style={{ width: size, height: size, willChange: 'contents', transform: 'translateZ(0)' }}
         className="block pointer-events-none"
       />
       

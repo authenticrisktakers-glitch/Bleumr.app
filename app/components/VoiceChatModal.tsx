@@ -355,7 +355,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
   return (
     <div
       ref={mountRef}
-      style={{ width: 280, height: 280 }}
+      style={{ width: 280, height: 280, willChange: 'contents', transform: 'translateZ(0)' }}
       className="pointer-events-none"
     />
   );
