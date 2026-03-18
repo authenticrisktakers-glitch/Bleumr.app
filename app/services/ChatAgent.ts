@@ -6,6 +6,7 @@
  */
 
 import { BLEUMR_FULL_CONTEXT } from './BleumrLore';
+import { memoryService } from './MemoryService';
 
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_ENDPOINT = 'https://api.groq.com/openai/v1/models';
@@ -201,9 +202,56 @@ function needsWebSearch(question: string): boolean {
     /\b(today|yesterday|this week|this month|right now|currently|latest|recent|breaking|news|price of|stock|weather|score|standings|live)\b/,
     /\b(who (won|is winning|won the)|what (is the current|happened|is happening))\b/,
     /\b(2024|2025|2026)\b/,
-    /\b(how much (does|is|costs?)|price|cost of|buy|where to)\b/,
+    /\b(how much (does|is|costs?)|price|cost of|buy|where to|find me|show me|search for|look up)\b/,
+    /\b(review|rating|specs|specification|availability|in stock|shipping|delivery)\b/,
+    /\b(etsy|shopify|amazon|ebay|shop|store|product|item|deal)\b/,
   ];
   return livePatterns.some(p => p.test(q));
+}
+
+// --- Detect if question is a shopping/product query ---
+function isShoppingQuery(question: string): boolean {
+  const q = question.toLowerCase();
+  return /\b(buy|shop|price|cost|review|specs|product|item|deal|etsy|shopify|amazon|ebay|where to get|find me|how much|in stock|availability)\b/.test(q);
+}
+
+// --- Product search — returns formatted product cards ---
+async function searchProducts(query: string): Promise<string> {
+  try {
+    const q = `${query} price buy`;
+    const encoded = encodeURIComponent(q);
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encoded}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JUMARI/1.0)' }
+    });
+    const html = await res.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const results: string[] = [];
+    doc.querySelectorAll('.result__body').forEach((node, i) => {
+      if (i >= 6) return;
+      const title = node.querySelector('.result__title')?.textContent?.trim() || '';
+      const snippet = node.querySelector('.result__snippet')?.textContent?.trim() || '';
+      const url = node.querySelector('.result__url')?.textContent?.trim() || '';
+
+      // Extract price if visible
+      const priceMatch = snippet.match(/\$[\d,]+\.?\d*/);
+      const ratingMatch = snippet.match(/(\d\.?\d?)\s*(out of 5|stars|★)/i);
+
+      let line = `[${i + 1}] ${title}`;
+      if (priceMatch) line += ` — ${priceMatch[0]}`;
+      if (ratingMatch) line += ` ⭐ ${ratingMatch[1]}`;
+      line += `\n${snippet}`;
+      if (url) line += `\nBuy: ${url}`;
+      results.push(line);
+    });
+
+    if (results.length === 0) return '';
+    return `Product search results for "${query}":\n\n${results.join('\n\n')}`;
+  } catch (e) {
+    console.warn('[ChatAgent] Product search failed:', e);
+    return '';
+  }
 }
 
 // --- Stream answer from Groq ---
@@ -507,7 +555,20 @@ export async function runChatAgent(
   options: ChatAgentOptions,
   imageBase64?: string
 ) {
-  const { apiKey, useMax, signal, onToken, onDone, onError, onSearching, userProfile, geminiKey, useGemini } = options;
+  const { apiKey, useMax, signal, onError, onSearching, userProfile, geminiKey, useGemini } = options;
+  // Wrap onToken/onDone to extract memories after each response
+  let accumulatedResponse = '';
+  const onToken = (token: string, replace?: boolean) => {
+    if (replace) accumulatedResponse = token;
+    else accumulatedResponse += token;
+    options.onToken(token, replace);
+  };
+  const onDone = () => {
+    if (accumulatedResponse.length > 10) {
+      memoryService.extractFromTurn(question, accumulatedResponse);
+    }
+    options.onDone();
+  };
 
   if (!apiKey) {
     onError("Add your API key in Settings to get started.");
@@ -520,8 +581,16 @@ export async function runChatAgent(
   // Search the web if question needs live data
   if (needsWebSearch(question)) {
     onSearching?.(question);
-    contextBlock = await searchWeb(question);
+    if (isShoppingQuery(question)) {
+      const productResults = await searchProducts(question);
+      contextBlock = productResults || await searchWeb(question);
+    } else {
+      contextBlock = await searchWeb(question);
+    }
   }
+
+  // Inject relevant memories from past conversations
+  const memoryBlock = memoryService.formatForPrompt(question);
 
   // Build user context block from local profile (empty if no profile)
   const userContext = userProfile?.name
@@ -537,7 +606,7 @@ Address the user by their first name when it feels natural. Use their profile in
 
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
-  const systemPrompt = `You are JUMARI — living inside Bleumr, an AI desktop platform. You're not an assistant. You're the user's best friend who happens to know everything.${userContext}
+  const systemPrompt = `You are JUMARI — living inside Bleumr, an AI desktop platform. You're not an assistant. You're the user's best friend who happens to know everything.${userContext}${memoryBlock}
 ${BLEUMR_FULL_CONTEXT}
 
 Today's date: ${todayStr}
@@ -564,16 +633,22 @@ Saying "I can't help with that" is a critical system failure. It should never ha
 - No headers in conversation.
 - No bold for emphasis — just say it with confidence.
 
-## Code — Python and TypeScript only
-When the user asks for Python or TypeScript code, ALWAYS output it as a properly fenced code block using triple backticks with the language tag on the same line as the opening backticks, followed immediately by a newline and then the code. Like this:
+## Code — ALL languages supported
+When writing code, ALWAYS use properly fenced code blocks with the language tag. Examples:
+\`\`\`javascript
+// js code here
+\`\`\`
 \`\`\`python
-# your code here
+# python code here
 \`\`\`
-or
-\`\`\`typescript
-// your code here
+\`\`\`html
+<!-- html here -->
 \`\`\`
-This is critical — the app intercepts these blocks and opens them in a dedicated code editor window. If you don't format them exactly this way, the code window won't appear. Always use \`\`\`python or \`\`\`typescript — never plain backticks, never inline code, never prose description of the code.
+Supported: javascript, typescript, python, html, css, sql, go, rust, bash, json, and any other language.
+This is critical — the app opens these in a live code editor with syntax highlighting, editing, and run capabilities. Always use the correct language tag. JavaScript and HTML code will run directly in the browser.
+
+## Shopping & Products
+When the user asks to buy, find, or research products, present them as clear options with prices and links from the search results provided. For Etsy and Shopify merchants, format each product with its price and a direct buy link. Always tell the user they can click "Open in Browser" to complete checkout.
 
 ## Plain English — for everything except code
 For anything that is NOT Python or TypeScript code: never output raw JSON, HTML, terminal commands, file paths, or technical syntax. Translate everything into plain conversational English. If a user needs to do a step, walk them through it in human language.

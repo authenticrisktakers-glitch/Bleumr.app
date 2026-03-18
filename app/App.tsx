@@ -22,6 +22,9 @@ import { BrowserService } from './services/BrowserService';
 import { SecureStorage } from './services/SecureStorage';
 import SubscriptionService, { SubscriptionTier } from './services/SubscriptionService';
 import { runChatAgent } from './services/ChatAgent';
+import { CodePlayground } from './components/CodePlayground';
+import { FormulaModule, detectFormulas } from './components/FormulaModule';
+import { memoryService } from './services/MemoryService';
 import {
   ChatThreadMeta,
   createThreadId,
@@ -339,7 +342,7 @@ export default function App() {
   const [licenseKeyError, setLicenseKeyError] = useState('');
 
   // Code Editor Panel
-  const [codePanel, setCodePanel] = useState<{ language: 'python' | 'typescript'; code: string; title: string } | null>(null);
+  const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
 
   // Voice State
   const [isListening, setIsListening] = useState(false);
@@ -4385,19 +4388,26 @@ export default function App() {
 
                   if (!chatText) return null;
 
-                  // Extract Python/TypeScript code blocks and replace with editor buttons
-                  const codeBlockRegex = /`{3,}\s*(python|typescript|ts)\s*\r?\n([\s\S]*?)`{3,}/gi;
-                  const codeBlocks: { language: 'python' | 'typescript'; code: string }[] = [];
+                  // Extract ALL code blocks and replace with editor buttons
+                  const codeBlockRegex = /`{3,}\s*(javascript|js|typescript|ts|python|html|css|sql|go|rust|bash|sh|json|java|cpp|c|swift|kotlin|ruby|php|r|matlab|scala|haskell)\s*\r?\n([\s\S]*?)`{3,}/gi;
+                  const codeBlocks: { language: string; code: string }[] = [];
                   let cleanedText = chatText.replace(codeBlockRegex, (_, lang, code) => {
-                    const language: 'python' | 'typescript' = lang === 'python' ? 'python' : 'typescript';
-                    codeBlocks.push({ language, code: code.trim() });
+                    codeBlocks.push({ language: lang.toLowerCase(), code: code.trim() });
                     return `[[CODE_BLOCK_${codeBlocks.length - 1}]]`;
                   });
 
+                  // Detect and extract formula expressions
+                  const formulaMatches = detectFormulas(cleanedText);
+                  const formulaBlocks: { expression: string; title: string }[] = [];
+                  for (const fm of formulaMatches) {
+                    formulaBlocks.push({ expression: fm.expression, title: fm.title });
+                    cleanedText = cleanedText.replace(fm.expression, fm.placeholder);
+                  }
+
                   const isLatestVisibleBotMsg = messages.slice(index + 1).findIndex(m => m.role === 'assistant' && m.action?.action !== 'read_page') === -1;
 
-                  // Split cleanedText around [[CODE_BLOCK_N]] placeholders
-                  const parts = cleanedText.split(/\[\[CODE_BLOCK_(\d+)\]\]/);
+                  // Split cleanedText around [[CODE_BLOCK_N]] and [[FORMULA_N]] placeholders
+                  const parts = cleanedText.split(/(\[\[CODE_BLOCK_\d+\]\]|\[\[FORMULA_\d+\]\])/);
 
                   return (
                     <div key={msg.id} className="flex flex-col items-start gap-1.5 mb-2">
@@ -4415,34 +4425,57 @@ export default function App() {
                       ) : (
                         <div className="max-w-[90%] flex flex-col gap-2">
                           {parts.map((part, pi) => {
-                            // Even indices are text, odd indices are code block indices
-                            if (pi % 2 === 0) {
+                            // Check if this part is a placeholder
+                            const codeMatch = part.match(/^\[\[CODE_BLOCK_(\d+)\]\]$/);
+                            const formulaMatch = part.match(/^\[\[FORMULA_(\d+)\]\]$/);
+
+                            if (!codeMatch && !formulaMatch) {
                               if (!part.trim()) return null;
                               return (
                                 <div key={pi} className="px-4 py-3 bg-slate-800 text-slate-200 border border-slate-700/50 rounded-2xl rounded-tl-sm text-sm leading-relaxed shadow-sm prose prose-invert prose-sm max-w-none">
                                   <ReactMarkdown>{part}</ReactMarkdown>
                                 </div>
                               );
+                            } else if (formulaMatch) {
+                              const fIdx = parseInt(formulaMatch[1]);
+                              const fb = formulaBlocks[fIdx];
+                              if (!fb) return null;
+                              return <FormulaModule key={pi} expression={fb.expression} title={fb.title} />;
                             } else {
-                              const blockIdx = parseInt(part);
+                              const blockIdx = parseInt(codeMatch![1]);
                               const block = codeBlocks[blockIdx];
                               if (!block) return null;
                               const firstLine = block.code.split('\n')[0];
-                              const title = firstLine.startsWith('#') ? firstLine.replace(/^#\s*/, '') : firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine || (block.language === 'python' ? 'Python Script' : 'TypeScript File');
+                              const langLabels: Record<string, {icon: string; label: string; color: string}> = {
+                                python: {icon: '🐍', label: 'Python', color: 'text-blue-400 bg-blue-500/10 border-blue-500/25'},
+                                javascript: {icon: '⚡', label: 'JavaScript', color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25'},
+                                js: {icon: '⚡', label: 'JavaScript', color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25'},
+                                typescript: {icon: '🔷', label: 'TypeScript', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/25'},
+                                ts: {icon: '🔷', label: 'TypeScript', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/25'},
+                                html: {icon: '🌐', label: 'HTML', color: 'text-orange-400 bg-orange-500/10 border-orange-500/25'},
+                                css: {icon: '🎨', label: 'CSS', color: 'text-pink-400 bg-pink-500/10 border-pink-500/25'},
+                                sql: {icon: '🗄️', label: 'SQL', color: 'text-green-400 bg-green-500/10 border-green-500/25'},
+                                go: {icon: '🐹', label: 'Go', color: 'text-teal-400 bg-teal-500/10 border-teal-500/25'},
+                                rust: {icon: '🦀', label: 'Rust', color: 'text-orange-400 bg-orange-500/10 border-orange-500/25'},
+                                bash: {icon: '📟', label: 'Bash', color: 'text-green-400 bg-green-500/10 border-green-500/25'},
+                                sh: {icon: '📟', label: 'Shell', color: 'text-green-400 bg-green-500/10 border-green-500/25'},
+                                json: {icon: '{}', label: 'JSON', color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25'},
+                              };
+                              const lm = langLabels[block.language] ?? {icon: '📄', label: block.language.toUpperCase(), color: 'text-slate-400 bg-slate-500/10 border-slate-500/25'};
+                              const title = firstLine.startsWith('#') || firstLine.startsWith('//') || firstLine.startsWith('--')
+                                ? firstLine.replace(/^[#\/\-!\s]+/, '').slice(0, 60) || `${lm.label} code`
+                                : firstLine.slice(0, 60) || `${lm.label} code`;
+                              const canRun = ['javascript', 'js', 'html', 'css'].includes(block.language);
                               return (
                                 <button
                                   key={pi}
                                   onClick={() => setCodePanel({ language: block.language, code: block.code, title })}
-                                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:scale-[1.01] ${
-                                    block.language === 'python'
-                                      ? 'bg-blue-500/10 border-blue-500/25 hover:bg-blue-500/15'
-                                      : 'bg-cyan-500/10 border-cyan-500/25 hover:bg-cyan-500/15'
-                                  }`}
+                                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:scale-[1.01] ${lm.color}`}
                                 >
-                                  <span className="text-2xl">{block.language === 'python' ? '🐍' : '⚡'}</span>
+                                  <span className="text-2xl">{lm.icon}</span>
                                   <div className="flex flex-col gap-0.5">
-                                    <span className={`text-xs font-bold tracking-wide ${block.language === 'python' ? 'text-blue-400' : 'text-cyan-400'}`}>
-                                      {block.language === 'python' ? 'Python' : 'TypeScript'} — click to open
+                                    <span className={`text-xs font-bold tracking-wide ${lm.color.split(' ')[0]}`}>
+                                      {lm.label}{canRun ? ' — click to run' : ' — click to edit'}
                                     </span>
                                     <span className="text-[11px] text-slate-400 font-mono truncate max-w-[280px]">{title}</span>
                                   </div>
@@ -5194,93 +5227,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Code Editor Panel */}
+      {/* Code Playground Panel */}
       <AnimatePresence>
         {codePanel && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9998] flex flex-col bg-[#0a0a0a]"
-          >
-            {/* Top Bar */}
-            <div className="flex items-center justify-between px-4 py-3 bg-[#111] border-b border-slate-800 shrink-0">
-              <div className="flex items-center gap-3">
-                {/* Traffic lights */}
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => setCodePanel(null)} className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition-colors" title="Close" />
-                  <div className="w-3 h-3 rounded-full bg-yellow-500/40" />
-                  <div className="w-3 h-3 rounded-full bg-green-500/40" />
-                </div>
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold tracking-wide ${
-                  codePanel.language === 'python'
-                    ? 'bg-blue-500/15 text-blue-400 border border-blue-500/20'
-                    : 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20'
-                }`}>
-                  {codePanel.language === 'python' ? '🐍 Python' : '⚡ TypeScript'}
-                </div>
-                <span className="text-sm text-slate-400 font-medium truncate max-w-[400px]">{codePanel.title}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    const ext = codePanel.language === 'python' ? 'py' : 'ts';
-                    const filename = codePanel.title.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase() || 'code';
-                    const blob = new Blob([codePanel.code], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${filename}.${ext}`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-                >
-                  ↓ Download
-                </button>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(codePanel.code);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-                >
-                  Copy
-                </button>
-                <button
-                  onClick={() => setCodePanel(null)}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            {/* Code Body with line numbers */}
-            <div className="flex-1 overflow-auto">
-              <table className="w-full border-collapse">
-                <tbody>
-                  {codePanel.code.split('\n').map((line, i) => (
-                    <tr key={i} className="hover:bg-white/[0.02] group">
-                      <td className="select-none text-right text-[12px] font-mono text-slate-600 group-hover:text-slate-500 px-4 py-0 leading-6 w-12 align-top shrink-0 border-r border-slate-800">
-                        {i + 1}
-                      </td>
-                      <td className="px-4 py-0 leading-6 align-top">
-                        <pre className="text-[13px] font-mono text-slate-200 whitespace-pre-wrap break-all">{line || ' '}</pre>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {/* Status bar */}
-            <div className="flex items-center justify-between px-4 py-1.5 bg-[#111] border-t border-slate-800 shrink-0">
-              <span className="text-[11px] text-slate-500 font-mono">
-                {codePanel.code.split('\n').length} lines · {codePanel.code.length} chars
-              </span>
-              <span className="text-[11px] text-slate-500 font-mono">
-                {codePanel.language === 'python' ? 'Python 3' : 'TypeScript'}
-              </span>
-            </div>
-          </motion.div>
+          <CodePlayground
+            panel={codePanel}
+            onClose={() => setCodePanel(null)}
+            onCodeChange={(code) => setCodePanel(prev => prev ? { ...prev, code } : null)}
+          />
         )}
       </AnimatePresence>
     </div>
