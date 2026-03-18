@@ -121,10 +121,10 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
 
-    // Sky sphere — very dark for chrome contrast
+    // Sky sphere — silver-grey so metallic surface reads as chrome silver everywhere
     const envScene = new THREE.Scene();
     const envGeo   = new THREE.SphereGeometry(10, 8, 6);
-    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0x050505 });
+    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xffffff });
     envScene.add(new THREE.Mesh(envGeo, envMat));
 
     // Top panel — large bright white (creates the main chrome highlight strip)
@@ -173,15 +173,15 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     const origPos = geo.attributes.position.array.slice() as Float32Array;
 
     // ── Silver Chrome Mercury material ─────────────────────────────────────
-    // Silver-white base with near-zero roughness for mirror-like chrome reflections.
-    // The warp dents come from vertex displacement in the animation loop.
+    // Slightly lowered metalness so the silver color shows through on dark areas.
+    // Roughness 0.06 scatters the env reflection broadly — reads as silver, not mirror-black.
     const mat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0xd0d0d8),   // silver-white base
-      metalness: 1.0,
-      roughness: 0.02,                    // near-mirror for sharp chrome reflections
+      color: new THREE.Color(0xe8e8ec),   // bright silver-white base
+      metalness: 0.92,                    // slightly below 1 so color contributes
+      roughness: 0.06,                    // scatter env slightly — silver sheen not black mirror
       clearcoat: 1.0,
-      clearcoatRoughness: 0.02,
-      envMapIntensity: 8.0,               // strong env reflections = chrome look
+      clearcoatRoughness: 0.03,
+      envMapIntensity: 6.0,
       reflectivity: 1.0,
     });
 
