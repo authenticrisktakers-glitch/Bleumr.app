@@ -205,7 +205,8 @@ class SubscriptionService {
   }
 
   canUseBrowserAgent(): boolean {
-    return this.getTier() === 'stellur';
+    // Unlocked for all tiers until payment system is live
+    return true;
   }
 
   getRemainingMessages(): number {

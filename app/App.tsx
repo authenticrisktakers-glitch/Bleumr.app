@@ -250,7 +250,16 @@ export default function App() {
 
   useEffect(() => {
     SecureStorage.get('orbit_api_key').then(key => {
-      if (key) setSecureApiKey(key);
+      if (key) {
+        setSecureApiKey(key);
+      } else {
+        // Fall back to .env key (dev only — never ship a key in .env to production)
+        const envKey = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
+        if (envKey) {
+          setSecureApiKey(envKey);
+          SecureStorage.set('orbit_api_key', envKey);
+        }
+      }
     });
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
     SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
