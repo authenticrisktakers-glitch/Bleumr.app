@@ -107,7 +107,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 2.2;
+    renderer.toneMappingExposure = 1.4;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     el.appendChild(renderer.domElement);
 
@@ -124,7 +124,7 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     // Sky sphere — silver-grey so metallic surface reads as chrome silver everywhere
     const envScene = new THREE.Scene();
     const envGeo   = new THREE.SphereGeometry(10, 8, 6);
-    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xffffff });
+    const envMat   = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0xc8c8c8 });
     envScene.add(new THREE.Mesh(envGeo, envMat));
 
     // Top panel — large bright white (creates the main chrome highlight strip)
@@ -145,23 +145,31 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     leftPanel.lookAt(0, 0, 0);
     envScene.add(leftPanel);
 
-    // Right panel — dim fill
+    // Right panel — dark, creates contrast dent shadows
     const rightPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(2, 3),
-      new THREE.MeshBasicMaterial({ color: 0x334455, side: THREE.DoubleSide })
+      new THREE.PlaneGeometry(4, 6),
+      new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide })
     );
     rightPanel.position.set(7, -1, -3);
     rightPanel.lookAt(0, 0, 0);
     envScene.add(rightPanel);
 
-    // Bottom panel — ground bounce, subtle warm-silver
+    // Bottom panel — medium grey ground bounce
     const bottomPanel = new THREE.Mesh(
       new THREE.PlaneGeometry(6, 3),
-      new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0x666666, side: THREE.DoubleSide })
     );
     bottomPanel.position.set(0, -7, -2);
     bottomPanel.lookAt(0, 0, 0);
     envScene.add(bottomPanel);
+
+    // Back panel — dark so sphere has depth contrast in center
+    const backPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 6),
+      new THREE.MeshBasicMaterial({ color: 0x080808, side: THREE.DoubleSide })
+    );
+    backPanel.position.set(0, 0, -9);
+    envScene.add(backPanel);
 
     const envTexture = pmremGenerator.fromScene(envScene as any).texture;
     scene.environment = envTexture;
