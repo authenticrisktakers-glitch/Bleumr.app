@@ -78,17 +78,36 @@ const AGENT_PHASE_LABEL: Record<string, Record<string, string>> = {
   },
 };
 
-function SeatedCharacter({ agent, status, selected, onClick, phaseLabel }: {
+// Extract the last 1–2 complete sentences from an agent's response for the speech bubble.
+// Only updates when a sentence ends (. ! ?) → no token-by-token choppiness.
+function getLastCompleteSentences(text: string, maxChars = 180): string {
+  const clean = text.replace(/[#*`>_~]/g, '').replace(/\s+/g, ' ').trim();
+  const matches = clean.match(/[^.!?\n]+[.!?]+/g);
+  if (!matches || matches.length === 0) return '';
+  let result = '';
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const s = matches[i].trim();
+    if (!s || s.length < 8) continue;
+    const candidate = result ? s + ' ' + result : s;
+    if (candidate.length <= maxChars) result = candidate;
+    else break;
+  }
+  return result;
+}
+
+function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLabel }: {
   agent: typeof AGENTS[number];
   status: AgentStatus;
   selected: boolean;
   onClick: () => void;
-  streamText?: string; // kept for API compat but no longer rendered
+  streamText?: string;
   phaseLabel?: string;
 }) {
   const thinking = status === 'thinking';
   const done = status === 'done';
   const label = phaseLabel || (thinking ? 'Thinking…' : '');
+  // Show last complete sentence from the agent's actual output
+  const bubbleText = streamText ? getLastCompleteSentences(streamText, 180) : '';
 
   return (
     <motion.button
@@ -97,44 +116,54 @@ function SeatedCharacter({ agent, status, selected, onClick, phaseLabel }: {
       className="relative flex flex-col items-center outline-none select-none"
       style={{ cursor: 'pointer' }}
     >
-      {/* Status pill — single clean label, no streaming text */}
+      {/* Speech bubble — shows real conversation text when available, status label otherwise */}
       <AnimatePresence mode="wait">
-        {thinking && label && (
-          <motion.div key="status"
-            initial={{ opacity: 0, y: 6, scale: 0.9 }}
+        {thinking && (bubbleText || label) && (
+          <motion.div key={bubbleText ? 'convo' : 'status'}
+            initial={{ opacity: 0, y: 8, scale: 0.88 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.9 }}
-            transition={{ duration: 0.22 }}
+            transition={{ duration: 0.28 }}
             className="absolute pointer-events-none"
             style={{
               bottom: '112%',
               left: '50%',
               transform: 'translateX(-50%)',
               zIndex: 50,
-              whiteSpace: 'nowrap',
+              width: bubbleText ? 220 : 'auto',
             }}
           >
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+            <div className="rounded-2xl px-3 py-2"
               style={{
-                background: `linear-gradient(135deg, rgba(10,12,28,0.96), rgba(6,8,20,0.96))`,
-                border: `1px solid ${agent.accent}50`,
-                boxShadow: `0 2px 12px rgba(0,0,0,0.5), 0 0 0 1px ${agent.accent}15`,
+                background: `linear-gradient(135deg, rgba(10,12,28,0.97), rgba(6,8,20,0.97))`,
+                border: `1px solid ${agent.accent}55`,
+                boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 0 1px ${agent.accent}15`,
                 backdropFilter: 'blur(12px)',
+                whiteSpace: bubbleText ? 'normal' : 'nowrap',
               }}
             >
-              <motion.div
-                className="h-1.5 w-1.5 rounded-full shrink-0"
-                style={{ background: agent.accent }}
-                animate={{ opacity: [1, 0.25, 1] }}
-                transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-              />
-              <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.88)' }}>
-                {label}
-              </span>
+              {/* Header row — name + pulse dot */}
+              <div className="flex items-center gap-1.5 mb-1">
+                <motion.div
+                  className="h-1.5 w-1.5 rounded-full shrink-0"
+                  style={{ background: agent.accent }}
+                  animate={{ opacity: [1, 0.25, 1] }}
+                  transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <span className="text-[8px] font-bold uppercase tracking-wide" style={{ color: agent.accent }}>
+                  {label || agent.name}
+                </span>
+              </div>
+              {/* Actual words */}
+              {bubbleText ? (
+                <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.82)', wordBreak: 'break-word' }}>
+                  {bubbleText}
+                </p>
+              ) : null}
             </div>
             {/* Tail */}
             <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -6, width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: `7px solid ${agent.accent}50` }} />
-            <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -5, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid rgba(6,8,20,0.96)' }} />
+            <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: -5, width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid rgba(6,8,20,0.97)' }} />
           </motion.div>
         )}
 
@@ -1056,7 +1085,7 @@ const TOP_STATIONS = [
 ] as const;
 
 function TopViewOffice({
-  statuses, agentStreaming, agentPhaseLabel, selected, onSelect, fileCount, onCabinetClick,
+  statuses, agentStreaming: agentBubble, agentPhaseLabel, selected, onSelect, fileCount, onCabinetClick,
 }: {
   statuses: Record<AgentId, AgentStatus>;
   agentStreaming: Record<AgentId, string>;
@@ -1211,9 +1240,8 @@ function TopViewOffice({
         const active = status !== 'idle';
         const isSelected = selected === agent.id;
 
-        // Extract last sentence for bubble
-        const rawStream = agentStreaming[agent.id] || '';
-        const cleanBubble = rawStream.replace(/[#*`>_~]/g,'').replace(/\s+/g,' ').trim().slice(-120);
+        // Use the sentence-complete bubble text (no per-token choppiness)
+        const cleanBubble = agentBubble[agent.id] || '';
 
         return (
           <div key={agent.id} className="absolute" style={{ left: `${cx}%`, top: `${cy}%`, transform: 'translate(-50%,-50%)', zIndex: 10 }}>
@@ -1509,6 +1537,8 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
   const [outputs, setOutputs] = useState<AgentOutput[]>([]);
   const [streaming, setStreaming] = useState('');
   const [agentStreaming, setAgentStreaming] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
+  // agentBubble only updates when a complete sentence is detected — no per-token choppiness
+  const [agentBubble, setAgentBubble] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
   const [agentPhaseLabel, setAgentPhaseLabel] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
   const [selected, setSelected] = useState<AgentId | null>(null);
   const [lastTask, setLastTask] = useState('');
@@ -1534,8 +1564,17 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
   }, [initialTask, apiKey]);
 
   const setStatus = (id: AgentId, s: AgentStatus) => setStatuses(p => ({ ...p, [id]: s }));
-  const appendAgentStream = (id: AgentId, tok: string) => setAgentStreaming(p => ({ ...p, [id]: p[id] + tok }));
-  const clearAgentStream  = (id: AgentId) => setAgentStreaming(p => ({ ...p, [id]: '' }));
+  const appendAgentStream = (id: AgentId, tok: string) => setAgentStreaming(p => {
+    const next = p[id] + tok;
+    // Only update the bubble when a complete sentence lands
+    const sentence = getLastCompleteSentences(next, 180);
+    if (sentence) setAgentBubble(b => ({ ...b, [id]: sentence }));
+    return { ...p, [id]: next };
+  });
+  const clearAgentStream = (id: AgentId) => {
+    setAgentStreaming(p => ({ ...p, [id]: '' }));
+    setAgentBubble(b => ({ ...b, [id]: '' }));
+  };
 
   // ── Groq call (supports streaming) ────────────────────────────────────────
   const groq = useCallback(async (
@@ -2104,7 +2143,7 @@ Write the complete final deliverable:`,
                   status={statuses[agent.id]}
                   selected={selected === agent.id}
                   onClick={() => setSelected(p => p === agent.id ? null : agent.id)}
-                  streamText={agentStreaming[agent.id]}
+                  streamText={agentBubble[agent.id]}
                   phaseLabel={agentPhaseLabel[agent.id]}
                 />
                 <Desk agent={agent} status={statuses[agent.id]} />
