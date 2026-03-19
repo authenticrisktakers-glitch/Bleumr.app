@@ -18,6 +18,7 @@ interface PlatformSidebarProps {
   onOpenSettings: () => void;
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
+  onOpenVoiceChat?: () => void;
   onSchedule?: (dateStr: string) => void;
 }
 
@@ -56,6 +57,7 @@ export function PlatformSidebar({
   onOpenSettings,
   onOpenScheduler,
   onOpenWorkspace,
+  onOpenVoiceChat,
   onSchedule,
 }: PlatformSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,6 +239,7 @@ export function PlatformSidebar({
             <Layers3 className="w-4 h-4 shrink-0 text-violet-500" />
             Mission Team
           </button>
+
         </div>
 
         {/* Chat History label */}

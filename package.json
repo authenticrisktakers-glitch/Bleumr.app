@@ -1,17 +1,17 @@
 {
   "name": "bleumr",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Bleumr - AI-powered desktop browser and agent platform",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "dev:renderer": "vite --config vite.renderer.config.ts",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win",
-    "package:linux": "npm run build && electron-builder --linux"
+    "dev": "node ./node_modules/electron-vite/bin/electron-vite.js dev",
+    "dev:renderer": "node ./node_modules/vite/bin/vite.js --config vite.renderer.config.ts",
+    "build": "node ./node_modules/electron-vite/bin/electron-vite.js build",
+    "preview": "node ./node_modules/electron-vite/bin/electron-vite.js preview",
+    "package": "npm run build && node ./node_modules/electron-builder/cli.js",
+    "package:mac": "npm run build && node ./node_modules/electron-builder/cli.js --mac",
+    "package:win": "npm run build && node ./node_modules/electron-builder/cli.js --win",
+    "package:linux": "npm run build && node ./node_modules/electron-builder/cli.js --linux"
   },
   "build": {
     "appId": "com.bleumr.app",

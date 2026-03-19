@@ -326,6 +326,7 @@ export const PlatformView = memo(function PlatformView({
         onOpenSettings={onOpenSettings}
         onOpenScheduler={onOpenScheduler}
         onOpenWorkspace={onOpenWorkspace}
+        onOpenVoiceChat={onOpenVoiceChat}
         onSchedule={(text) => { onSchedule?.(text); }}
       />
 

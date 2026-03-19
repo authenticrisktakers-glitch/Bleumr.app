@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BLEUMR_AGENT_PREFIX } from '../services/BleumrLore';
+import { addScheduleEvent } from './CalendarPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Search as SearchIcon, Layers3, X, Zap, CheckCircle2, Bot, Orbit, Sparkles, Archive, Pencil, Download, Trash2, Plus, FolderOpen } from 'lucide-react';
 import { InlineStarSphere } from './InlineStarSphere';
@@ -95,7 +96,7 @@ function getLastCompleteSentences(text: string, maxChars = 180): string {
   return result;
 }
 
-function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLabel }: {
+function AstronautCharacter({ agent, status, selected, onClick, streamText, phaseLabel }: {
   agent: typeof AGENTS[number];
   status: AgentStatus;
   selected: boolean;
@@ -201,156 +202,126 @@ function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLa
         transition={{ duration: 1.4, repeat: Infinity }}
       />
 
-      {/* The SVG — upper body seated, slightly leaning forward when thinking */}
+      {/* Seated astronaut SVG — white suit, dark visor, arms resting on desk */}
       <motion.div
-        animate={thinking ? { y: [0, -3, 0] } : { y: 0 }}
-        transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+        animate={thinking ? { y: [0, -2, 0] } : { y: 0 }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       >
-        <svg width="90" height="100" viewBox="0 0 90 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg width="90" height="100" viewBox="0 0 90 100" fill="none" xmlns="http://www.w3.org/2000/svg" overflow="visible">
           <defs>
-            <linearGradient id={`shirt-${agent.id}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={agent.shirt1} />
-              <stop offset="100%" stopColor={agent.shirt2} />
-            </linearGradient>
-            <radialGradient id={`face-${agent.id}`} cx="45%" cy="38%" r="60%">
-              <stop offset="0%" stopColor={agent.skin1} />
-              <stop offset="100%" stopColor={agent.skin2} />
+            <radialGradient id={`suit-${agent.id}`} cx="32%" cy="28%" r="72%">
+              <stop offset="0%" stopColor="#ffffff" />
+              <stop offset="55%" stopColor="#dce9f4" />
+              <stop offset="100%" stopColor="#a8c2d8" />
             </radialGradient>
-            <linearGradient id={`arm-${agent.id}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={agent.skin1} />
-              <stop offset="100%" stopColor={agent.skin2} />
-            </linearGradient>
-            {/* Chair back gradient */}
+            <radialGradient id={`helm-${agent.id}`} cx="30%" cy="25%" r="75%">
+              <stop offset="0%" stopColor="#ffffff" />
+              <stop offset="100%" stopColor="#c0d6e8" />
+            </radialGradient>
+            <radialGradient id={`visor-${agent.id}`} cx="28%" cy="28%" r="70%">
+              <stop offset="0%" stopColor="#1a2535" />
+              <stop offset="100%" stopColor="#060d18" />
+            </radialGradient>
             <linearGradient id={`chair-${agent.id}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#1e293b" />
               <stop offset="100%" stopColor="#0f172a" />
             </linearGradient>
           </defs>
 
-          {/* ── Chair back (behind torso) ── */}
-          <rect x="14" y="52" width="62" height="45" rx="10" fill={`url(#chair-${agent.id})`} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-          {/* Chair headrest */}
-          <rect x="22" y="46" width="46" height="14" rx="8" fill="#1e293b" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+          {/* ── Chair (subtle — mostly hidden behind desk) ── */}
+          <ellipse cx="45" cy="84" rx="27" ry="16" fill={`url(#chair-${agent.id})`} opacity="0.65" />
 
-          {/* ── Left arm reaching forward onto desk ── */}
+          {/* ── Left arm — rounded organic pill, angled naturally ── */}
           <motion.g
-            animate={thinking
-              ? { rotate: [0, -6, 0], translateY: [0, 2, 0] }
-              : { rotate: 0, translateY: 0 }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-            style={{ transformOrigin: '20px 72px' }}
+            animate={thinking ? { rotate: [0, -4, 0], translateY: [0, 1.5, 0] } : { rotate: 0, translateY: 0 }}
+            transition={{ duration: 1.9, repeat: Infinity, ease: 'easeInOut' }}
+            style={{ transformOrigin: '15px 68px' }}
           >
-            {/* Upper arm */}
-            <rect x="10" y="68" width="14" height="26" rx="7" fill={`url(#shirt-${agent.id})`} />
-            {/* Forearm angled forward-down */}
-            <rect x="8" y="88" width="12" height="18" rx="6" fill={`url(#arm-${agent.id})`} transform="rotate(-12 14 88)" />
-            {/* Hand/fist on desk */}
-            <ellipse cx="11" cy="104" rx="7" ry="5" fill={agent.skin1} />
+            <ellipse cx="11" cy="72" rx="7" ry="13" fill={`url(#suit-${agent.id})`} transform="rotate(-8 11 72)" />
+            <ellipse cx="10" cy="76" rx="6.5" ry="2.2" fill={agent.accent} opacity="0.45" transform="rotate(-8 10 76)" />
+            <ellipse cx="9" cy="90" rx="6" ry="10" fill={`url(#suit-${agent.id})`} transform="rotate(-14 9 90)" />
+            <ellipse cx="8" cy="102" rx="8" ry="4.5" fill={agent.accent} opacity="0.85" />
+            <ellipse cx="6.5" cy="100.5" rx="3" ry="1.4" fill="rgba(255,255,255,0.38)" />
           </motion.g>
 
-          {/* ── Right arm reaching forward onto desk ── */}
+          {/* ── Right arm ── */}
           <motion.g
-            animate={thinking
-              ? { rotate: [0, 6, 0], translateY: [0, 2, 0] }
-              : { rotate: 0, translateY: 0 }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
-            style={{ transformOrigin: '70px 72px' }}
+            animate={thinking ? { rotate: [0, 4, 0], translateY: [0, 1.5, 0] } : { rotate: 0, translateY: 0 }}
+            transition={{ duration: 1.9, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
+            style={{ transformOrigin: '75px 68px' }}
           >
-            {/* Upper arm */}
-            <rect x="66" y="68" width="14" height="26" rx="7" fill={`url(#shirt-${agent.id})`} />
-            {/* Forearm angled forward-down */}
-            <rect x="70" y="88" width="12" height="18" rx="6" fill={`url(#arm-${agent.id})`} transform="rotate(12 76 88)" />
-            {/* Hand/fist on desk */}
-            <ellipse cx="79" cy="104" rx="7" ry="5" fill={agent.skin1} />
+            <ellipse cx="79" cy="72" rx="7" ry="13" fill={`url(#suit-${agent.id})`} transform="rotate(8 79 72)" />
+            <ellipse cx="80" cy="76" rx="6.5" ry="2.2" fill={agent.accent} opacity="0.45" transform="rotate(8 80 76)" />
+            <ellipse cx="81" cy="90" rx="6" ry="10" fill={`url(#suit-${agent.id})`} transform="rotate(14 81 90)" />
+            <ellipse cx="82" cy="102" rx="8" ry="4.5" fill={agent.accent} opacity="0.85" />
+            <ellipse cx="83.5" cy="100.5" rx="3" ry="1.4" fill="rgba(255,255,255,0.38)" />
           </motion.g>
 
-          {/* ── Torso / body ── */}
-          <rect x="20" y="55" width="50" height="42" rx="14" fill={`url(#shirt-${agent.id})`} />
+          {/* ── Suit torso — organic tapered path, NOT a rectangle ── */}
+          <path d="M17 98 C15 83,14 69,16 62 Q20 52,45 52 Q70 52,74 62 C76 69,75 83,73 98 Z"
+            fill={`url(#suit-${agent.id})`} />
+          {/* Shoulder humps — round bumps, clearly not the monitor */}
+          <ellipse cx="19" cy="61" rx="9" ry="7" fill={`url(#suit-${agent.id})`} />
+          <ellipse cx="71" cy="61" rx="9" ry="7" fill={`url(#suit-${agent.id})`} />
+          {/* Shoulder accent arcs */}
+          <path d="M12 63 Q17 56 25 59" stroke={agent.accent} strokeWidth="2.2" fill="none" opacity="0.5" strokeLinecap="round" />
+          <path d="M78 63 Q73 56 65 59" stroke={agent.accent} strokeWidth="2.2" fill="none" opacity="0.5" strokeLinecap="round" />
+          {/* Mission patches */}
+          <circle cx="24" cy="59" r="5" fill="rgba(0,0,0,0.4)" stroke={`${agent.accent}88`} strokeWidth="1.2" />
+          <circle cx="24" cy="59" r="2.5" fill={agent.accent} opacity="0.85" />
+          <circle cx="66" cy="59" r="5" fill="rgba(0,0,0,0.4)" stroke={`${agent.accent}88`} strokeWidth="1.2" />
+          <circle cx="66" cy="59" r="2.5" fill={agent.accent} opacity="0.85" />
+          {/* Chest life-support unit */}
+          <rect x="33" y="63" width="24" height="20" rx="4.5" fill="rgba(4,8,20,0.80)" stroke={`${agent.accent}60`} strokeWidth="1.2" />
+          <line x1="36" y1="69" x2="54" y2="69" stroke={agent.accent} strokeWidth="0.8" opacity="0.42" />
+          <line x1="36" y1="73" x2="54" y2="73" stroke={agent.accent} strokeWidth="0.8" opacity="0.42" />
+          <circle cx="37" cy="66" r="2" fill={agent.accent} opacity="0.95" />
+          <circle cx="43" cy="66" r="1.4" fill="rgba(255,255,255,0.45)" />
+          {/* Lower suit color wash — breaks white-rectangle look */}
+          <path d="M20 84 Q45 89 70 84 L73 98 C56 101,34 101,17 98 Z"
+            fill={agent.accent} opacity="0.11" />
 
-          {/* Shirt collar V */}
-          <path d="M35 56 L45 68 L55 56" stroke="rgba(255,255,255,0.22)" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          {/* ── Helmet neck ring ── */}
+          <ellipse cx="45" cy="51" rx="14" ry="4.2" fill={`url(#suit-${agent.id})`} />
+          <ellipse cx="45" cy="51" rx="14" ry="4.2" stroke={`${agent.accent}55`} strokeWidth="1" fill="none" />
 
-          {/* Tiny icon badge on chest */}
-          <rect x="37" y="65" width="16" height="14" rx="5" fill="rgba(0,0,0,0.3)" />
-          <circle cx="45" cy="72" r="5" fill={agent.accentDim} />
-
-          {/* ── Neck ── */}
-          <rect x="37" y="43" width="16" height="16" rx="6" fill={`url(#arm-${agent.id})`} />
-
-          {/* ── Head ── */}
+          {/* ── Helmet ── */}
           <motion.g
-            animate={thinking ? { rotate: [0, 2, 0, -1, 0] } : { rotate: 0 }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            style={{ transformOrigin: '45px 26px' }}
+            animate={thinking ? { rotate: [0, 2, 0, -1.5, 0] } : { rotate: 0 }}
+            transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+            style={{ transformOrigin: '45px 25px' }}
           >
-            <circle cx="45" cy="26" r="22" fill={`url(#face-${agent.id})`} />
-
-            {/* Hair — fills top of head */}
-            <path
-              d="M23 22 C23 10 67 10 67 22 L67 16 C67 5 23 5 23 16 Z"
-              fill={agent.hair}
-            />
-            <rect x="23" y="12" width="44" height="12" rx="5" fill={agent.hair} />
-
-            {/* Ears */}
-            <ellipse cx="23" cy="27" rx="3.5" ry="5" fill={agent.skin2} />
-            <ellipse cx="67" cy="27" rx="3.5" ry="5" fill={agent.skin2} />
-
-            {/* Eyes with blinking */}
-            <motion.g
-              animate={thinking ? { scaleY: [1, 0.08, 1] } : { scaleY: 1 }}
-              transition={{ duration: 4, repeat: Infinity, repeatDelay: 3 }}
-              style={{ transformOrigin: '45px 24px' }}
-            >
-              {/* Eye whites */}
-              <ellipse cx="37" cy="24" rx="5" ry="5.5" fill="white" />
-              <ellipse cx="53" cy="24" rx="5" ry="5.5" fill="white" />
-              {/* Pupils — look slightly down (toward desk) */}
-              <circle cx="37.5" cy="25.5" r="3" fill="#1e293b" />
-              <circle cx="53.5" cy="25.5" r="3" fill="#1e293b" />
-              {/* Shine */}
-              <circle cx="38.5" cy="24" r="1" fill="white" opacity="0.9" />
-              <circle cx="54.5" cy="24" r="1" fill="white" opacity="0.9" />
-            </motion.g>
-
-            {/* Eyebrows */}
-            <path d="M31 18 Q37 16 42 18" stroke={agent.hair} strokeWidth="1.8" strokeLinecap="round" fill="none" />
-            <path d="M48 18 Q53 16 59 18" stroke={agent.hair} strokeWidth="1.8" strokeLinecap="round" fill="none" />
-            {thinking && (
-              <>
-                {/* Focused brow */}
-                <path d="M31 17 Q37 15.5 42 17.5" stroke={agent.hair} strokeWidth="2.2" strokeLinecap="round" fill="none" opacity="0.7" />
-                <path d="M48 17.5 Q53 15.5 59 17" stroke={agent.hair} strokeWidth="2.2" strokeLinecap="round" fill="none" opacity="0.7" />
-              </>
+            {/* Outer shell */}
+            <circle cx="45" cy="25" r="23" fill={`url(#helm-${agent.id})`} stroke="rgba(255,255,255,0.45)" strokeWidth="1.8" />
+            {/* Dark visor */}
+            <ellipse cx="45" cy="28" rx="14" ry="12" fill={`url(#visor-${agent.id})`} />
+            <ellipse cx="45" cy="28" rx="14" ry="12" stroke={agent.accent} strokeWidth="1.8" fill="none" opacity="0.75" />
+            {/* Visor shine */}
+            <ellipse cx="36" cy="21" rx="4.5" ry="2.8" fill="rgba(255,255,255,0.48)" transform="rotate(-28,36,21)" />
+            <ellipse cx="34" cy="24" rx="2.2" ry="1.3" fill="rgba(255,255,255,0.22)" transform="rotate(-28,34,24)" />
+            {/* Shell highlight arc */}
+            <path d="M24 12 Q45 1 66 12" stroke="rgba(255,255,255,0.3)" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+            <path d="M22 26 Q22 17 25 11" stroke="rgba(255,255,255,0.16)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+            <path d="M68 26 Q68 17 65 11" stroke="rgba(255,255,255,0.16)" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+            {/* Planner: commander band */}
+            {agent.id === 'planner' && (
+              <rect x="26" y="7" width="38" height="3.5" rx="1.75" fill={agent.accent} opacity="0.4" />
             )}
-
-            {/* Mouth */}
-            <motion.path
-              d={done
-                ? 'M38 34 Q45 39 52 34'
-                : thinking
-                  ? 'M40 33 Q45 35 50 33'
-                  : 'M39 33 Q45 36 51 33'}
-              stroke={done ? '#34d399' : agent.skin2}
-              strokeWidth="2"
-              strokeLinecap="round"
-              fill="none"
-            />
-
-            {/* Glasses (Researcher only) */}
+            {/* Researcher: HUD scan lines in visor */}
             {agent.id === 'researcher' && (
-              <g opacity="0.7">
-                <circle cx="37" cy="24" r="7" stroke="#94a3b8" strokeWidth="1.2" fill="none" />
-                <circle cx="53" cy="24" r="7" stroke="#94a3b8" strokeWidth="1.2" fill="none" />
-                <line x1="44" y1="24" x2="46" y2="24" stroke="#94a3b8" strokeWidth="1.2" />
-                <line x1="30" y1="24" x2="23" y2="26" stroke="#94a3b8" strokeWidth="1.2" />
-                <line x1="60" y1="24" x2="67" y2="26" stroke="#94a3b8" strokeWidth="1.2" />
+              <g opacity="0.48">
+                <line x1="36" y1="26" x2="54" y2="26" stroke={agent.accent} strokeWidth="0.9" />
+                <line x1="34" y1="30" x2="56" y2="30" stroke={agent.accent} strokeWidth="0.9" />
+                <circle cx="38" cy="33" r="2.2" stroke={agent.accent} strokeWidth="0.9" fill="none" />
               </g>
             )}
-
-            {/* Headband/hat accent (Synth) */}
+            {/* Synth: comm antenna */}
             {agent.id === 'synth' && (
-              <rect x="23" y="11" width="44" height="6" rx="3" fill={agent.accent} opacity="0.6" />
+              <g>
+                <line x1="58" y1="5" x2="64" y2="-3" stroke={agent.accent} strokeWidth="2.2" strokeLinecap="round" />
+                <circle cx="65" cy="-5" r="3.5" fill={agent.accent} opacity="0.92" />
+                <circle cx="65" cy="-5" r="1.4" fill="white" opacity="0.88" />
+              </g>
             )}
           </motion.g>
         </svg>
@@ -371,110 +342,142 @@ function SeatedCharacter({ agent, status, selected, onClick, streamText, phaseLa
   );
 }
 
-// ─── Desk (rendered over character's lap to complete seated illusion) ──────────
+// ─── Mission desk — astronaut sits behind this ────────────────────────────────
 function Desk({ agent, status }: { agent: typeof AGENTS[number]; status: AgentStatus }) {
   const active = status !== 'idle';
   const thinking = status === 'thinking';
 
   return (
-    <div className="relative" style={{ width: 140, marginTop: -28, zIndex: 10 }}>
-      {/* Desk surface */}
-      <div className="relative rounded-2xl"
+    <div className="relative" style={{ width: 186, zIndex: 10 }}>
+
+      {/* ── Standing monitor — rises above the desk surface ── */}
+      <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 84, zIndex: 3 }}>
+        {/* Monitor back panel — we see the BACK, no screen content visible */}
+        <div className="relative rounded-md overflow-hidden"
+          style={{
+            width: 72,
+            height: 44,
+            background: 'linear-gradient(160deg,#0e1220 0%,#080b14 100%)',
+            border: '1.5px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.8)',
+          }}>
+          {/* Vent slots on the back panel */}
+          {[12, 18, 24].map(y => (
+            <div key={y} className="absolute rounded-full" style={{ left: 8, right: 8, top: y, height: 1.5, background: 'rgba(255,255,255,0.05)' }} />
+          ))}
+          {/* Brand logo mark — faint on back */}
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2" style={{ width: 10, height: 10, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.06)' }} />
+          {/* Power LED — only indicator visible on back */}
+          <motion.div className="absolute bottom-1.5 right-2 rounded-full"
+            style={{ width: 3, height: 3, background: active ? agent.accent : '#0a0c12', boxShadow: active ? `0 0 4px ${agent.accent}` : 'none' }}
+            animate={thinking ? { opacity: [1, 0.2, 1] } : {}} transition={{ duration: 1.4, repeat: Infinity }} />
+        </div>
+        {/* Monitor neck */}
+        <div className="mx-auto" style={{ width: 6, height: 9, background: 'linear-gradient(180deg,#1a2035,#0b1018)', borderLeft: '1px solid rgba(255,255,255,0.07)', borderRight: '1px solid rgba(255,255,255,0.07)' }} />
+        {/* Monitor base */}
+        <div className="mx-auto rounded-sm" style={{ width: 30, height: 4, background: 'linear-gradient(180deg,#1e2840,#0b1018)', border: '1px solid rgba(255,255,255,0.09)' }} />
+      </div>
+
+      {/* ── Desk top surface — thin front-edge visible from front ── */}
+      <div className="relative rounded-tl-xl rounded-tr-xl overflow-visible"
         style={{
-          height: 52,
-          background: 'linear-gradient(160deg,#1a1f35 0%,#111525 100%)',
-          border: `1px solid ${active ? agent.accent + '40' : 'rgba(255,255,255,0.08)'}`,
+          height: 13,
+          background: 'linear-gradient(170deg,#1e2540 0%,#151c30 55%,#0f1422 100%)',
+          border: `1px solid ${active ? agent.accent+'55' : 'rgba(255,255,255,0.1)'}`,
+          borderBottom: 'none',
           boxShadow: active
-            ? `0 0 30px ${agent.accent}20, inset 0 1px 0 rgba(255,255,255,0.07)`
-            : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+            ? `0 -4px 28px ${agent.accent}18, inset 0 1px 0 rgba(255,255,255,0.1)`
+            : 'inset 0 1px 0 rgba(255,255,255,0.07)',
+          zIndex: 4,
         }}
       >
-        {/* Monitor */}
-        <div className="absolute left-2.5 top-2.5 rounded-lg overflow-hidden"
-          style={{ width: 62, height: 34, background: '#080c14', border: '1px solid rgba(255,255,255,0.1)' }}>
-          <AnimatePresence>
-            {active && (
-              <motion.div key="screen"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="absolute inset-0 flex flex-col gap-1 p-1.5"
-              >
-                {[85, 65, 50].map((w, i) => (
-                  <motion.div key={i} className="rounded-full"
-                    style={{ height: 2.5, width: `${w}%`, background: agent.accent, opacity: 1 - i * 0.3 }}
-                    animate={thinking ? { opacity: [1 - i * 0.3, (1 - i * 0.3) * 0.4, 1 - i * 0.3] } : {}}
-                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
-                  />
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          {/* Status LED */}
-          <motion.div className="absolute right-1.5 top-1.5 rounded-full"
-            style={{ width: 5, height: 5, background: active ? agent.accent : '#1e293b' }}
-            animate={thinking ? { opacity: [1, 0.2, 1], scale: [1, 1.4, 1] } : {}}
-            transition={{ duration: 0.8, repeat: Infinity }}
-          />
+        {/* Surface top rim glow */}
+        <div className="absolute inset-x-0 top-0 rounded-tl-xl rounded-tr-xl"
+          style={{ height: 2.5, background: `linear-gradient(90deg,transparent,${active ? agent.accent+'45':'rgba(255,255,255,0.12)'},transparent)` }} />
+
+        {/* Coffee mug — LEFT side, sits on desk surface */}
+        <div className="absolute" style={{ left: 8, top: -18 }}>
+          {active && [0, 5].map((dx, si) => (
+            <motion.div key={si} className="absolute rounded-full"
+              style={{ left: 2+dx, top: -9, width: 2, height: 7, background: 'rgba(148,163,184,0.22)' }}
+              animate={{ y:[0,-6,0], opacity:[0,0.5,0] }}
+              transition={{ duration: 2.2, repeat: Infinity, delay: si*0.4 }}
+            />
+          ))}
+          <div style={{ width: 15, height: 18, background: 'linear-gradient(180deg,#2a3347,#18202e)', border: '1.5px solid rgba(255,255,255,0.14)', borderRadius: '2px 2px 5px 5px' }}>
+            <div style={{ margin: '2px auto 0', width: 9, height: 3, background: `${agent.accent}70`, borderRadius: 1 }} />
+          </div>
+          <div className="absolute" style={{ right: -5, top: 4, width: 5, height: 8, borderRadius: '0 50% 50% 0', border: '1.5px solid rgba(255,255,255,0.13)', borderLeft: 'none' }} />
         </div>
 
-        {/* Monitor stand */}
-        <div className="absolute left-[42px] top-[38px] w-1 h-3 rounded-b" style={{ background: '#0f172a' }} />
-        <div className="absolute left-[36px] top-[49px] w-[13px] h-1.5 rounded" style={{ background: '#0f172a' }} />
+        {/* Mouse — right side, on desk surface */}
+        <div className="absolute" style={{ right: 12, top: -18, width: 12, height: 17, background: '#090d16', border: `1px solid ${active ? agent.accent+'35':'rgba(255,255,255,0.09)'}`, borderRadius: 6 }}>
+          <div className="absolute top-1 left-1/2 -translate-x-1/2" style={{ width: 1, height: 6, background: 'rgba(255,255,255,0.08)' }} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{ width: 4, height: 4, background: active ? `${agent.accent}50` : 'rgba(255,255,255,0.06)' }} />
+        </div>
 
-        {/* Keyboard */}
-        <div className="absolute bottom-2 left-2.5 rounded"
-          style={{ width: 65, height: 10, background: '#0d1117', border: '1px solid rgba(255,255,255,0.08)' }}>
-          {Array.from({ length: 3 }).map((_, row) => (
-            <div key={row} className="flex gap-px px-1" style={{ marginTop: row === 0 ? 1 : 2 }}>
-              {Array.from({ length: 8 }).map((_, col) => (
-                <motion.div key={col} className="flex-1 rounded-[1px]"
-                  style={{ height: 1.5, background: active ? `${agent.accent}50` : 'rgba(255,255,255,0.08)' }}
-                  animate={thinking && Math.random() > 0.7 ? { opacity: [0.3, 1, 0.3] } : {}}
-                  transition={{ duration: 0.4, repeat: Infinity, delay: (row * 8 + col) * 0.05 }}
+        {/* No screen glow on desk — we see the monitor's back, not the screen */}
+      </div>
+
+      {/* ── DESK FRONT EDGE — thin bright lip ── */}
+      <div style={{ height: 5, background: `linear-gradient(180deg,${active ? agent.accent+'40':'rgba(255,255,255,0.18)'} 0%,rgba(255,255,255,0.04) 100%)`, position: 'relative', zIndex: 4 }} />
+
+      {/* ── DESK FRONT PANEL ── */}
+      <div className="relative"
+        style={{
+          height: 46,
+          background: 'linear-gradient(180deg,#121928 0%,#090d16 60%,#06080f 100%)',
+          border: `1px solid ${active ? agent.accent+'38' : 'rgba(255,255,255,0.09)'}`,
+          borderTop: 'none',
+          borderRadius: '0 0 8px 8px',
+          boxShadow: active ? `0 6px 24px ${agent.accent}15, inset 0 -1px 0 rgba(0,0,0,0.5)` : '0 6px 16px rgba(0,0,0,0.6)',
+          zIndex: 4,
+        }}>
+        {/* Keyboard on the desk front panel — front-facing */}
+        <div className="absolute rounded-sm"
+          style={{ top: 5, left: '50%', transform: 'translateX(-50%)', width: 84, height: 12, background: '#07090f', border: `1px solid ${active ? agent.accent+'40':'rgba(255,255,255,0.09)'}`, boxShadow: active ? `0 0 8px ${agent.accent}12` : 'none' }}>
+          {Array.from({ length: 2 }).map((_, row) => (
+            <div key={row} className="flex gap-px px-1.5" style={{ marginTop: row === 0 ? 1.5 : 2 }}>
+              {Array.from({ length: 12 }).map((_, col) => (
+                <motion.div key={col} className="flex-1 rounded-sm"
+                  style={{ height: 2.5, background: active ? `${agent.accent}60` : 'rgba(255,255,255,0.1)' }}
+                  animate={thinking && (row * 12 + col) % 5 === 0 ? { opacity: [0.4, 1, 0.4] } : {}}
+                  transition={{ duration: 0.35, repeat: Infinity, delay: col * 0.03 + row * 0.06 }}
                 />
               ))}
             </div>
           ))}
         </div>
 
-        {/* Coffee mug */}
-        <div className="absolute right-2.5 top-2">
-          <div className="rounded-b-lg rounded-t-sm"
-            style={{ width: 14, height: 18, background: 'linear-gradient(180deg,#374151,#1f2937)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div className="mx-auto mt-1 rounded-full" style={{ width: 8, height: 3, background: `${agent.accent}60` }} />
-          </div>
-          {/* Steam */}
-          {active && (
-            <motion.div className="absolute -top-2 left-1/2 -translate-x-1/2"
-              animate={{ y: [0, -4, 0], opacity: [0, 0.6, 0] }}
-              transition={{ duration: 2, repeat: Infinity }}>
-              <div className="w-0.5 h-2 rounded-full" style={{ background: 'rgba(148,163,184,0.5)' }} />
-            </motion.div>
-          )}
+        {/* Nameplate */}
+        <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 8, width: 60, height: 14, background: 'rgba(0,0,0,0.6)', border: `1px solid ${agent.accent}50`, borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.22em', color: agent.accent }}>{agent.name}</span>
         </div>
 
-        {/* Paper stack */}
-        <motion.div className="absolute right-2.5 bottom-2 rounded-md"
-          style={{ width: 20, height: 26, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', transform: 'rotate(4deg)' }}
-          animate={active ? { rotate: [4, 6, 4] } : {}}
-          transition={{ duration: 3, repeat: Infinity }}
-        >
-          {[0.5, 0.3, 0.2].map((op, i) => (
-            <div key={i} className="mx-auto rounded-full"
-              style={{ marginTop: i === 0 ? 6 : 4, height: 1.5, width: '65%', background: `rgba(255,255,255,${op})` }} />
-          ))}
-        </motion.div>
+        {/* Cable port */}
+        <div className="absolute" style={{ right: 12, top: '50%', transform: 'translateY(-50%)', width: 4, height: 4, background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '50%' }} />
+
+        {/* Active glow strip along bottom edge */}
+        {active && <motion.div className="absolute bottom-0 left-10 right-10 rounded-t"
+          style={{ height: 2, background: `linear-gradient(90deg,transparent,${agent.accent}90,transparent)` }}
+          animate={{ opacity: [0.35, 1, 0.35] }} transition={{ duration: 1.6, repeat: Infinity }}
+        />}
       </div>
 
-      {/* Desk legs */}
-      <div className="flex justify-between px-3">
+      {/* ── Desk legs ── */}
+      <div className="flex justify-between" style={{ paddingLeft: 12, paddingRight: 12, position: 'relative', zIndex: 4 }}>
         {[0, 1].map(i => (
-          <div key={i} className="w-1.5 rounded-b"
-            style={{ height: 18, background: '#0a0d16', border: '1px solid rgba(255,255,255,0.05)' }} />
+          <div key={i} style={{ width: 10, height: 24, background: 'linear-gradient(180deg,#0e1220 0%,#05070c 100%)', border: '1px solid rgba(255,255,255,0.07)', borderTop: 'none', borderRadius: '0 0 4px 4px' }} />
         ))}
       </div>
+
+      {/* Floor shadow */}
+      <div className="rounded-full mx-auto" style={{ width: 152, height: 7, background: 'rgba(0,0,0,0.6)', filter: 'blur(7px)', marginTop: 2 }} />
     </div>
   );
 }
+
 
 // ─── Smart download helpers ───────────────────────────────────────────────────
 type ExportFormat = 'md' | 'html' | 'csv' | 'json' | 'txt';
@@ -1809,6 +1812,25 @@ Write the complete final deliverable:`,
       setStreaming('');
       setPhase('done');
 
+      // Parse any <schedule> tags Synth may have emitted and fire toast + open scheduler
+      const schedRegex = /<schedule>([\s\S]*?)<\/schedule>/gi;
+      let schedMatch;
+      let foundSchedule = false;
+      while ((schedMatch = schedRegex.exec(full)) !== null) {
+        try {
+          const data = JSON.parse(schedMatch[1].trim());
+          if (data.title && data.date) {
+            addScheduleEvent(data);
+            window.dispatchEvent(new Event('orbit_schedule_update'));
+            window.dispatchEvent(new CustomEvent('orbit_scheduling_toast', { detail: data }));
+            foundSchedule = true;
+          }
+        } catch { /* ignore malformed tags */ }
+      }
+      if (foundSchedule) {
+        setTimeout(() => window.dispatchEvent(new CustomEvent('orbit_open_scheduler')), 900);
+      }
+
       // Auto-save final deliverable to file cabinet
       const synthTask = task;
       const synthSlug = (synthTask.replace(/[^a-z0-9 ]/gi, '').trim().slice(0, 36).replace(/\s+/g, '_').toLowerCase()) || 'workspace_output';
@@ -1919,70 +1941,90 @@ Write the complete final deliverable:`,
             )}
           </AnimatePresence>
 
-          {/* ── Base room fill ── */}
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg,#08090f 0%,#06080e 48%,#0a0c12 100%)' }} />
+          {/* ══ ROOM SHAPE — clearly front-facing 2D ══════════════════════════════ */}
 
-          {/* ── Ceiling — dark slab with subtle ambient ── */}
-          <div className="absolute top-0 left-0 right-0" style={{ height: '8%', background: 'linear-gradient(180deg,#030408 0%,#050609 100%)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-            {/* Ceiling recessed light strips */}
+          {/* Base fill */}
+          <div className="absolute inset-0" style={{ background: '#090b12' }} />
+
+          {/* ── Ceiling slab ── */}
+          <div className="absolute top-0 left-0 right-0" style={{ height: '10%', background: 'linear-gradient(180deg,#1e2234 0%,#131829 100%)', borderBottom: '2px solid rgba(255,255,255,0.08)' }}>
+            {/* Crown moulding */}
+            <div className="absolute bottom-0 left-0 right-0" style={{ height: 1.5, background: 'rgba(255,255,255,0.14)' }} />
+            {/* Recessed panel lines */}
             {[25, 50, 75].map(pct => (
-              <div key={pct} className="absolute top-0" style={{ left: `${pct}%`, transform: 'translateX(-50%)', width: 60, height: '100%' }}>
-                <div style={{ width: '100%', height: 2, background: 'linear-gradient(90deg,transparent,rgba(200,220,255,0.12),transparent)' }} />
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 rounded-full blur-lg" style={{ width: 40, height: 20, background: 'rgba(180,200,255,0.07)' }} />
+              <div key={pct} className="absolute top-2 bottom-2" style={{ left: `${pct}%`, width: 1, background: 'rgba(255,255,255,0.04)' }} />
+            ))}
+            {/* Overhead strip lights — 3 glowing bars */}
+            {[22, 50, 78].map((pct, li) => (
+              <div key={pct} className="absolute bottom-0" style={{ left: `${pct}%`, transform: 'translateX(-50%)', width: 100 }}>
+                {/* Light bar housing */}
+                <div style={{ position: 'absolute', bottom: 2, left: 0, right: 0, height: 4, background: 'rgba(30,35,55,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2 }} />
+                {/* Glowing tube */}
+                <motion.div style={{ position: 'absolute', bottom: 3, left: 4, right: 4, height: 2.5, background: 'linear-gradient(90deg,rgba(200,215,255,0.15),rgba(220,235,255,0.55),rgba(200,215,255,0.15))', borderRadius: 2, boxShadow: '0 0 8px rgba(200,220,255,0.5), 0 0 16px rgba(180,200,255,0.25)' }}
+                  animate={{ opacity: [0.7, 1, 0.7] }}
+                  transition={{ duration: 4, repeat: Infinity, delay: li * 1.2 }}
+                />
+                {/* Light cone cast down onto room */}
+                <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ bottom: -40, width: 130, height: 40, background: 'radial-gradient(ellipse at 50% 0%, rgba(180,200,255,0.07) 0%, transparent 70%)', filter: 'blur(4px)' }} />
               </div>
             ))}
           </div>
 
-          {/* ── Back wall — textured paneling ── */}
-          <div className="absolute left-0 right-0" style={{ top: '8%', height: '48%', background: 'linear-gradient(180deg,#0b0d15 0%,#090b13 100%)' }}>
-            {/* Horizontal rail — chair rail height */}
-            <div className="absolute left-0 right-0" style={{ bottom: 0, height: 1, background: 'rgba(255,255,255,0.055)' }} />
-            <div className="absolute left-0 right-0" style={{ bottom: 3, height: 1, background: 'rgba(255,255,255,0.025)' }} />
+
+
+          {/* ── Back wall (full width) ── */}
+          <div className="absolute" style={{ top: '10%', bottom: '22%', left: 0, right: 0, background: 'linear-gradient(180deg,#0e1222 0%,#0b0f1c 100%)' }}>
             {/* Vertical panel dividers */}
-            {[16.6, 33.3, 50, 66.6, 83.3].map(pct => (
+            {[20, 40, 60, 80].map(pct => (
               <div key={pct} className="absolute top-0 bottom-0" style={{ left: `${pct}%`, width: 1, background: 'linear-gradient(180deg,transparent,rgba(255,255,255,0.04),transparent)' }} />
             ))}
-            {/* Subtle wall grain overlay */}
-            <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,255,255,0.008) 3px,rgba(255,255,255,0.008) 4px)', opacity: 0.6 }} />
-            {/* Ambient ceiling bounce — soft warm bloom from desk lights */}
-            <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ height: '40%', background: 'linear-gradient(0deg,rgba(99,102,241,0.04) 0%,transparent 100%)' }} />
+            {/* Chair-rail moulding */}
+            <div className="absolute left-0 right-0" style={{ bottom: '28%', height: 2, background: 'rgba(255,255,255,0.07)' }} />
+            <div className="absolute left-0 right-0" style={{ bottom: 'calc(28% + 3px)', height: 1, background: 'rgba(255,255,255,0.03)' }} />
+            {/* Subtle horizontal grain */}
+            <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 5px,rgba(255,255,255,0.007) 5px,rgba(255,255,255,0.007) 6px)', opacity: 0.6 }} />
+            {/* Ceiling-bounce bloom from lights */}
+            <div className="absolute inset-x-0 top-0 pointer-events-none" style={{ height: '18%', background: 'linear-gradient(180deg,rgba(140,160,220,0.05) 0%,transparent 100%)' }} />
+
           </div>
 
-          {/* ── Wainscoting / lower wall panel ── */}
-          <div className="absolute left-0 right-0" style={{ top: '56%', bottom: '16%', background: 'linear-gradient(180deg,#080a10 0%,#060810 100%)' }}>
-            {/* Panel edge top */}
-            <div className="absolute left-0 right-0 top-0" style={{ height: 2, background: 'rgba(255,255,255,0.05)' }} />
-            {/* Baseboard bottom */}
-            <div className="absolute left-0 right-0 bottom-0" style={{ height: 3, background: 'rgba(255,255,255,0.04)' }} />
-            {/* Vertical groove lines on lower panel */}
-            {[10, 22, 34, 46, 58, 70, 82, 94].map(pct => (
-              <div key={pct} className="absolute top-2 bottom-2" style={{ left: `${pct}%`, width: 1, background: 'rgba(255,255,255,0.025)' }} />
+          {/* ── Floor — with perspective lines converging to vanishing point ── */}
+          <div className="absolute left-0 right-0 bottom-0" style={{ height: '22%', background: 'linear-gradient(180deg,#0d1118 0%,#080b12 100%)', borderTop: '2px solid rgba(255,255,255,0.08)' }}>
+            {/* Baseboard trim line */}
+            <div className="absolute top-0 left-0 right-0" style={{ height: 1.5, background: 'rgba(255,255,255,0.14)' }} />
+            {/* Perspective floor planks — lines fan from vanishing point at top-centre */}
+            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {[-40, -22, -8, 0, 8, 22, 40, 55, 70, 85, 100, 115, 130].map((x, i) => (
+                <line key={i} x1={x} y1="0" x2={50 + (x - 50) * 3.5} y2="100" stroke="rgba(255,255,255,0.032)" strokeWidth="0.45" />
+              ))}
+              {[18, 36, 55, 75].map(y => (
+                <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="rgba(255,255,255,0.028)" strokeWidth="0.45" />
+              ))}
+            </svg>
+            {/* Chair mats — subtle rectangles under each station */}
+            {[18, 50, 82].map((pct, i) => (
+              <div key={i} className="absolute top-0 rounded-sm"
+                style={{ left: `${pct - 10}%`, width: '18%', height: '60%', background: `linear-gradient(180deg,rgba(${i===0?'99,102,241':i===1?'6,182,212':'16,185,129'},0.04) 0%,transparent 100%)`, border: `1px solid rgba(${i===0?'99,102,241':i===1?'6,182,212':'16,185,129'},0.06)`, borderBottom: 'none' }} />
+            ))}
+            {/* Floor gloss near base */}
+            <div className="absolute bottom-0 left-0 right-0" style={{ height: '30%', background: 'linear-gradient(180deg,transparent 0%,rgba(80,100,200,0.04) 100%)' }} />
+            {/* Light cone pools from overhead lights hitting the floor */}
+            {[22, 50, 78].map(pct => (
+              <div key={pct} className="absolute top-0 pointer-events-none" style={{ left: `${pct}%`, transform: 'translateX(-50%)', width: 120, height: '100%', background: 'radial-gradient(ellipse 60% 60% at 50% 0%, rgba(180,200,255,0.045) 0%, transparent 70%)' }} />
             ))}
           </div>
 
-          {/* ── Floor — dark hardwood planks ── */}
-          <div className="absolute left-0 right-0 bottom-0" style={{ height: '16%', background: 'linear-gradient(180deg,#07080d 0%,#050609 100%)' }}>
-            {/* Plank lines */}
-            {[18, 36, 54, 72, 90].map(y => (
-              <div key={y} className="absolute left-0 right-0" style={{ top: `${y}%`, height: 1, background: 'rgba(255,255,255,0.03)' }} />
-            ))}
-            {/* Plank end seams — random widths */}
-            {[8, 28, 52, 76].map(x => (
-              <div key={x} className="absolute top-0 bottom-0" style={{ left: `${x}%`, width: 1, background: 'rgba(255,255,255,0.025)' }} />
-            ))}
-            {/* Subtle floor gloss reflection */}
-            <div className="absolute inset-x-0 top-0" style={{ height: '30%', background: 'linear-gradient(180deg,rgba(99,102,241,0.04) 0%,transparent 100%)' }} />
-          </div>
 
-          {/* ── Windows — much larger, more dramatic ── */}
+
+          {/* ── Windows — pushed to edges, no overlap with center sign ── */}
           {([
-            { style: { left: 18 }, nebulaColor: 'rgba(99,102,241,0.22)', dir: -1 as const },
-            { style: { right: 18 }, nebulaColor: 'rgba(52,211,153,0.16)', dir: 1 as const },
+            { style: { left: 0 }, nebulaColor: 'rgba(99,102,241,0.22)', dir: -1 as const },
+            { style: { right: 0 }, nebulaColor: 'rgba(52,211,153,0.16)', dir: 1 as const },
           ]).map((w, wi) => (
             <div key={wi} className="absolute rounded-2xl overflow-hidden"
               style={{
-                width: 168, height: 210,
-                top: '9%',
+                width: 220, height: 250,
+                top: '7%',
                 ...w.style,
                 background: '#010308',
                 border: '1.5px solid rgba(255,255,255,0.14)',
@@ -2068,10 +2110,10 @@ Write the complete final deliverable:`,
           ))}
 
           {/* Window sill ledges */}
-          {[{ left: 18 }, { right: 18 }].map((pos, wi) => (
+          {[{ left: 0 }, { right: 0 }].map((pos, wi) => (
             <div key={wi} className="absolute rounded-b-sm"
               style={{
-                width: 178, height: 8, top: 'calc(9% + 210px)',
+                width: 230, height: 8, top: 'calc(7% + 250px)',
                 ...pos,
                 background: 'linear-gradient(180deg,#1a1d28,#12141e)',
                 border: '1px solid rgba(255,255,255,0.07)',
@@ -2083,44 +2125,48 @@ Write the complete final deliverable:`,
           <div className="absolute pointer-events-none" style={{ left: 0, width: 200, bottom: '16%', height: 80, background: 'radial-gradient(ellipse 80% 50% at 30% 100%,rgba(99,102,241,0.06) 0%,transparent 70%)' }} />
           <div className="absolute pointer-events-none" style={{ right: 0, width: 200, bottom: '16%', height: 80, background: 'radial-gradient(ellipse 80% 50% at 70% 100%,rgba(52,211,153,0.05) 0%,transparent 70%)' }} />
 
-          {/* ── File cabinet — centered on back wall, just below the sign ── */}
-          <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 'calc(10% + 152px)', zIndex: 10 }}>
+          {/* ── File cabinet — standing on the floor between researcher and synth ── */}
+          <div className="absolute" style={{ bottom: 50, left: 'calc(63% - 26px)', zIndex: 5 }}>
             <FileCabinetVisual fileCount={wsFiles.length} onClick={() => setCabinetOpen(true)} />
+            {/* Floor shadow to ground it */}
+            <div className="absolute left-1/2 -translate-x-1/2 rounded-full" style={{ bottom: -6, width: 44, height: 6, background: 'rgba(0,0,0,0.55)', filter: 'blur(4px)' }} />
           </div>
 
-          {/* Bleumr Workspace — etched into back wall */}
+          {/* Bleumr Workspace — big centered sign on back wall */}
           <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center"
-            style={{ top: '10%', width: 200 }}>
-            <div className="relative flex flex-col items-center px-5 py-4 rounded-2xl"
+            style={{ top: '7%', width: 300, zIndex: 5 }}>
+            <div className="relative flex flex-col items-center px-8 py-6 rounded-2xl"
               style={{
-                background: 'linear-gradient(160deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%)',
-                boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.07)',
+                background: 'linear-gradient(160deg, rgba(255,255,255,0.024) 0%, rgba(255,255,255,0.008) 100%)',
+                boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.05), 0 2px 0 rgba(255,255,255,0.07), 0 0 60px rgba(99,102,241,0.08)',
+                border: '1px solid rgba(255,255,255,0.1)',
               }}>
-              <InlineStarSphere size={64} />
-              <div className="mt-3 flex flex-col items-center gap-0.5">
-                <motion.span className="tracking-[0.25em] font-bold text-[12px] uppercase"
-                  style={{ color: 'rgba(255,255,255,0.6)', textShadow: '0 0 16px rgba(129,140,248,0.4)' }}
-                  animate={{ opacity: [0.45, 0.75, 0.45] }}
+              <InlineStarSphere size={90} />
+              <div className="mt-4 flex flex-col items-center gap-1">
+                <motion.span className="tracking-[0.3em] font-black text-[22px] uppercase"
+                  style={{ color: 'rgba(255,255,255,0.82)', textShadow: '0 0 28px rgba(129,140,248,0.6), 0 0 60px rgba(129,140,248,0.3)' }}
+                  animate={{ opacity: [0.65, 1, 0.65] }}
                   transition={{ duration: 4, repeat: Infinity }}>
                   BLEUMR
                 </motion.span>
-                <span className="tracking-[0.2em] text-[7px] font-semibold uppercase"
-                  style={{ color: 'rgba(129,140,248,0.45)' }}>
+                <span className="tracking-[0.32em] text-[11px] font-bold uppercase"
+                  style={{ color: 'rgba(129,140,248,0.7)', textShadow: '0 0 12px rgba(129,140,248,0.4)' }}>
                   MISSION TEAM
                 </span>
               </div>
-              <div className="mt-3 flex items-center gap-1.5">
+              <div className="mt-4 flex items-center gap-2">
                 {['#818cf8','#22d3ee','#34d399'].map((c, i) => (
                   <motion.div key={i} className="rounded-full"
-                    style={{ width: 22, height: 2, background: c }}
-                    animate={{ opacity: [0.25, 0.6, 0.25] }}
+                    style={{ width: 28, height: 2.5, background: c }}
+                    animate={{ opacity: [0.3, 0.7, 0.3] }}
                     transition={{ duration: 2.5, repeat: Infinity, delay: i * 0.4 }}
                   />
                 ))}
               </div>
-              <div className="absolute top-0 inset-x-4 h-px rounded-full"
-                style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent)' }} />
+              <div className="absolute top-0 inset-x-6 h-px rounded-full"
+                style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent)' }} />
+              <div className="absolute bottom-0 inset-x-6 h-px rounded-full"
+                style={{ background: 'linear-gradient(90deg,transparent,rgba(129,140,248,0.12),transparent)' }} />
             </div>
           </div>
 
@@ -2135,18 +2181,33 @@ Write the complete final deliverable:`,
           </AnimatePresence>
 
           {/* ── Agent stations ── */}
-          <div className="absolute bottom-14 left-0 right-0 flex items-end justify-around px-8">
+          <div className="absolute left-0 right-0 flex items-end justify-around px-6" style={{ bottom: 42 }}>
             {AGENTS.map(agent => (
-              <div key={agent.id} className="flex flex-col items-center">
-                <SeatedCharacter
-                  agent={agent}
-                  status={statuses[agent.id]}
-                  selected={selected === agent.id}
-                  onClick={() => setSelected(p => p === agent.id ? null : agent.id)}
-                  streamText={agentBubble[agent.id]}
-                  phaseLabel={agentPhaseLabel[agent.id]}
+              <div key={agent.id} className="relative flex-shrink-0" style={{ width: 210, height: 280 }}>
+
+                {/* Chair mat glow on floor */}
+                <motion.div className="absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none"
+                  style={{ bottom: -8, width: 160, height: 14, background: agent.accent, filter: 'blur(12px)', zIndex: 0 }}
+                  animate={{ opacity: statuses[agent.id] === 'thinking' ? [0.1, 0.28, 0.1] : statuses[agent.id] === 'done' ? 0.14 : 0.06 }}
+                  transition={{ duration: 2, repeat: Infinity }}
                 />
-                <Desk agent={agent} status={statuses[agent.id]} />
+
+                {/* Character — helmet peeks above standing monitor */}
+                <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 88, zIndex: 1 }}>
+                  <AstronautCharacter
+                    agent={agent}
+                    status={statuses[agent.id]}
+                    selected={selected === agent.id}
+                    onClick={() => setSelected(p => p === agent.id ? null : agent.id)}
+                    streamText={agentBubble[agent.id]}
+                    phaseLabel={agentPhaseLabel[agent.id]}
+                  />
+                </div>
+
+                {/* Desk — in front of character, covering lower body / chair */}
+                <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 0, zIndex: 2 }}>
+                  <Desk agent={agent} status={statuses[agent.id]} />
+                </div>
               </div>
             ))}
           </div>

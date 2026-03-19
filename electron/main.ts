@@ -15,6 +15,17 @@ import {
 } from 'fs'
 import { autoUpdater } from 'electron-updater'
 
+// ── GPU + performance flags (must be set before app is ready) ─────────────────
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
+app.commandLine.appendSwitch('ignore-gpu-blacklist')
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,PlatformHEVCDecoderSupport')
+app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors')
+// DNS prefetch for faster first loads
+app.commandLine.appendSwitch('enable-tcp-fast-open')
+app.commandLine.appendSwitch('enable-quic')
+
 // ── Simple JSON preference store ──────────────────────────────────────────────
 
 const storePath = join(app.getPath('userData'), 'preferences.json')
@@ -60,14 +71,28 @@ function createTab(url: string): string {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,      // keep rendering active even when tab is hidden
+      images: true,
+      javascript: true,
+      webgl: true,
+      spellcheck: false,
     },
   })
 
-  view.webContents.loadURL(url || 'about:blank').catch(() => {})
+  // Speed: aggressive caching + DNS prefetch
+  view.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders } })
+  })
 
-  // Grant mic/camera permissions for browser tabs (e.g. Google Meet, voice sites)
+  // Load the URL — add https:// if scheme is missing
+  const targetUrl = url
+    ? (url.startsWith('http') || url.startsWith('file') || url.startsWith('about') ? url : `https://${url}`)
+    : 'about:blank'
+  view.webContents.loadURL(targetUrl).catch(() => {})
+
+  // Grant mic/camera/clipboard permissions for browser tabs
   view.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    const allowed = ['media', 'audioCapture', 'mediaKeySystem'].includes(permission)
+    const allowed = ['media', 'audioCapture', 'mediaKeySystem', 'clipboard-read', 'notifications'].includes(permission)
     callback(allowed)
   })
 
@@ -135,9 +160,10 @@ function setActiveTab(id: string) {
   mainWindow.contentView.addChildView(view)
   activeTabId = id
 
-  // Default to full window bounds; renderer can call setBounds to adjust
-  const { width, height } = mainWindow.getBounds()
-  view.setBounds({ x: 0, y: 0, width, height })
+  // Start hidden (1×1 off-screen); the renderer will call orbit:browser:setBounds
+  // with the actual viewport rect immediately after switching tabs.
+  // This prevents the WebContentsView from flashing at full-window size.
+  view.setBounds({ x: 0, y: -1, width: 1, height: 1 })
 
   emitBrowserState()
 }
@@ -162,8 +188,16 @@ function getAllTabsState() {
 }
 
 function emitBrowserState() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('orbit:browser:stateUpdate', getAllTabsState())
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const state = getAllTabsState()
+  mainWindow.webContents.send('orbit:browser:stateUpdate', state)
+  // Also emit explicit loading-changed events for each tab so the renderer
+  // can reliably clear the loading indicator without relying on stale closures
+  for (const tab of state.tabs) {
+    mainWindow.webContents.send('orbit:browser:loadingChanged', {
+      tabId: tab.id,
+      isLoading: tab.loading,
+    })
   }
 }
 
@@ -250,16 +284,7 @@ app.whenReady().then(() => {
     })
   }
 
-  // Keep active browser view sized to the window
-  mainWindow.on('resize', () => {
-    if (activeTabId) {
-      const view = tabs.get(activeTabId)
-      if (view && mainWindow) {
-        const { width, height } = mainWindow.getBounds()
-        view.setBounds({ x: 0, y: 0, width, height })
-      }
-    }
-  })
+  // Window resize is handled by the renderer's ResizeObserver which calls setBounds via IPC
 
   mainWindow.on('closed', () => { mainWindow = null })
 })
@@ -381,6 +406,19 @@ ipcMain.handle('orbit:browser:close', (_e, tabId: string) => {
 
 ipcMain.handle('orbit:browser:setActive', (_e, tabId: string) => {
   setActiveTab(tabId)
+  return { success: true }
+})
+
+// Remove all WebContentsViews from the window without destroying them.
+// Called when the browser panel is closed so nothing renders behind the platform UI.
+ipcMain.handle('orbit:browser:hideAll', () => {
+  if (!mainWindow) return { success: false }
+  for (const [, view] of tabs) {
+    if (mainWindow.contentView.children.includes(view)) {
+      mainWindow.contentView.removeChildView(view)
+    }
+  }
+  activeTabId = null
   return { success: true }
 })
 

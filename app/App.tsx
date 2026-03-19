@@ -96,86 +96,95 @@ const DEFAULT_CONFIG: OrbitConfig = {
   maxMemoryMode: true,
 };
 
-const SYSTEM_PROMPT = `You are JUMARI — a world-class AI agent living inside Bleumr. You have two modes: conversation and browser control.
+const SYSTEM_PROMPT = `You are JUMARI — a silent, ruthlessly efficient browser agent inside Bleumr.
 ${BLEUMR_FULL_CONTEXT}
 
----
-
-## WHO YOU ARE
-You are the smartest, most capable AI agent on the planet. You think fast, act decisively, and always find a way. When something fails, you adapt and try another approach.
+## CRITICAL OUTPUT RULES — NEVER BREAK THESE
+- NEVER write "Step 1:", "Step 2:", "Step 3:" or any numbered steps visible to the user
+- NEVER explain your reasoning, plan, or thought process in plain text
+- NEVER describe what you are about to do or what you just did
+- NEVER say "I have successfully navigated", "I can see", "The page shows", "I will now"
+- During automation: output ONLY a single JSON block. Nothing else. No words before or after.
+- Only speak as plain text for MODE 1 (conversation) or the final "reply" action
+- Keep ALL plain-text responses under 2 sentences. No lists. No headers.
 
 ## CONTENT BOUNDARIES
-You do not assist with: illegal activity, generating malware or phishing content, scraping personal data without consent (emails, phone numbers, private info), creating or sending spam, bypassing authentication on accounts the user does not own, or any content that violates applicable law. When asked to do something outside these bounds, explain briefly why and offer the closest legal alternative.
+You do not assist with: illegal activity, malware, phishing, scraping private data without consent, spam, bypassing auth on accounts the user doesn't own, or anything illegal. Decline briefly in one sentence.
 
 ---
 
 ## MODE 1 — CONVERSATION
-For anything you can answer from knowledge: questions, writing, math, analysis, opinions, creative work, anything.
-Reply naturally in plain text. Be direct, smart, and useful. No JSON.
+Questions, writing, math, analysis, opinions, creative work. Reply in plain text, max 2 sentences. No JSON.
 
-## MODE 2 — PAGE READING (user asks about what's on screen)
-When the user asks "what is this?", "summarize this", "what's on this page?", "read this", "what does it say?":
-Step 1 — read the page:
+## MODE 2 — PAGE READING
+User asks "what is this?", "summarize", "what's on this page?":
 \`\`\`json
-{"thought": "User wants to know about the page.", "plan": "Read the page content first.", "action": "read_page"}
+{"action": "read_page"}
 \`\`\`
-Step 2 — after getting page content, answer with:
+Then immediately:
 \`\`\`json
-{"thought": "I have the page content.", "plan": "Give a full, useful answer.", "action": "reply", "message": "your complete answer here"}
+{"action": "reply", "message": "your answer here"}
 \`\`\`
 
 ## MODE 3 — BROWSER AUTOMATION
-When user wants to DO something: navigate, click, search, fill forms, scroll, extract data, automate anything.
-Output ONE JSON action per turn. Think step by step. Be precise.
+User wants to DO something. Output ONE JSON block. Execute immediately. Do not announce, explain, or confirm.
 
 \`\`\`json
-{"thought": "what I see and what to do", "plan": "my approach", "action": "...", ...params}
+{"action": "...", ...params}
 \`\`\`
 
-AVAILABLE ACTIONS:
+ACTIONS:
 1.  {"action": "navigate", "url": "https://..."} — go to URL
-2.  {"action": "read_page"} — get all page elements with IDs; ALWAYS do this before clicking anything
-3.  {"action": "click", "element_id": 123} — click element by ID
-4.  {"action": "type", "element_id": 123, "text": "...", "press_enter": true} — type; always press_enter:true for search/login
-5.  {"action": "scroll", "direction": "down"} — scroll down or up
-6.  {"action": "inject_script", "script": "..."} — run JavaScript directly; use for complex interactions, data extraction, clicking things that don't have IDs
-7.  {"action": "go_back"} — navigate back
-8.  {"action": "refresh"} — reload page
-9.  {"action": "wait_for_element", "selector": "css"} — wait up to 15s for element
-10. {"action": "verify", "expected": "..."} — check task completed
-11. {"action": "reply", "message": "..."} — FINAL message to user when task is done
-12. {"action": "select_option", "element_id": 123, "value": "..."} — dropdown selection
-13. {"action": "key_press", "key": "Enter"} — keyboard key (Enter, Escape, Tab, ArrowUp, ArrowDown, Backspace, F5)
-14. {"action": "hover", "element_id": 123} — hover to reveal menus/tooltips
-15. {"action": "extract_data", "selector": "css", "attribute": "text"} — extract text or attributes from elements
-16. {"action": "new_tab", "url": "https://..."} — open in new tab
-17. {"action": "get_url"} — get current URL
-18. {"action": "clipboard_write", "text": "..."} — copy to clipboard
-19. {"action": "fill_form", "fields": [{"element_id": 1, "value": "..."}]} — fill multiple fields at once
-20. {"action": "drag_drop", "from_selector": "css", "to_selector": "css"} — drag and drop
-21. {"action": "screenshot"} — capture + analyze screenshot visually
+2.  {"action": "read_page"} — read elements with IDs — do this before ANY click
+3.  {"action": "click", "element_id": 123}
+4.  {"action": "type", "element_id": 123, "text": "...", "press_enter": true}
+5.  {"action": "scroll", "direction": "down"}
+6.  {"action": "inject_script", "script": "..."} — JS for complex interactions; null-check everything
+7.  {"action": "go_back"}
+8.  {"action": "refresh"}
+9.  {"action": "wait_for_element", "selector": "css"}
+10. {"action": "reply", "message": "..."} — ONLY when fully done; max 1 sentence
+11. {"action": "select_option", "element_id": 123, "value": "..."}
+12. {"action": "key_press", "key": "Enter"}
+13. {"action": "hover", "element_id": 123}
+14. {"action": "extract_data", "selector": "css", "attribute": "text"}
+15. {"action": "new_tab", "url": "https://..."}
+16. {"action": "screenshot"} — visual analysis
+17. {"action": "fill_form", "fields": [{"element_id": 1, "value": "..."}]}
 
----
+## EXECUTION RULES
+1. read_page BEFORE every click — never guess element IDs
+2. For search: navigate → read_page → type (press_enter: true)
+3. Click fails → try inject_script
+4. Dynamic sites (Instagram, YouTube, Twitter): null-check all JS selectors
+5. Complete tasks fully — never stop halfway, never ask permission mid-task
+6. Login wall → ask user for credentials in one sentence, then stop
+7. SITE LOCK: If already on a site and user says "search X" — use THAT site's search, never leave
 
-## EXECUTION RULES — NON-NEGOTIABLE
-1. ALWAYS use read_page before clicking — never guess element IDs
-2. For ANY search: navigate → read_page → type with press_enter:true
-3. If a click fails, try inject_script to interact directly via JS
-4. For dynamic sites (YouTube, Twitter, Instagram, Reddit): null-check everything in scripts
-5. When something doesn't work, try a different approach — never give up, never say "I can't"
-6. Complete every task fully. Don't stop halfway. Don't ask for permission mid-task.
-7. Only use "reply" action when the ENTIRE task is done
-8. If you hit a login wall, tell the user what credentials are needed
-9. Always be efficient — combine steps when possible
+## ANTI-PATTERNS — NEVER DO THESE
+- ❌ "Step 1: Navigate to..." — just output the JSON
+- ❌ "I have successfully..." — just do the next action
+- ❌ Long explanations — the user sees actions happening in real time
+- ❌ Asking "Would you like me to..." — just do it
+- ❌ Stopping after navigate — always immediately read_page and continue
 
-## SITE LOCK — NON-NEGOTIABLE
-If you are already on a website (YouTube, Twitter, Reddit, Amazon, etc.) and the user asks to search, look up, or find something — ALWAYS use that site's own search. NEVER navigate away to Google or any other site. The user is on that site for a reason. Stay there until they explicitly say "go to [different site]".
+## MODE 4 — SCHEDULER / REMINDERS
+When the user asks to schedule, remind, add an event, set a meeting, or anything time-based:
+1. Reply naturally confirming what you're scheduling.
+2. At the END of your reply, emit ONE hidden tag (never show it to the user, it gets stripped from display):
 
-Examples:
-- On YouTube, user says "search dogs" → use YouTube search bar, stay on YouTube
-- On Amazon, user says "find headphones" → use Amazon search, stay on Amazon
-- On Reddit, user says "look up crypto" → use Reddit search, stay on Reddit
-- User says "go to Google and search dogs" → THEN you may go to Google
+<schedule>{"title": "Event title here", "date": "YYYY-MM-DD", "startHour": 9, "endHour": 10}</schedule>
+
+Rules:
+- date: always ISO format "YYYY-MM-DD". TODAY_DATE_PLACEHOLDER. Infer the next upcoming date if user says "tomorrow", "next Monday", etc.
+- startHour / endHour: integers 0–23. Default duration 1 hour unless user specifies. Reminders use startHour = endHour.
+- title: concise, 1–6 words, no quotes inside.
+- ALWAYS emit this tag if ANY scheduling/reminder intent is detected — even vague ones like "remind me to call mom".
+- Never omit the tag if the user is asking to schedule or be reminded of something.
+
+Example: User says "remind me to take my meds tomorrow at 8am"
+Response: "Got it! I've added a reminder to take your meds tomorrow at 8:00 AM."
+<schedule>{"title": "Take meds", "date": "2026-03-19", "startHour": 8, "endHour": 8}</schedule>
 
 ## TASK COMPLETION MINDSET
 You finish what you start. If the first approach fails, you try inject_script. If that fails, you try a different URL or page element. You are relentless. The only time you stop is when the task is genuinely complete or truly impossible (not just hard).`;
@@ -366,8 +375,10 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState('Jumari 1.0');
   const availableAgents = ['Jumari 1.0', 'Bleumr v1.0', 'Nova 2.0', 'Atlas Pro'];
   
-  // webviewRefs — keyed by tabId, used to target the right webview element per tab
+  // webviewRefs — keyed by tabId, used for executeJS fallback
   const webviewRefs = useRef<{ [key: string]: any }>({});
+  // browserContainerRef — measures the viewport rect so we can position the WebContentsView correctly
+  const browserContainerRef = useRef<HTMLDivElement>(null);
 
   // Browser State - Using useBrowserEngine hook
   const {
@@ -433,8 +444,13 @@ export default function App() {
       const data = (e as CustomEvent).detail;
       if (data?.title) setSchedulingToast(data);
     };
+    const openHandler = () => setShowScheduler(true);
     window.addEventListener('orbit_scheduling_toast', handler);
-    return () => window.removeEventListener('orbit_scheduling_toast', handler);
+    window.addEventListener('orbit_open_scheduler', openHandler);
+    return () => {
+      window.removeEventListener('orbit_scheduling_toast', handler);
+      window.removeEventListener('orbit_open_scheduler', openHandler);
+    };
   }, []);
 
   // Auto-updater listeners (Electron only)
@@ -462,6 +478,58 @@ export default function App() {
       return prev;
     });
   }, [currentUrl, activeTabId]);
+
+  // ── WebContentsView bounds sync ───────────────────────────────────────────
+  // Measures the browser container div and tells the main process exactly where
+  // to position the Electron WebContentsView so it sits inside our UI chrome.
+  const updateBrowserBounds = useCallback(() => {
+    const orbitBrowser = (window as any).orbit?.browser;
+    if (!orbitBrowser?.setBounds || !activeTabId || !browserContainerRef.current) return;
+    // orbit:// internal URLs have no WebContentsView — skip
+    if (!currentUrl || currentUrl.startsWith('orbit://')) return;
+    const rect = browserContainerRef.current.getBoundingClientRect();
+    orbitBrowser.setBounds(activeTabId, {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    });
+  }, [activeTabId, currentUrl]);
+
+  // Re-position whenever the active tab or URL changes
+  useEffect(() => { updateBrowserBounds(); }, [updateBrowserBounds]);
+
+  // Re-position whenever the container is resized (window resize, panel drag, etc.)
+  useEffect(() => {
+    const container = browserContainerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => updateBrowserBounds());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [updateBrowserBounds]);
+
+  // Keep a stable ref to activeTabId so the appMode effect never needs it as a dep
+  const activeTabIdForModeRef = useRef(activeTabId);
+  useEffect(() => { activeTabIdForModeRef.current = activeTabId; }, [activeTabId]);
+
+  // Hide all WebContentsViews when browser panel is closed so they don't bleed
+  // through behind the platform UI. Re-activate the current tab when returning.
+  // Depends ONLY on appMode — never fires on tab changes to avoid resetting bounds.
+  useEffect(() => {
+    const orbitBrowser = (window as any).orbit?.browser;
+    if (!orbitBrowser) return;
+    if (appMode === 'platform') {
+      orbitBrowser.hideAll?.();
+    } else if (appMode === 'browser') {
+      // Re-add the active WebContentsView to the window after hideAll removed it.
+      // Only if the current tab has a real WebContentsView (not a renderer-only orbit:// tab).
+      const tabId = activeTabIdForModeRef.current;
+      if (tabId && !tabId.startsWith('tab-')) {
+        orbitBrowser.setActive?.(tabId);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode]); // intentionally omit activeTabId — use ref above
 
   // --- Chat Thread Management ---
   // useCallback prevents PlatformView (which is React.memo'd) from re-rendering
@@ -2833,7 +2901,8 @@ export default function App() {
       }
     }
 
-    const systemContent = SYSTEM_PROMPT + pageContext;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const systemContent = SYSTEM_PROMPT.replace('TODAY_DATE_PLACEHOLDER', `Today is ${todayStr}`) + pageContext;
 
     // Build message history — collapse system/browser-feedback into the conversation
     // as user-turn context so the AI always gets a valid user/assistant alternation
@@ -2902,6 +2971,38 @@ export default function App() {
   const handleUserSubmit = async (text: string, imageBase64?: string, imagePreview?: string) => {
     if (!text.trim() && !imageBase64) return;
     if (isAgentWorking) return;
+
+    // ── UI command intercepts — fire FIRST before anything else ──────────────
+    // These open panels directly without needing the AI or an API key.
+    const uiCmd = text.trim().toLowerCase();
+    const isOpenScheduler = /\b(open|show|launch|pull up|go to|view|see)\s+(the\s+)?(scheduler|calendar|schedule)\b|^(scheduler|calendar)$/i.test(uiCmd);
+    const isOpenVoice     = /\b(open|start|launch)\s+(the\s+)?voice(\s+chat)?\b/i.test(uiCmd);
+    const isOpenWorkspace = /\b(open|launch|show)\s+(the\s+)?(workspace|cowork|mission\s+team|research\s+team)\b/i.test(uiCmd);
+    const isOpenSettings  = /\b(open|go\s+to|show)\s+(the\s+)?settings\b/i.test(uiCmd);
+
+    if (isOpenScheduler || isOpenVoice || isOpenWorkspace || isOpenSettings) {
+      const msgId = Date.now().toString();
+      const replies: Record<string, string> = {
+        scheduler: 'Opening your scheduler.',
+        voice:     'Launching voice chat.',
+        workspace: 'Opening Workspace.',
+        settings:  'Opening Settings.',
+      };
+      const which = isOpenScheduler ? 'scheduler' : isOpenVoice ? 'voice' : isOpenWorkspace ? 'workspace' : 'settings';
+      setMessages(prev => [
+        ...prev,
+        { id: msgId + '-u', role: 'user' as const, content: text.trim() },
+        { id: msgId + '-a', role: 'assistant' as const, content: replies[which] },
+      ]);
+      setTimeout(() => {
+        if (isOpenScheduler) setShowScheduler(true);
+        else if (isOpenVoice) setShowVoiceChat(true);
+        else if (isOpenWorkspace) setShowWorkspace(true);
+        else if (isOpenSettings) setShowSettings(true);
+      }, 200);
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     let processedInput = text;
 
@@ -3165,7 +3266,10 @@ export default function App() {
                    console.warn('[Scheduler] Failed to parse schedule tag:', match[1], err);
                  }
                }
-               if (foundAny) setTimeout(() => setShowScheduler(true), 2200);
+               if (foundAny) {
+                 // Show toast immediately, then open scheduler so user can see the event
+                 setTimeout(() => setShowScheduler(true), 800);
+               }
              };
 
              // Detect HTML/<open> tags in RAW content, open in Orbit browser via Electron IPC
@@ -3425,9 +3529,27 @@ export default function App() {
            if (isInjectScript) actionType = 'MODIFY_DATA';
            if (isEmailOrPassword) actionType = 'SEND_EMAIL';
 
+           // Build a plain-English message — never show raw code or JSON
+           const actionVerb = action.action ?? 'perform an action';
+           const actionTarget = action.url ?? action.selector ?? action.text?.slice(0, 40) ?? '';
+           const humanMessages: Record<string, string> = {
+             inject_script: 'JUMARI is about to run a script on this page.',
+             click:         'JUMARI is about to click something on the page.',
+             type:          'JUMARI is about to type into a form field.',
+             navigate:      `JUMARI is about to navigate${actionTarget ? ' to ' + actionTarget : ''}.`,
+             fill_form:     'JUMARI is about to fill out a form.',
+             SEND_EMAIL:    'JUMARI is about to send an email.',
+             PURCHASE:      'JUMARI is about to complete a purchase.',
+             POST_CONTENT:  'JUMARI is about to post content.',
+             DELETE_DATA:   'JUMARI is about to delete data.',
+             MODIFY_DATA:   'JUMARI is about to modify data on this page.',
+           };
+           const humanMsg = humanMessages[actionType] ?? humanMessages[actionVerb] ?? `JUMARI is about to ${actionVerb}.`;
+
            const result = await SafetyMiddleware.requestApproval({
               actionType,
-              context: action
+              context: action,
+              message: humanMsg,
            });
 
            if (!result.approved) {
@@ -4688,31 +4810,28 @@ export default function App() {
           )}
         </div>
 
-        {/* Webview Container */}
-        <div className="flex-1 relative bg-white rounded-tl-lg overflow-hidden border-t border-l border-slate-800/60 shadow-2xl">
+        {/* Webview Container — WebContentsView from main process renders here via setBounds */}
+        <div
+          ref={browserContainerRef}
+          className="flex-1 relative rounded-tl-lg overflow-hidden border-t border-l border-slate-800/60 shadow-2xl bg-[#0a0a0c]"
+        >
           <AIParticleOverlay isActive={isAgentWorking || isLoadingUrl} />
-          
+
+          {/* OrbitHome: shown for orbit:// tabs (no WebContentsView for those) */}
           {tabs.map(tab => (
-            <div 
-              key={tab.id} 
-              className="w-full h-full absolute inset-0 bg-[#0a0a0c]"
-              style={{ display: tab.id === activeTabId ? 'block' : 'none' }}
-            >
-              {tab.url === 'orbit://home' ? (
+            tab.url.startsWith('orbit://') && tab.id === activeTabId ? (
+              <div key={tab.id} className="w-full h-full absolute inset-0">
                 <OrbitHome />
-              ) : (
-                <webview
-                  id={`browser-${tab.id}`}
-                  ref={el => {
-                    webviewRefs.current[tab.id] = el;
-                  }}
-                  src={tab.url}
-                  style={{ width: "100%", height: "100%" }}
-                  allowpopups="true"
-                ></webview>
-              )}
-            </div>
+              </div>
+            ) : null
           ))}
+
+          {/* Empty state: no tabs open yet */}
+          {tabs.length === 0 && (
+            <div className="w-full h-full absolute inset-0">
+              <OrbitHome />
+            </div>
+          )}
         </div>
       </div>
 
@@ -5294,6 +5413,7 @@ export default function App() {
         />
       )}
     </AnimatePresence>
+
     </AgentErrorBoundary>
   );
 }

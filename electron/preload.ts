@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('orbit', {
     /** Capture current tab as base64 PNG for vision analysis */
     screenshot: (tabId: string) =>
       ipcRenderer.invoke('orbit:browser:screenshot', tabId),
+    /** Remove all WebContentsViews from the window (called when browser panel closes) */
+    hideAll: () =>
+      ipcRenderer.invoke('orbit:browser:hideAll'),
 
     /** Subscribe to URL changes; returns unsubscribe fn */
     onUrlChanged: (callback: (data: { tabId: string; url: string }) => void) => {
@@ -112,17 +115,27 @@ contextBridge.exposeInMainWorld('orbit', {
     /** Subscribe to loading-state changes; returns unsubscribe fn */
     onLoadingChanged: (callback: (data: { tabId: string; isLoading: boolean }) => void) => {
       const prev = new Map<string, boolean>()
-      const handler = (_: Electron.IpcRendererEvent, state: any) => {
+      // Listen on stateUpdate (batched) AND the dedicated loadingChanged event
+      const stateHandler = (_: Electron.IpcRendererEvent, state: any) => {
         for (const tab of state?.tabs ?? []) {
           const old = prev.get(tab.id)
           if (old !== tab.loading) {
             prev.set(tab.id, tab.loading)
-            if (old !== undefined) callback({ tabId: tab.id, isLoading: tab.loading })
+            callback({ tabId: tab.id, isLoading: tab.loading }) // always fire, no guard
           }
         }
       }
-      ipcRenderer.on('orbit:browser:stateUpdate', handler)
-      return () => ipcRenderer.off('orbit:browser:stateUpdate', handler)
+      const directHandler = (_: Electron.IpcRendererEvent, data: any) => {
+        if (data?.tabId !== undefined && data?.isLoading !== undefined) {
+          callback({ tabId: data.tabId, isLoading: data.isLoading })
+        }
+      }
+      ipcRenderer.on('orbit:browser:stateUpdate', stateHandler)
+      ipcRenderer.on('orbit:browser:loadingChanged', directHandler)
+      return () => {
+        ipcRenderer.off('orbit:browser:stateUpdate', stateHandler)
+        ipcRenderer.off('orbit:browser:loadingChanged', directHandler)
+      }
     },
     /** Subscribe to tab crash events; returns unsubscribe fn */
     onCrash: (callback: (data: { tabId: string; details: unknown }) => void) => {

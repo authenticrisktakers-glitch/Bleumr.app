@@ -5,6 +5,7 @@ export type SensitiveAction = 'PURCHASE' | 'SEND_EMAIL' | 'POST_CONTENT' | 'DELE
 export interface SafetyCheckRequest {
   actionType: SensitiveAction | string;
   context: Record<string, any>;
+  message?: string; // human-readable, shown in the approval prompt
 }
 
 export interface SafetyCheckResult {
