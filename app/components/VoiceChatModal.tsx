@@ -447,8 +447,12 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (!analyser) return;
     const bufLen = analyser.frequencyBinCount;
     const data   = new Uint8Array(bufLen);
-    const SILENCE_THRESHOLD = 10;
-    const SILENCE_FRAMES    = 45; // ~1.8 s
+    const SILENCE_THRESHOLD = 18;  // raised — Electron mics often have baseline noise > 10
+    const SILENCE_FRAMES    = 40;  // ~1.5 s of silence after speech ends
+    const SPEECH_THRESHOLD  = 30;  // must hear actual speech before silence-detection kicks in
+    const MAX_LISTEN_FRAMES = 900; // ~15 s hard cap — stops even if silence never detected
+    let heardSpeech = false;
+    let totalFrames = 0;
 
     const tick = () => {
       animRef.current = requestAnimationFrame(tick);
@@ -457,10 +461,18 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       setVolume(avg / 255);
 
       if (voiceStateRef.current === 'listening') {
-        if (avg < SILENCE_THRESHOLD) {
-          if (++silentRef.current >= SILENCE_FRAMES) stopListening();
-        } else {
-          silentRef.current = 0;
+        totalFrames++;
+        // Detect that the user actually started speaking
+        if (!heardSpeech && avg >= SPEECH_THRESHOLD) heardSpeech = true;
+        // Hard cap — stop after max duration regardless
+        if (totalFrames >= MAX_LISTEN_FRAMES) { stopListening(); return; }
+        // Only check silence after user has spoken
+        if (heardSpeech) {
+          if (avg < SILENCE_THRESHOLD) {
+            if (++silentRef.current >= SILENCE_FRAMES) stopListening();
+          } else {
+            silentRef.current = 0;
+          }
         }
       }
     };
