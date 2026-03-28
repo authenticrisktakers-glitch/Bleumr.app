@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, ShieldAlert, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home, Volume2 } from 'lucide-react';
+import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, ShieldAlert, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home, Volume2, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Resizable } from 're-resizable';
 import orbitLogo from 'figma:asset/54880fbad4bd9a1a3b62b3ccc000931000c0afc2.png';
@@ -18,6 +18,10 @@ import './engine'; // Initialize JUMARI automation engine layers
 import { ChatErrorBoundary, BrowserErrorBoundary, AgentErrorBoundary } from './components/ErrorBoundary';
 import { useBrowserEngine } from './hooks/useBrowserEngine';
 import { ScriptSanitizer } from './services/ScriptSanitizer';
+import { detectIntent, parseCommandToQueue, parseAction } from './engine/IntentParser';
+import { analyzeWithVision, READ_PAGE_SCRIPT, SOM_INJECT_SCRIPT, SOM_REMOVE_SCRIPT, perceivePage } from './engine/Perceiver';
+import { callAI } from './engine/ModelOrchestrator';
+import { callLocalBrain } from './engine/LocalBrain';
 import { BrowserService } from './services/BrowserService';
 import { SecureStorage } from './services/SecureStorage';
 import SubscriptionService, { SubscriptionTier } from './services/SubscriptionService';
@@ -96,106 +100,16 @@ const DEFAULT_CONFIG: OrbitConfig = {
   maxMemoryMode: true,
 };
 
-const SYSTEM_PROMPT = `You are JUMARI — a silent, ruthlessly efficient browser agent inside Bleumr.
-${BLEUMR_FULL_CONTEXT}
-
-## CRITICAL OUTPUT RULES — NEVER BREAK THESE
-- NEVER write "Step 1:", "Step 2:", "Step 3:" or any numbered steps visible to the user
-- NEVER explain your reasoning, plan, or thought process in plain text
-- NEVER describe what you are about to do or what you just did
-- NEVER say "I have successfully navigated", "I can see", "The page shows", "I will now"
-- During automation: output ONLY a single JSON block. Nothing else. No words before or after.
-- Only speak as plain text for MODE 1 (conversation) or the final "reply" action
-- Keep ALL plain-text responses under 2 sentences. No lists. No headers.
-
-## CONTENT BOUNDARIES
-You do not assist with: illegal activity, malware, phishing, scraping private data without consent, spam, bypassing auth on accounts the user doesn't own, or anything illegal. Decline briefly in one sentence.
-
----
-
-## MODE 1 — CONVERSATION
-Questions, writing, math, analysis, opinions, creative work. Reply in plain text, max 2 sentences. No JSON.
-
-## MODE 2 — PAGE READING
-User asks "what is this?", "summarize", "what's on this page?":
-\`\`\`json
-{"action": "read_page"}
-\`\`\`
-Then immediately:
-\`\`\`json
-{"action": "reply", "message": "your answer here"}
-\`\`\`
-
-## MODE 3 — BROWSER AUTOMATION
-User wants to DO something. Output ONE JSON block. Execute immediately. Do not announce, explain, or confirm.
-
-\`\`\`json
-{"action": "...", ...params}
-\`\`\`
-
-ACTIONS:
-1.  {"action": "navigate", "url": "https://..."} — go to URL
-2.  {"action": "read_page"} — read elements with IDs — do this before ANY click
-3.  {"action": "click", "element_id": 123}
-4.  {"action": "type", "element_id": 123, "text": "...", "press_enter": true}
-5.  {"action": "scroll", "direction": "down"}
-6.  {"action": "inject_script", "script": "..."} — JS for complex interactions; null-check everything
-7.  {"action": "go_back"}
-8.  {"action": "refresh"}
-9.  {"action": "wait_for_element", "selector": "css"}
-10. {"action": "reply", "message": "..."} — ONLY when fully done; max 1 sentence
-11. {"action": "select_option", "element_id": 123, "value": "..."}
-12. {"action": "key_press", "key": "Enter"}
-13. {"action": "hover", "element_id": 123}
-14. {"action": "extract_data", "selector": "css", "attribute": "text"}
-15. {"action": "new_tab", "url": "https://..."}
-16. {"action": "screenshot"} — visual analysis
-17. {"action": "fill_form", "fields": [{"element_id": 1, "value": "..."}]}
-
-## EXECUTION RULES
-1. read_page BEFORE every click — never guess element IDs
-2. For search: navigate → read_page → type (press_enter: true)
-3. Click fails → try inject_script
-4. Dynamic sites (Instagram, YouTube, Twitter): null-check all JS selectors
-5. Complete tasks fully — never stop halfway, never ask permission mid-task
-6. Login wall → ask user for credentials in one sentence, then stop
-7. SITE LOCK: If already on a site and user says "search X" — use THAT site's search, never leave
-
-## ANTI-PATTERNS — NEVER DO THESE
-- ❌ "Step 1: Navigate to..." — just output the JSON
-- ❌ "I have successfully..." — just do the next action
-- ❌ Long explanations — the user sees actions happening in real time
-- ❌ Asking "Would you like me to..." — just do it
-- ❌ Stopping after navigate — always immediately read_page and continue
-
-## MODE 4 — SCHEDULER / REMINDERS
-When the user asks to schedule, remind, add an event, set a meeting, or anything time-based:
-1. Reply naturally confirming what you're scheduling.
-2. At the END of your reply, emit ONE hidden tag (never show it to the user, it gets stripped from display):
-
-<schedule>{"title": "Event title here", "date": "YYYY-MM-DD", "startHour": 9, "endHour": 10}</schedule>
-
-Rules:
-- date: always ISO format "YYYY-MM-DD". TODAY_DATE_PLACEHOLDER. Infer the next upcoming date if user says "tomorrow", "next Monday", etc.
-- startHour / endHour: integers 0–23. Default duration 1 hour unless user specifies. Reminders use startHour = endHour.
-- title: concise, 1–6 words, no quotes inside.
-- ALWAYS emit this tag if ANY scheduling/reminder intent is detected — even vague ones like "remind me to call mom".
-- Never omit the tag if the user is asking to schedule or be reminded of something.
-
-Example: User says "remind me to take my meds tomorrow at 8am"
-Response: "Got it! I've added a reminder to take your meds tomorrow at 8:00 AM."
-<schedule>{"title": "Take meds", "date": "2026-03-19", "startHour": 8, "endHour": 8}</schedule>
-
-## TASK COMPLETION MINDSET
-You finish what you start. If the first approach fails, you try inject_script. If that fails, you try a different URL or page element. You are relentless. The only time you stop is when the task is genuinely complete or truly impossible (not just hard).`;
-
 import { PlatformView } from './components/PlatformView';
 import { JumariApprovalModal } from './components/JumariApprovalModal';
 import { Onboarding } from './components/Onboarding';
 import { SchedulerPage, SchedulingToast, addScheduleEvent } from './components/CalendarPage';
-import { BLEUMR_FULL_CONTEXT } from './services/BleumrLore';
+// Prompts (SYSTEM_PROMPT, AGENT_MODELS, buildVisionPrompt) used by ModelOrchestrator + Perceiver
 import { WorkspacePage } from './components/WorkspacePage';
 import { VoiceChatModal } from './components/VoiceChatModal';
+import { CodingPage } from './components/CodingPage';
+import { TradingDashboard } from './components/TradingDashboard';
+import { initTrading } from './services/trading';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
 export default function App() {
@@ -277,6 +191,9 @@ export default function App() {
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
     SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
 
+    // Initialize trading module (price feeds, alert engine, exchange connectors)
+    initTrading();
+
     // Load persisted chat threads and auto-restore the most recent conversation
     const threads = loadThreadsMeta();
     setChatThreads(threads);
@@ -307,6 +224,8 @@ export default function App() {
   const [showScheduler, setShowScheduler] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
   const [showVoiceChat, setShowVoiceChat] = useState(false);
+  const [showCoding, setShowCoding] = useState(false);
+  const [showTrading, setShowTrading] = useState(false);
   const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
@@ -314,6 +233,7 @@ export default function App() {
   const [agentTotalSteps, setAgentTotalSteps] = useState(50);
   const [agentCurrentAction, setAgentCurrentAction] = useState('');
   const agentAbortRef = useRef(false);
+  const agentCorrectionRef = useRef<string | null>(null); // mid-task user correction
   const chatAbortRef = useRef<AbortController | null>(null);
 
   // Approve All Actions — user opted in, disables safety modals
@@ -343,11 +263,27 @@ export default function App() {
   }, [approveAll]);
 
   // Refresh Brain Energy + tier whenever settings opens (picks up localStorage changes)
+  // Also hide/restore the native WebContentsView — it sits above all renderer z-index
+  // so modals would appear behind it without this.
   useEffect(() => {
+    const orbitBrowser = (window as any).orbit?.browser;
     if (showSettings) {
       setDailyUsage(SubscriptionService.getDailyUsage());
       setTier(SubscriptionService.getTier());
+      // Push browser off-screen so the settings modal is not covered
+      orbitBrowser?.hideAll?.();
+    } else {
+      // Restore browser position if we're in browser mode with an active tab
+      if (appMode === 'browser' && activeTabId) {
+        // Small delay to let the modal animate out before repositioning
+        setTimeout(() => {
+          orbitBrowser?.setActive?.(activeTabId);
+          // Trigger a bounds update via the existing mechanism
+          window.dispatchEvent(new Event('resize'));
+        }, 180);
+      }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSettings]);
 
   const [showDOMEvents, setShowDOMEvents] = useState(false);
@@ -362,6 +298,23 @@ export default function App() {
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
   const [licenseKeyStatus, setLicenseKeyStatus] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
   const [licenseKeyError, setLicenseKeyError] = useState('');
+
+  // Hide WebContentsView when ANY full-screen overlay is open.
+  // The native WebContentsView sits above all renderer z-index so modals/settings
+  // render behind it unless we explicitly push it off-screen first.
+  useEffect(() => {
+    const orbitBrowser = (window as any).orbit?.browser;
+    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showVoiceChat || showUpgradeModal;
+    if (anyOverlayOpen) {
+      orbitBrowser?.hideAll?.();
+    } else if (appMode === 'browser' && activeTabId) {
+      setTimeout(() => {
+        orbitBrowser?.setActive?.(activeTabId);
+        window.dispatchEvent(new Event('resize'));
+      }, 180);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showScheduler, showWorkspace, showCoding, showTrading, showVoiceChat, showUpgradeModal]);
 
   // Code Editor Panel
   const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
@@ -672,2200 +625,6 @@ export default function App() {
   const [scheduledJobs, setScheduledJobs] = useState<{id: string, name: string, pattern: string, nextRun: string}[]>([]);
   const cronJobsRef = useRef<{ [key: string]: Cron }>({});
 
-  // Robust NLU (Natural Language Understanding) Engine
-  const detectIntent = (text: string) => {
-      const normalized = text.toLowerCase().replace(/['".,?!]/g, ' ');
-      
-      // We define intents by required semantic groups (an utterance must hit a keyword in each group to match)
-      // This effectively covers thousands of sentence combinations!
-      const INTENT_LIBRARY: Record<string, string[][]> = {
-          BOOK_RESERVATION: [
-              ['book', 'reserve', 'reservation', 'schedule', 'get a table', 'make a reservation', 'setup a dinner', 'secure a spot', 'snag a table', 'find a reservation'],
-              ['ruth', 'steak', 'restaurant', 'dinner', 'lunch', 'eat', 'food', 'dining', 'bistro', 'cafe']
-          ],
-          LEAD_GEN: [
-              ['scrape', 'extract', 'collect', 'gather', 'find', 'mine', 'pull', 'build', 'get', 'fetch', 'harvest', 'compile', 'aggregate'],
-              ['emails', 'leads', 'contacts', 'phone', 'numbers', 'prospects', 'database', 'info', 'csv', 'directory', 'list', 'data']
-          ],
-          CONTENT_GEN: [
-              ['summarize', 'summarise', 'rewrite', 'write', 'draft', 'create', 'generate', 'make', 'turn this into', 'whip up', 'compose', 'rephrase', 'outline'],
-              ['twitter', 'thread', 'blog', 'post', 'article', 'summary', 'notes', 'tweet', 'content', 'paragraph', 'essay', 'caption', 'copy']
-          ],
-          RESEARCH: [
-              ['research', 'compare', 'analyze', 'investigate', 'gather', 'what are the', 'figure out', 'look into', 'evaluate', 'assess'],
-              ['stats', 'data', 'differences', 'pros', 'cons', 'pricing', 'competitors', 'products', 'product', 'market', 'metrics', 'options', 'alternatives']
-          ],
-          INSTA_LIKE: [
-              ['instagram', 'ig', 'insta', 'feed', 'timeline', 'homepage'],
-              ['like', 'heart', 'spam', 'auto-like', 'engage with posts', 'smash the like', 'double tap', 'mass like']
-          ],
-          INSTA_COMMENT: [
-              ['instagram', 'ig', 'insta', 'feed', 'timeline', 'pictures', 'posts'],
-              ['comment', 'reply', 'engage', 'respond', 'leave a comment', 'drop a comment', 'write something', 'hype up']
-          ],
-          INSTA_DM: [
-              ['instagram', 'ig', 'insta', 'profile', 'user', 'inbox', 'dms', 'followers'],
-              ['message', 'dm', 'inbox', 'reach out', 'text', 'send a', 'shoot a message', 'slide into', 'contact']
-          ],
-          IMAGE_DOWNLOAD: [
-              ['download', 'save', 'extract', 'grab', 'pull', 'scrape', 'get all', 'rip', 'hoard', 'collect', 'fetch'],
-              ['images', 'photos', 'pictures', 'pics', 'media', 'assets', 'jpgs', 'pngs', 'graphics']
-          ],
-          AUTO_CHECKOUT: [
-              ['buy', 'purchase', 'checkout', 'add to cart', 'order', 'procure', 'snag', 'cop'],
-              ['item', 'product', 'cart', 'this', 'sneakers', 'tickets', 'it']
-          ],
-          PRICE_TRACKER: [
-              ['track', 'monitor', 'watch', 'alert', 'notify', 'keep an eye on'],
-              ['price', 'cost', 'drop', 'sale', 'discount', 'cheaper']
-          ],
-          FORM_FILLER: [
-              ['fill', 'complete', 'populate', 'submit', 'enter', 'type'],
-              ['form', 'application', 'details', 'survey', 'questionnaire', 'fields', 'blanks']
-          ],
-          PAGE_MONITOR: [
-              ['refresh', 'reload', 'monitor', 'check', 'watch', 'poll'],
-              ['page', 'site', 'website', 'stock', 'availability', 'changes', 'updates']
-          ],
-          EMAIL_OUTREACH: [
-              ['send', 'email', 'compose', 'shoot an email', 'draft', 'write an email', 'blast'],
-              ['gmail', 'inbox', 'message', 'outlook', 'client', 'prospect', 'lead', 'client']
-          ],
-          JOB_APPLY: [
-              ['apply', 'submit', 'send application', 'fill out', 'put in for'],
-              ['job', 'role', 'position', 'career', 'resume', 'application', 'listing']
-          ],
-          SEO_AUDIT: [
-              ['audit', 'analyze', 'check', 'review', 'scan', 'inspect', 'diagnose'],
-              ['seo', 'meta', 'headings', 'ranking', 'keywords', 'tags', 'h1', 'performance']
-          ],
-          EXTRACT_LINKS: [
-              ['grab', 'extract', 'scrape', 'pull', 'get', 'collect', 'copy', 'list'],
-              ['links', 'urls', 'hrefs', 'hyperlinks', 'navigation']
-          ],
-          DARK_MODE: [
-              ['turn on', 'enable', 'switch to', 'toggle', 'make it'],
-              ['dark mode', 'night mode', 'dark theme', 'black background']
-          ],
-          TRANSLATE_PAGE: [
-              ['translate', 'convert', 'change language', 'make it in', 'read this in'],
-              ['spanish', 'french', 'english', 'german', 'japanese', 'language', 'tongue']
-          ],
-          YOUTUBE_DOWNLOAD: [
-              ['download', 'save', 'rip', 'grab', 'fetch', 'extract'],
-              ['video', 'youtube', 'mp4', 'clip', 'stream', 'movie']
-          ],
-          SUMMARIZE_VIDEO: [
-              ['summarize', 'tldr', 'break down', 'explain', 'what is this about'],
-              ['video', 'youtube', 'clip', 'watch', 'transcript']
-          ],
-          YOUTUBE_SEARCH: [
-              ['youtube', 'yt'],
-              ['search', 'find', 'look for', 'look up', 'watch', 'most viewed', 'popular', 'video', 'channel']
-          ],
-          SOCIAL_SHARE: [
-              ['share', 'post', 'tweet', 'publish', 'cross-post'],
-              ['twitter', 'facebook', 'linkedin', 'feed', 'timeline', 'social media']
-          ],
-          SCHEDULE_TASK: [
-              ['schedule', 'every', 'recurring', 'daily', 'hourly', 'weekly', 'run this', 'automate this'],
-              ['minute', 'hour', 'day', 'week', 'morning', 'night', 'time', 'job', 'task']
-          ],
-          TRACK_PRICE: [
-              ['track', 'monitor', 'watch', 'alert', 'notify', 'price drop'],
-              ['price', 'cost', 'sale', 'listing', 'item', 'product']
-          ],
-          FILL_FORM: [
-              ['fill', 'login', 'sign in', 'register', 'submit', 'complete'],
-              ['form', 'credentials', 'details', 'application', 'info']
-          ],
-          SUMMARIZE_PAGE: [
-              ['summarize', 'extract', 'read', 'key points', 'insights', 'tldr'],
-              ['article', 'page', 'post', 'blog', 'news', 'document']
-          ],
-          AMAZON_SEARCH: [
-              ['amazon'],
-              ['search', 'find', 'look for', 'look up', 'cheapest', 'highest rated', 'product', 'item']
-          ],
-          TWITTER_SEARCH: [
-              ['twitter', 'x'],
-              ['search', 'find', 'look for', 'look up', 'most liked', 'viral', 'tweet', 'user']
-          ],
-          REDDIT_SEARCH: [
-              ['reddit'],
-              ['search', 'find', 'look for', 'look up', 'thread', 'discussion', 'opinion']
-          ],
-          WIKIPEDIA_SEARCH: [
-              ['wikipedia', 'wiki'],
-              ['search', 'find', 'look for', 'look up', 'article', 'summary', 'about']
-          ],
-          CODE_GEN: [
-              ['write', 'code', 'generate', 'script', 'function', 'program', 'build', 'create'],
-              ['python', 'javascript', 'html', 'css', 'react', 'app', 'tool', 'bot', 'challenge', 'test']
-          ],
-          CROSS_TAB_FILL: [
-              ['pull', 'extract', 'grab', 'use', 'get', 'take'],
-              ['data', 'spreadsheet', 'tab', 'other page', 'sheet'],
-              ['fill', 'form', 'paste', 'enter']
-          ]
-      };
-
-      let bestIntent = null;
-      let maxScore = 0;
-
-      for (const [intent, groups] of Object.entries(INTENT_LIBRARY)) {
-          let score = 0;
-          for (const group of groups) {
-              if (group.some(phrase => normalized.includes(phrase))) {
-                  score += 1;
-              }
-          }
-          // Must hit at least all required semantic groups for the intent to trigger
-          if (score >= groups.length && score > maxScore) {
-              maxScore = score;
-              bestIntent = intent;
-          }
-      }
-
-      return bestIntent;
-  };
-
-  const parseCommandToQueue = (text: string) => {
-    // ----------------------------------------------------
-    // DELEGATE TO THE NEW ASSISTANT CHANNEL
-    // ----------------------------------------------------
-    const fallbackQueue = AssistantChannel['parseCommandToQueue'] ? (AssistantChannel as any)['parseCommandToQueue'](text) : [];
-    if (fallbackQueue && fallbackQueue.length > 0) return fallbackQueue;
-
-    const queue: any[] = [];
-    const normalized = text.toLowerCase().replace(/['"]/g, '');
-    
-    const intent = detectIntent(text);
-
-    if (intent === 'SCHEDULE_TASK') {
-       let pattern = '* * * * *'; // Default to every minute for demo
-       let freqLabel = 'every minute';
-       
-       if (normalized.includes('hour')) { pattern = '0 * * * *'; freqLabel = 'hourly'; }
-       else if (normalized.includes('day')) { pattern = '0 9 * * *'; freqLabel = 'daily at 9am'; }
-       
-       queue.push({ type: 'inject_script', thought: 'Setting up background cron job.', plan: `Configure a scheduled task to run ${freqLabel}.`, script: `
-          return "Scheduled a recurring background task: ${freqLabel}. The bot will automatically execute this intent in the background using croner.";
-       `, desc: 'Schedule Task' });
-       
-       queue.push({ type: 'reply_msg', message: `I've set up a scheduled background job to run ${freqLabel}. This will persist offline!`, desc: 'Report Schedule Status', action_data: { type: 'create_schedule', pattern, name: text } });
-       return queue;
-    }
-
-    if (intent === 'TRACK_PRICE') {
-       queue.push({ type: 'inject_script', thought: 'Injecting price extraction heuristic.', plan: 'Extract main product price and save to offline memory.', script: `
-          const priceEls = Array.from(document.querySelectorAll('*')).filter(el => {
-              const text = el.innerText || '';
-              return text.match(/^\\$?\\d{1,3}(,\\d{3})*(\\.\\d{2})?$/) && window.getComputedStyle(el).fontSize !== '16px';
-          });
-          const price = priceEls.length > 0 ? priceEls[0].innerText : 'Price not found';
-          return "Saved '" + document.title + "' to offline tracker with current price: " + price;
-       `, desc: 'Track Price (localforage)' });
-       
-       queue.push({ type: 'reply_msg', message: `I've stored this product's price in your offline localforage database and will monitor it for drops!`, desc: 'Confirm Price Track' });
-       return queue;
-    }
-
-    if (intent === 'CROSS_TAB_FILL') {
-       queue.push({ type: 'inject_script', thought: 'Extracting data from an inactive tab context and preparing to fill active form.', plan: 'Read local memory state to bridge context.', script: `
-          const dummyExtractedData = "Transferred from Sheet Row 4";
-          const inputs = document.querySelectorAll('input[type="text"]');
-          if(inputs.length > 0) inputs[0].value = dummyExtractedData;
-          return "Injected context from previous tab into active inputs.";
-       `, desc: 'Cross-Tab Memory Transfer' });
-       queue.push({ type: 'reply_msg', message: 'I successfully pulled the context from your other open tab (spreadsheet data) and filled the active web form.', desc: 'Report Tab Transfer' });
-       return queue;
-    }
-
-    if (intent === 'FILL_FORM') {
-       queue.push({ type: 'inject_script', thought: 'Analyzing form inputs and auto-filling from local profile.', plan: 'Identify inputs and inject dummy values.', script: `
-          const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea');
-          let count = 0;
-          inputs.forEach(input => {
-              const name = (input.name || input.id || input.placeholder || '').toLowerCase();
-              if (name.includes('email')) { input.value = 'user@offline-ai.local'; count++; }
-              else if (name.includes('name')) { input.value = 'John Doe'; count++; }
-              else if (name.includes('phone')) { input.value = '555-0199'; count++; }
-              else if (name.includes('password')) { input.value = 'SecurePass123!'; count++; }
-              else { input.value = 'Automated Input'; count++; }
-          });
-          const forms = document.querySelectorAll('form');
-          return "Auto-filled " + count + " input fields across " + forms.length + " forms using local profile data.";
-       `, desc: 'Fill Forms Natively' });
-       queue.push({ type: 'reply_msg', message: `I scanned the page and filled out the forms using your securely stored offline profile.`, desc: 'Confirm Auto-Fill' });
-       return queue;
-    }
-
-    if (intent === 'SUMMARIZE_PAGE') {
-       queue.push({ type: 'inject_script', thought: 'Extracting readable article content and running summarization heuristic.', plan: 'Execute Readability extraction and generate TL;DR.', script: `
-          const article = document.querySelector('article') || document.body;
-          const text = article.innerText.substring(0, 1000); // Simulate @mozilla/readability extraction
-          const summary = text.split('. ').slice(0, 3).join('. ') + '...';
-          return "Extracted Document Summary:\\n\\n" + summary;
-       `, desc: 'Summarize Page offline' });
-       queue.push({ type: 'reply_msg', message: `Here's the summary of the current page extracted entirely offline.`, desc: 'Provide Summary' });
-       return queue;
-    }
-
-    // --- High-Level Real Browser Task Macros (DOM Injection) ---
-    if (intent === 'LEAD_GEN') {
-      queue.push({ type: 'require_approval', message: '⚠️ JUMARI will extract contact information (emails, phone numbers) from the current page. Only use this on pages you have permission to collect data from. Scraping personal data without consent may violate GDPR, CCPA, and CAN-SPAM. Continue?', desc: 'Confirm Lead Extraction' });
-      queue.push({ type: 'inject_script', thought: 'Deploying Lead Generation bot to scrape emails and phone numbers.', plan: 'Execute DOM manipulation script to extract contact info.', script: `
-          // Real DOM execution: Lead Generation Scraper
-          const text = document.body.innerText;
-          const emails = [...new Set(text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9_-]+)/gi) || [])];
-          const phones = [...new Set(text.match(/(\\+?\\d{1,2}\\s?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/gi) || [])];
-          const links = Array.from(document.querySelectorAll('a')).map(a => a.href).filter(h => h.includes('linkedin.com/in') || h.includes('twitter.com') || h.includes('instagram.com'));
-          
-          let result = "Extracted Leads from " + document.title + ":\\n";
-          if (emails.length) result += "- Emails: " + emails.join(', ') + "\\n";
-          if (phones.length) result += "- Phones: " + phones.join(', ') + "\\n";
-          if (links.length) result += "- Social Profiles: " + [...new Set(links)].join(', ') + "\\n";
-          
-          if (!emails.length && !phones.length && !links.length) result = "No contact information found on the current page.";
-          return result;
-      `, desc: 'Scrape Contact Info' });
-      
-      if (normalized.includes('csv')) {
-         queue.push({ type: 'reply_msg', message: "Lead generation scan complete! Extracted contacts have been compiled. In a full desktop environment, this would now be saved to leads.csv.", desc: 'Report lead gen status' });
-      } else {
-         queue.push({ type: 'reply_msg', message: "Lead generation scan complete! Extracted available contact information.", desc: 'Report lead gen status' });
-      }
-      return queue;
-    }
-
-    if (intent === 'CONTENT_GEN') {
-      queue.push({ type: 'inject_script', thought: 'Deploying Content Creation bot to analyze page and generate content.', plan: 'Read page text and generate formatted content.', script: `
-          // Real DOM execution: Content Creator Bot
-          const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => h.innerText);
-          const paras = Array.from(document.querySelectorAll('p')).map(p => p.innerText).filter(t => t.length > 50).slice(0, 3);
-          
-          let content = "Content Generation Complete:\\n\\n";
-          if (headings.length > 0) content += "📌 Main Topic: " + headings[0] + "\\n\\n";
-          
-          content += "📝 Summary / Thread Draft:\\n";
-          paras.forEach((p, i) => {
-              content += (i+1) + ". " + p.substring(0, 100) + "...\\n";
-          });
-          
-          if (!paras.length) content = "Not enough text on page to generate content.";
-          return content;
-      `, desc: 'Generate Content' });
-      queue.push({ type: 'reply_msg', message: "Content generation complete! I've drafted the requested content based on the active page context.", desc: 'Report content status' });
-      return queue;
-    }
-
-    if (intent === 'RESEARCH') {
-      queue.push({ type: 'inject_script', thought: 'Deploying Research bot to analyze page and extract key data points.', plan: 'Execute DOM manipulation script to extract tabular data and key paragraphs.', script: `
-          // Real DOM execution: Research Bot
-          const tables = Array.from(document.querySelectorAll('table')).map(t => t.innerText.substring(0, 200).replace(/\\n/g, ' '));
-          const listItems = Array.from(document.querySelectorAll('li')).map(l => l.innerText).filter(t => t.length > 20 && t.length < 200).slice(0, 10);
-          
-          let result = "Research Data Extracted:\\n";
-          if (tables.length) result += "Found " + tables.length + " data tables.\\n";
-          if (listItems.length) {
-              result += "Key Points:\\n";
-              listItems.forEach(li => result += " - " + li + "\\n");
-          }
-          if (!tables.length && !listItems.length) result += "No structured research data found on this page.";
-          
-          return result;
-      `, desc: 'Extract Research Data' });
-      queue.push({ type: 'reply_msg', message: "Research data gathered successfully. Ready to compare or analyze further.", desc: 'Report research status' });
-      return queue;
-    }
-
-    if (intent === 'AUTO_CHECKOUT') {
-       queue.push({ type: 'require_approval', message: '⚠️ JUMARI is about to click a purchase or checkout button on your behalf. This may initiate a real transaction. Continue?', desc: 'Confirm Purchase Action' });
-       queue.push({ type: 'inject_script', thought: 'Scanning for purchase or add-to-cart buttons.', plan: 'Find the primary CTA and click it.', script: `
-          const buyBtns = Array.from(document.querySelectorAll('button, a')).filter(el => {
-              const text = el.textContent?.toLowerCase() || '';
-              return text.includes('add to cart') || text.includes('buy now') || text.includes('checkout') || text.includes('purchase');
-          });
-          if (buyBtns.length > 0) {
-              buyBtns[0].click();
-              return "Successfully found and clicked a checkout button.";
-          }
-          return "Could not find a valid checkout button on this page.";
-       `, desc: 'Auto Checkout' });
-       queue.push({ type: 'reply_msg', message: "I've scanned the page and triggered the first available checkout or add-to-cart button!", desc: 'Report auto-checkout status' });
-       return queue;
-    }
-
-    if (intent === 'PRICE_TRACKER') {
-       queue.push({ type: 'inject_script', thought: 'Scanning page for pricing information.', plan: 'Extract the main price tag.', script: `
-          const priceEls = Array.from(document.querySelectorAll('*')).filter(el => {
-             return el.children.length === 0 && el.textContent && el.textContent.match(/\\$[0-9]+(?:\\.[0-9]{2})?/);
-          });
-          if (priceEls.length > 0) {
-             const price = priceEls[0].textContent?.trim();
-             return "Detected primary price: " + price;
-          }
-          return "Could not detect a clear price tag on this page.";
-       `, desc: 'Track Price' });
-       queue.push({ type: 'reply_msg', message: "I've hooked into the product details. I can now track this item and notify you of price drops.", desc: 'Report price tracker' });
-       return queue;
-    }
-
-    if (intent === 'FORM_FILLER') {
-       queue.push({ type: 'inject_script', thought: 'Scanning for input fields to auto-populate.', plan: 'Find text inputs and inject mock data.', script: `
-          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="email"], textarea'));
-          if (inputs.length > 0) {
-             inputs.forEach(input => {
-                const name = input.getAttribute('name') || input.getAttribute('id') || '';
-                if (name.includes('name')) input.value = "John Doe";
-                else if (name.includes('email')) input.value = "john@example.com";
-                else if (name.includes('phone')) input.value = "555-019-2034";
-                else input.value = "Automated filler text";
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-             });
-             return "Successfully auto-filled " + inputs.length + " form fields.";
-          }
-          return "No form fields found to fill.";
-       `, desc: 'Auto Fill Form' });
-       queue.push({ type: 'reply_msg', message: "I've injected your standard auto-fill profile data into the detected form fields.", desc: 'Report form filler' });
-       return queue;
-    }
-
-    if (intent === 'PAGE_MONITOR') {
-       queue.push({ type: 'inject_script', thought: 'Setting up a DOM observer to watch for changes.', plan: 'Inject mutation observer script.', script: `
-          return "Page monitor engaged. I will periodically check this DOM state and alert you if the layout or inventory indicators change.";
-       `, desc: 'Monitor Page' });
-       queue.push({ type: 'reply_msg', message: "Page monitor is active. The bot will watch this URL in the background.", desc: 'Report page monitor' });
-       return queue;
-    }
-
-    if (intent === 'EMAIL_OUTREACH') {
-       queue.push({ type: 'navigate', url: 'https://mail.google.com/mail/u/0/#inbox?compose=new', desc: 'Navigate to Gmail Compose' });
-       queue.push({ type: 'wait_for_element', selector: 'div[role="textbox"]', thought: 'Waiting for Gmail compose window to load.', plan: 'Wait for textbox element', desc: 'Wait for Compose' });
-       queue.push({ type: 'inject_script', thought: 'Drafting outbound email sequence.', plan: 'Find the compose box and enter email copy.', script: `
-          const subject = document.querySelector('input[name="subjectbox"]');
-          if (subject) {
-              subject.value = "Exploring a potential partnership";
-              subject.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          const body = document.querySelector('div[role="textbox"]');
-          if (body) {
-              body.innerText = "Hi there,\\n\\nI found your profile and wanted to reach out regarding a potential collaboration. Let me know when you have a moment to chat.\\n\\nBest,\\nAutomated Bot";
-              body.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          return "Successfully drafted outbound outreach email.";
-       `, desc: 'Draft Email' });
-       queue.push({ type: 'reply_msg', message: "The email has been drafted in your inbox. Please review before hitting send.", desc: 'Report email drafted' });
-       return queue;
-    }
-
-    if (intent === 'JOB_APPLY') {
-       queue.push({ type: 'inject_script', thought: 'Scanning page for job application forms.', plan: 'Find submit buttons and inputs related to jobs.', script: `
-          const applyBtns = Array.from(document.querySelectorAll('button, a')).filter(el => {
-              const text = el.textContent?.toLowerCase() || '';
-              return text.includes('apply now') || text.includes('submit application') || text.includes('easy apply');
-          });
-          if (applyBtns.length > 0) {
-              applyBtns[0].click();
-              return "Located and triggered the 'Apply' button. Ready to fill out standard application fields.";
-          }
-          return "Could not find a clear 'Apply' button. The page might not be a direct job listing.";
-       `, desc: 'Trigger Job Application' });
-       queue.push({ type: 'reply_msg', message: "I've started the application process. Attempting to match your resume data to the form fields.", desc: 'Report job apply' });
-       return queue;
-    }
-
-    if (intent === 'SEO_AUDIT') {
-       queue.push({ type: 'inject_script', thought: 'Running SEO technical audit on DOM.', plan: 'Extract H1s, Meta descriptions, and image alt tags.', script: `
-          const h1s = Array.from(document.querySelectorAll('h1')).map(h => h.innerText);
-          const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') || 'Missing';
-          const imgAlts = Array.from(document.querySelectorAll('img')).map(img => img.getAttribute('alt') || 'Missing Alt');
-          const missingAlts = imgAlts.filter(a => a === 'Missing Alt').length;
-          
-          let report = "🔍 **SEO Audit Complete**\\n\\n";
-          report += "• **H1 Tags (" + h1s.length + "):** " + (h1s.length > 0 ? h1s[0] : 'None found!') + "\\n";
-          report += "• **Meta Description:** " + metaDesc + "\\n";
-          report += "• **Images:** " + imgAlts.length + " total, " + missingAlts + " missing alt tags.\\n";
-          report += "• **Word Count:** " + document.body.innerText.split(/\\s+/).length + " words.\\n";
-          
-          return report;
-       `, desc: 'Run SEO Audit' });
-       queue.push({ type: 'reply_msg', message: "The technical SEO scan for this page has completed. See the logs for a detailed breakdown.", desc: 'Report SEO Status' });
-       return queue;
-    }
-
-    if (intent === 'EXTRACT_LINKS') {
-       queue.push({ type: 'inject_script', thought: 'Crawling page for all outbound URLs.', plan: 'Extract all a[href] tags.', script: `
-          const links = [...new Set(Array.from(document.querySelectorAll('a')).map(a => a.href).filter(href => href && href.startsWith('http')))];
-          if (links.length > 0) {
-              let result = "Extracted " + links.length + " unique URLs from this page.\\nSample:\\n";
-              result += links.slice(0, 5).join('\\n');
-              return result;
-          }
-          return "No valid outbound links found on this page.";
-       `, desc: 'Extract Links' });
-       queue.push({ type: 'reply_msg', message: "Link extraction successful! I have pulled all the underlying URLs from this page's anchor tags.", desc: 'Report links extracted' });
-       return queue;
-    }
-
-    if (intent === 'DARK_MODE') {
-       queue.push({ type: 'inject_script', thought: 'Injecting CSS filter to force dark mode.', plan: 'Apply CSS invert and hue-rotate to HTML body.', script: `
-          if (document.documentElement.style.filter.includes('invert')) {
-              document.documentElement.style.filter = '';
-              document.documentElement.style.backgroundColor = '';
-              return "Dark mode disabled.";
-          } else {
-              document.documentElement.style.filter = 'invert(1) hue-rotate(180deg)';
-              document.documentElement.style.backgroundColor = '#121212';
-              
-              // Prevent images and videos from inverting twice
-              const style = document.createElement('style');
-              style.textContent = 'img, video, iframe, canvas { filter: invert(1) hue-rotate(180deg); }';
-              document.head.appendChild(style);
-              
-              return "Forced dark mode applied to current page.";
-          }
-       `, desc: 'Toggle Dark Mode' });
-       queue.push({ type: 'reply_msg', message: "I've injected a global CSS filter to force dark mode on this domain.", desc: 'Report dark mode' });
-       return queue;
-    }
-
-    if (intent === 'TRANSLATE_PAGE') {
-       queue.push({ type: 'inject_script', thought: 'Finding translatable text nodes to translate.', plan: 'Loop through DOM text nodes and append translation mock.', script: `
-          return "Translation hook engaged. I am intercepting all text nodes in the DOM to run through the translation API. The page content will update shortly.";
-       `, desc: 'Translate Page' });
-       queue.push({ type: 'reply_msg', message: "Translation script injected! In a fully connected environment, the text on this page will automatically convert to the requested language.", desc: 'Report translation' });
-       return queue;
-    }
-
-    if (intent === 'YOUTUBE_DOWNLOAD') {
-       queue.push({ type: 'inject_script', thought: 'Extracting source video URL for download.', plan: 'Scan DOM for video tags and source links.', script: `
-          const video = document.querySelector('video');
-          if (video) {
-              const src = video.src || (video.querySelector('source') ? video.querySelector('source').src : 'Blob/Stream URL');
-              return "Video source intercepted: " + src.substring(0, 50) + "... Initiating local download process.";
-          }
-          return "No HTML5 video element found on this page to download.";
-       `, desc: 'Download Video' });
-       queue.push({ type: 'reply_msg', message: "Video source located. I'm extracting the MP4 file and saving it to your local downloads folder.", desc: 'Report video download' });
-       return queue;
-    }
-
-    if (intent === 'SUMMARIZE_VIDEO') {
-       queue.push({ type: 'inject_script', thought: 'Extracting video transcript or closed captions.', plan: 'Scan DOM for caption tracks or description blocks.', script: `
-          const title = document.title;
-          return "Extracted metadata and auto-generated captions for: " + title + ". Passing to local LLM for summarization...";
-       `, desc: 'Summarize Video' });
-       queue.push({ type: 'reply_msg', message: "Here's a quick summary of the video based on its captions and metadata:\\n- Main Topic: Discusses the primary subject highlighted in the title.\\n- Key Point 1: Outlines the introduction.\\n- Key Point 2: Covers the main arguments presented in the middle.\\n- Conclusion: Wraps up the video's core message.", desc: 'Report video summary' });
-       return queue;
-    }
-
-    if (intent === 'YOUTUBE_SEARCH') {
-       // Extract channel or search query robustly
-       const match = text.match(/(?:search for|look for|look up|find|search)\s+(.+?)(?:\s+on\s+youtube|\s+in\s+youtube|$)/i) 
-                  || text.match(/(?:youtube|yt)\s+(?:and\s+)?(?:search|find|look for|look up)\s+(.+)/i)
-                  || text.match(/(?:go to\s+youtube\s+and\s+)?(?:search|find|look for|look up)\s+(.+)/i);
-       
-       let query = 'most viewed';
-       if (match && match[1]) {
-           // Clean up the query of common trailing actions
-           query = match[1].replace(/and\s+(?:watch|see|click|play).*/i, '').trim();
-       } else if (text.toLowerCase().includes('cats')) {
-           query = 'cats'; // fallback specifically for tests mentioning cats without typical prefixes
-       }
-       
-       const isMostViewed = text.toLowerCase().includes('most viewed') || text.toLowerCase().includes('popular');
-       
-       // Real Human-like Execution
-       queue.push({ type: 'navigate', url: 'https://www.youtube.com', desc: `Navigate to YouTube` });
-       queue.push({ type: 'wait_for_element', selector: 'input#search, input[name="search_query"], #search-input input', desc: 'Wait for search bar' });
-       queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-       queue.push({ type: 'wait_for_element', selector: 'ytd-video-renderer, ytd-grid-video-renderer, ytd-rich-item-renderer', desc: 'Wait for results to load' });
-       
-       if (isMostViewed) {
-          queue.push({ type: 'inject_script', thought: 'Extracting and sorting videos by view count robustly.', plan: 'Scan DOM for video elements, safely parse view counts, and return the highest.', script: `
-             return new Promise((resolve) => {
-                 setTimeout(() => {
-                     const videos = Array.from(document.querySelectorAll('ytd-video-renderer, ytd-grid-video-renderer, ytd-rich-item-renderer'));
-                     if (!videos || videos.length === 0) return resolve("Error: No videos found on the page.");
-                     
-                     let maxViews = -1;
-                     let mostViewedTitle = "Unknown";
-                     
-                     videos.forEach(video => {
-                         try {
-                             const titleEl = video.querySelector('#video-title');
-                             if (!titleEl) return;
-                             
-                             // Try multiple selectors where YouTube hides view counts depending on layout
-                             const metaSpan = Array.from(video.querySelectorAll('#metadata-line span')).find(s => s.textContent.includes('view'));
-                             const viewCountText = metaSpan ? metaSpan.textContent : (video.querySelector('.inline-metadata-item')?.textContent || '');
-                             
-                             if (viewCountText && viewCountText.includes('view')) {
-                                 let multiplier = 1;
-                                 if (viewCountText.includes('K')) multiplier = 1000;
-                                 if (viewCountText.includes('M')) multiplier = 1000000;
-                                 if (viewCountText.includes('B')) multiplier = 1000000000;
-                                 
-                                 const numMatch = viewCountText.match(/([\\d\\.]+)/);
-                                 if (numMatch) {
-                                     const viewCountNum = parseFloat(numMatch[1]) * multiplier;
-                                     if (viewCountNum > maxViews) {
-                                         maxViews = viewCountNum;
-                                         mostViewedTitle = titleEl.textContent.trim();
-                                     }
-                                 }
-                             }
-                         } catch(e) {}
-                     });
-                     
-                     if (maxViews === -1) {
-                         resolve("Error: Could not parse view counts from the current layout.");
-                     } else {
-                         const formattedViews = maxViews >= 1000000 ? (maxViews/1000000).toFixed(1) + 'M' : (maxViews >= 1000 ? (maxViews/1000).toFixed(1) + 'K' : maxViews);
-                         resolve("Most viewed video found: '" + mostViewedTitle + "' with ~" + formattedViews + " views.");
-                     }
-                 }, 2500); // Give youtube's dynamic polymer framework time to hydrate DOM
-             });
-          `, desc: 'Find most viewed video' });
-       } else if (text.toLowerCase().includes('watch') || text.toLowerCase().includes('play') || text.toLowerCase().includes('see')) {
-          queue.push({ type: 'click', selector: 'ytd-video-renderer:first-of-type a#thumbnail', desc: 'Clicking first video to watch' });
-       } else {
-          // If just searching, extract the first few results instead of pretending to find something
-          queue.push({ type: 'inject_script', thought: 'Extracting top search results safely.', plan: 'Scan DOM for video elements and return the top 3 titles.', script: `
-             return new Promise((resolve) => {
-                 setTimeout(() => {
-                     const videos = Array.from(document.querySelectorAll('ytd-video-renderer, ytd-grid-video-renderer, ytd-rich-item-renderer')).slice(0, 3);
-                     if (!videos || videos.length === 0) return resolve("Error: No videos found on the page.");
-                     
-                     let results = [];
-                     videos.forEach(video => {
-                         try {
-                             const titleEl = video.querySelector('#video-title');
-                             if (titleEl && titleEl.textContent) {
-                                 results.push(titleEl.textContent.trim());
-                             }
-                         } catch(e) {}
-                     });
-                     
-                     if (results.length === 0) return resolve("Error: Found video elements but could not extract titles.");
-                     resolve("Top results:\\n- " + results.join("\\n- "));
-                 }, 2500);
-             });
-          `, desc: 'Extract top results' });
-       }
-       return queue;
-    }
-
-    if (intent === 'AMAZON_SEARCH') {
-       const match = text.match(/(?:search for|look for|find)\s+(.+?)(?:\s+on\s+amazon|\s+in\s+amazon|$)/i) 
-                  || text.match(/(?:amazon)\s+(?:and\s+)?(?:search|find|look for)\s+(.+)/i)
-                  || text.match(/(?:go to\s+amazon\s+and\s+)?(?:search|find|look for)\s+(.+)/i);
-       const query = match && match[1] ? match[1].trim() : 'deals';
-       const isCheapest = text.toLowerCase().includes('cheapest') || text.toLowerCase().includes('lowest price');
-       
-       queue.push({ type: 'navigate', url: 'https://www.amazon.com', desc: `Navigate to Amazon` });
-       queue.push({ type: 'wait_for_element', selector: 'input#twotabsearchtextbox, input[name="field-keywords"]', desc: 'Wait for search bar' });
-       queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-       queue.push({ type: 'wait_for_element', selector: '[data-component-type="s-search-result"]', desc: 'Wait for products to load' });
-       
-       if (isCheapest) {
-          queue.push({ type: 'inject_script', thought: 'Extracting and sorting products by price robustly.', plan: 'Scan DOM for product elements, safely parse prices, and return the lowest.', script: `
-             return new Promise((resolve) => {
-                 setTimeout(() => {
-                     const products = Array.from(document.querySelectorAll('[data-component-type="s-search-result"]'));
-                     if (!products || products.length === 0) return resolve("Error: No products found on the page.");
-                     
-                     let minPrice = Infinity;
-                     let cheapestTitle = "Unknown";
-                     let cheapestLink = "";
-                     
-                     products.forEach(product => {
-                         try {
-                             const titleEl = product.querySelector('h2 a span');
-                             const priceEl = product.querySelector('.a-price .a-offscreen');
-                             const linkEl = product.querySelector('h2 a');
-                             if (!titleEl || !priceEl) return;
-                             
-                             const priceText = priceEl.textContent || '';
-                             const numMatch = priceText.match(/\\$?([\\d,]+\\.?\\d*)/);
-                             
-                             if (numMatch) {
-                                 const priceNum = parseFloat(numMatch[1].replace(/,/g, ''));
-                                 if (priceNum > 0 && priceNum < minPrice) {
-                                     minPrice = priceNum;
-                                     cheapestTitle = titleEl.textContent.trim();
-                                     cheapestLink = linkEl ? linkEl.getAttribute('href') : "";
-                                 }
-                             }
-                         } catch(e) {}
-                     });
-                     
-                     if (minPrice === Infinity) {
-                         resolve("Error: Could not parse prices from the current layout.");
-                     } else {
-                         resolve("Cheapest product found: '" + cheapestTitle + "' for $" + minPrice.toFixed(2));
-                     }
-                 }, 2500); 
-             });
-          `, desc: 'Find cheapest product' });
-       } else {
-          queue.push({ type: 'inject_script', thought: 'Extracting top products safely.', plan: 'Scan DOM for product elements and return the top 3.', script: `
-             return new Promise((resolve) => {
-                 setTimeout(() => {
-                     const products = Array.from(document.querySelectorAll('[data-component-type="s-search-result"]')).slice(0, 3);
-                     if (!products || products.length === 0) return resolve("Error: No products found on the page.");
-                     
-                     let results = [];
-                     products.forEach(product => {
-                         try {
-                             const titleEl = product.querySelector('h2 a span');
-                             const priceEl = product.querySelector('.a-price .a-offscreen');
-                             if (titleEl && titleEl.textContent) {
-                                 const title = titleEl.textContent.trim();
-                                 const price = priceEl ? priceEl.textContent.trim() : "Price unknown";
-                                 results.push(title.substring(0, 60) + "... - " + price);
-                             }
-                         } catch(e) {}
-                     });
-                     
-                     if (results.length === 0) return resolve("Error: Found product elements but could not extract titles/prices.");
-                     resolve("Top products:\\n- " + results.join("\\n- "));
-                 }, 2500);
-             });
-          `, desc: 'Extract top products' });
-       }
-       return queue;
-    }
-
-    if (intent === 'TWITTER_SEARCH') {
-       const match = text.match(/(?:search for|look for|find)\s+(.+?)(?:\s+on\s+twitter|\s+on\s+x|\s+in\s+twitter|\s+in\s+x|$)/i) 
-                  || text.match(/(?:twitter|x)\s+(?:and\s+)?(?:search|find|look for)\s+(.+)/i)
-                  || text.match(/(?:go to\s+(?:twitter|x)\s+and\s+)?(?:search|find|look for)\s+(.+)/i);
-       const query = match && match[1] ? match[1].trim() : 'news';
-       
-       queue.push({ type: 'navigate', url: 'https://twitter.com/explore', desc: `Navigate to Twitter Explore` });
-       queue.push({ type: 'wait_for_element', selector: 'input[data-testid="SearchBox_Search_Input"]', desc: 'Wait for search bar' });
-       queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-       queue.push({ type: 'wait_for_element', selector: 'article[data-testid="tweet"]', desc: 'Wait for tweets to load' });
-       
-       queue.push({ type: 'inject_script', thought: 'Extracting top tweets robustly.', plan: 'Scan DOM for tweet elements and extract text.', script: `
-          return new Promise((resolve) => {
-              setTimeout(() => {
-                  const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).slice(0, 3);
-                  if (!tweets || tweets.length === 0) return resolve("Error: No tweets found on the page.");
-                  
-                  let results = [];
-                  tweets.forEach(tweet => {
-                      try {
-                          const textEl = tweet.querySelector('div[data-testid="tweetText"]');
-                          const userEl = tweet.querySelector('div[data-testid="User-Name"]');
-                          if (textEl && textEl.textContent && userEl && userEl.textContent) {
-                              const handleMatch = userEl.textContent.match(/(@[\\w_]+)/);
-                              const handle = handleMatch ? handleMatch[1] : "Unknown User";
-                              const text = textEl.textContent.replace(/\\n/g, ' ').trim();
-                              results.push(handle + ": " + text.substring(0, 100) + (text.length > 100 ? "..." : ""));
-                          }
-                      } catch(e) {}
-                  });
-                  
-                  if (results.length === 0) return resolve("Error: Found tweet elements but could not extract text.");
-                  resolve("Top tweets:\\n- " + results.join("\\n- "));
-              }, 3000); 
-          });
-       `, desc: 'Extract top tweets' });
-       return queue;
-    }
-
-    if (intent === 'REDDIT_SEARCH') {
-       const match = text.match(/(?:search for|look for|find)\s+(.+?)(?:\s+on\s+reddit|\s+in\s+reddit|$)/i) 
-                  || text.match(/(?:reddit)\s+(?:and\s+)?(?:search|find|look for)\s+(.+)/i)
-                  || text.match(/(?:go to\s+reddit\s+and\s+)?(?:search|find|look for)\s+(.+)/i);
-       const query = match && match[1] ? match[1].trim() : 'news';
-       
-       queue.push({ type: 'navigate', url: 'https://www.reddit.com', desc: `Navigate to Reddit` });
-       queue.push({ type: 'wait_for_element', selector: 'faceplate-search-input, input[name="q"], input[type="search"]', desc: 'Wait for search bar' });
-       queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-       queue.push({ type: 'wait_for_element', selector: 'faceplate-tracker[source="search"], a[data-testid="post-title"]', desc: 'Wait for posts to load' });
-       
-       queue.push({ type: 'inject_script', thought: 'Extracting top reddit threads robustly.', plan: 'Scan DOM for posts and extract titles and upvotes.', script: `
-          return new Promise((resolve) => {
-              setTimeout(() => {
-                  const posts = Array.from(document.querySelectorAll('faceplate-tracker[source="search"]')).slice(0, 3);
-                  if (!posts || posts.length === 0) return resolve("Error: No reddit posts found on the page.");
-                  
-                  let results = [];
-                  posts.forEach(post => {
-                      try {
-                          const titleEl = post.querySelector('a[data-testid="post-title"]');
-                          const upvotesEl = post.querySelector('faceplate-number');
-                          if (titleEl && titleEl.textContent) {
-                              const title = titleEl.textContent.trim();
-                              const upvotes = upvotesEl ? upvotesEl.textContent.trim() : "?";
-                              results.push(title.substring(0, 80) + (title.length > 80 ? "..." : "") + " (" + upvotes + " upvotes)");
-                          }
-                      } catch(e) {}
-                  });
-                  
-                  if (results.length === 0) return resolve("Error: Found posts but could not extract titles.");
-                  resolve("Top Reddit threads:\\n- " + results.join("\\n- "));
-              }, 3000); 
-          });
-       `, desc: 'Extract top threads' });
-       return queue;
-    }
-
-    if (intent === 'WIKIPEDIA_SEARCH') {
-       const match = text.match(/(?:search for|look for|find)\s+(.+?)(?:\s+on\s+wikipedia|\s+in\s+wikipedia|\s+on\s+wiki|$)/i) 
-                  || text.match(/(?:wikipedia|wiki)\s+(?:and\s+)?(?:search|find|look for)\s+(.+)/i)
-                  || text.match(/(?:go to\s+(?:wikipedia|wiki)\s+and\s+)?(?:search|find|look for)\s+(.+)/i);
-       const query = match && match[1] ? match[1].trim() : 'web browser';
-       
-       queue.push({ type: 'navigate', url: 'https://en.wikipedia.org/wiki/Main_Page', desc: `Navigate to Wikipedia` });
-       queue.push({ type: 'wait_for_element', selector: 'input#searchInput, input[name="search"]', desc: 'Wait for search bar' });
-       queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-       queue.push({ type: 'wait_for_element', selector: '#firstHeading', desc: 'Wait for Wikipedia article or results to load' });
-       
-       queue.push({ type: 'inject_script', thought: 'Extracting Wikipedia summary robustly.', plan: 'Determine if on article page or search results, and extract accordingly.', script: `
-          return new Promise((resolve) => {
-              setTimeout(() => {
-                  const heading = document.querySelector('#firstHeading');
-                  if (!heading) return resolve("Error: Could not find Wikipedia heading.");
-                  
-                  if (heading.textContent.includes('Search results')) {
-                      const results = Array.from(document.querySelectorAll('.mw-search-result-heading a')).slice(0, 3);
-                      if (results.length === 0) return resolve("Error: No search results found.");
-                      
-                      let titles = results.map(r => r.textContent).join(', ');
-                      return resolve("Found multiple results. Top matches: " + titles + ". Please be more specific.");
-                  } else {
-                      const paragraphs = Array.from(document.querySelectorAll('.mw-parser-output > p'));
-                      let summary = "";
-                      for (let p of paragraphs) {
-                          if (p.textContent.trim().length > 50) { // Find first actual paragraph
-                              summary = p.textContent.replace(/\\[\\d+\\]/g, '').trim(); // Remove citations
-                              break;
-                          }
-                      }
-                      
-                      if (!summary) return resolve("Error: Could not extract article summary.");
-                      resolve("Article: " + heading.textContent + "\\nSummary: " + summary.substring(0, 300) + "...");
-                  }
-              }, 1500); 
-          });
-       `, desc: 'Extract Wikipedia info' });
-       return queue;
-    }
-
-    if (intent === 'SOCIAL_SHARE') {
-       queue.push({ type: 'inject_script', thought: 'Preparing content for cross-platform sharing.', plan: 'Extract current URL and Title, then trigger share intent.', script: `
-          const url = window.location.href;
-          const title = document.title;
-          return "Prepared share payload:\\nTitle: " + title + "\\nURL: " + url;
-       `, desc: 'Social Share' });
-       queue.push({ type: 'reply_msg', message: "I've drafted a social media post with this page's link. You can now automatically cross-post this to Twitter and LinkedIn via the integrations panel.", desc: 'Report social share' });
-       return queue;
-    }
-
-    if (intent === 'INSTA_LIKE' || intent === 'INSTA_COMMENT' || intent === 'INSTA_DM' || (normalized.includes('instagram') && normalized.includes('manage'))) {
-      queue.push({ type: 'require_approval', message: '⚠️ JUMARI will automate actions on Instagram (likes, comments, follows, or DMs). This may violate Instagram\'s Terms of Service and could result in your account being restricted. Continue at your own risk?', desc: 'Confirm Instagram Automation' });
-      queue.push({ type: 'navigate', url: 'https://www.instagram.com', desc: 'Navigate to Instagram' });
-      queue.push({ type: 'wait_for_element', selector: 'main, article, [aria-label="Like"]', thought: 'Waiting for the Instagram feed and posts to fully load.', plan: 'Wait for feed container', desc: 'Wait for Load' });
-      
-      if (intent === 'INSTA_LIKE' || normalized.includes('manage')) {
-        queue.push({ type: 'inject_script', thought: 'Injecting Auto-Liker bot into Instagram Feed.', plan: 'Execute DOM manipulation script to click like buttons.', script: `
-          // Real DOM execution: Auto-Like Script for Instagram
-          const likeButtons = Array.from(document.querySelectorAll('svg[aria-label="Like"]')).map(el => el.closest('button') || el.closest('[role="button"]') || el).filter(b => b);
-          if(likeButtons.length === 0) return "No unliked posts found on current feed.";
-          
-          let count = 0;
-          likeButtons.forEach((btn, i) => {
-              setTimeout(() => {
-                  try { btn.click(); count++; console.log("Liked post " + count); } catch(e) {}
-              }, i * 1500 + Math.random() * 500);
-          });
-          return "Started auto-liking " + likeButtons.length + " posts in the viewport.";
-        `, desc: 'Execute Auto-Like Script' });
-
-        queue.push({ type: 'verify_action', expected_state: 'Successfully liked posts on Instagram feed', desc: 'Double check tasks' });
-      }
-
-      if (intent === 'INSTA_COMMENT' || normalized.includes('manage')) {
-        queue.push({ type: 'inject_script', thought: 'Injecting Auto-Commenter bot.', plan: 'Execute DOM script to type and submit comments.', script: `
-          // Real DOM execution: Auto-Commenter for Instagram
-          const commentBoxes = Array.from(document.querySelectorAll('textarea[aria-label="Add a comment..."]'));
-          if(commentBoxes.length === 0) return "No comment boxes found in viewport.";
-          
-          let count = 0;
-          commentBoxes.forEach((box, i) => {
-              setTimeout(() => {
-                  box.value = "Great post! 🔥";
-                  box.dispatchEvent(new Event('input', { bubbles: true }));
-                  
-                  const form = box.closest('form');
-                  if(form) {
-                      const submitBtn = form.querySelector('button[type="submit"], button.post-btn');
-                      if(submitBtn) {
-                         submitBtn.removeAttribute('disabled');
-                         submitBtn.click();
-                      }
-                  }
-              }, i * 2000 + 500);
-          });
-          
-          return "Drafted and dispatched automated comments on " + commentBoxes.length + " posts.";
-        `, desc: 'Execute Auto-Comment Script' });
-      }
-
-      if (normalized.includes('follow') || normalized.includes('manage')) {
-        queue.push({ type: 'inject_script', thought: 'Injecting Auto-Follow script.', plan: 'Execute DOM script to click follow buttons.', script: `
-          // Real DOM execution: Mass Auto-Follow
-          const followBtns = Array.from(document.querySelectorAll('button')).filter(b => b.textContent && b.textContent.trim().toLowerCase() === 'follow');
-          if(followBtns.length === 0) return "No users to follow found on page.";
-          
-          followBtns.forEach((btn, i) => {
-             setTimeout(() => { btn.click(); }, i * 1200);
-          });
-          return "Initiated auto-follow sequence for " + followBtns.length + " users.";
-        `, desc: 'Execute Auto-Follow Script' });
-      }
-      
-      if (intent === 'INSTA_DM' || normalized.includes('dm') || normalized.includes('message') || normalized.includes('reply to dm') || normalized.includes('respond to dms')) {
-        queue.push({ type: 'inject_script', thought: 'Injecting Auto-DM bot.', plan: 'Execute DOM script to open DMs and send messages.', script: `
-          // Real DOM execution: Auto-DM for Instagram
-          const messageBtns = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(b => b.textContent && (b.textContent.trim().toLowerCase().includes('message') || b.textContent.trim().toLowerCase() === 'send message'));
-          
-          if (messageBtns.length > 0) {
-              messageBtns[0].click();
-              
-              // Simulate typing into the message box after UI updates
-              setTimeout(() => {
-                  const inputs = Array.from(document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]'));
-                  const messageBox = inputs.find(el => el.getAttribute('placeholder')?.toLowerCase().includes('message') || el.hasAttribute('contenteditable'));
-                  
-                  if (messageBox) {
-                      if (messageBox.tagName === 'TEXTAREA' || messageBox.tagName === 'INPUT') {
-                          messageBox.value = "Hey! This is an automated reply sent from my local bot. 🤖 Thanks for connecting!";
-                      } else {
-                          messageBox.innerText = "Hey! This is an automated reply sent from my local bot. 🤖 Thanks for connecting!";
-                      }
-                      messageBox.dispatchEvent(new Event('input', { bubbles: true }));
-                      
-                      // Find and click the send button
-                      setTimeout(() => {
-                          const sendBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.toLowerCase() === 'send');
-                          if(sendBtn) {
-                              sendBtn.click();
-                          }
-                      }, 500);
-                  }
-              }, 2500);
-              return "Successfully initiated Auto-DM sequence: Clicked Message button and drafting response.";
-          } else {
-              // Alternative heuristic if we are already in the inbox view
-              const unreadConversations = document.querySelectorAll('div[aria-label*="unread"]');
-              if (unreadConversations.length > 0) {
-                  return "Found " + unreadConversations.length + " unread DMs. Preparing to auto-reply to the first one...";
-              }
-          }
-          return "Could not find a 'Message' button or unread DMs. Make sure you are on a specific user profile or your inbox.";
-        `, desc: 'Execute Auto-DM Script' });
-      }
-      
-      queue.push({ type: 'reply_msg', message: "🚀 **Real execution scripts injected!** I've written the exact JavaScript DOM manipulation required to automate Instagram and attempted to inject it into the browser frame. *(Note: If the current frame blocks cross-origin script injection, this code will execute perfectly once compiled via our Chrome Extension exporter!)*", desc: 'Report automation status' });
-      return queue;
-    }
-
-    if (intent === 'IMAGE_DOWNLOAD' || normalized.includes('download all images') || normalized.includes('scrape images')) {
-       queue.push({ type: 'inject_script', thought: 'Extracting all images from DOM.', plan: 'Run script to collect and trigger downloads.', script: `
-          // Real DOM execution: Image Scraper
-          const images = Array.from(document.querySelectorAll('img')).map(img => img.src).filter(src => src.startsWith('http'));
-          if(images.length === 0) return "No images found.";
-          
-          // Trigger mock download logs or actual anchor clicks
-          return "Found " + images.length + " valid images ready for extraction.\\nSample:\\n- " + images.slice(0,3).join('\\n- ');
-       `, desc: 'Extract and download all images' });
-       queue.push({ type: 'reply_msg', message: "Image extraction script executed against the live DOM.", desc: 'Confirm extraction' });
-       return queue;
-    }
-
-    // Split input into sequential parts
-    const parts = normalized.split(/\b(?:and then|and|then)\b|,/);
-
-    for (let part of parts) {
-      part = part.trim();
-      if (!part) continue;
-
-      // --- Navigation & Web Action ---
-      if (part.match(/^(?:go to|navigate to|visit|open|pull up|load)\s+(.+)$/)) {
-        let url = RegExp.$1.trim();
-        // If it looks like a brand/words and missing a domain extension
-        if (!url.includes('.') && !url.includes(':') && url.toLowerCase() !== 'localhost') {
-           url = url.toLowerCase().replace(/\s+/g, '') + '.com';
-        }
-        // Trim spaces just in case
-        url = url.replace(/\s+/g, '');
-        if (!url.startsWith('http')) {
-           url = url.startsWith('localhost') ? 'http://' + url : 'https://' + url;
-        }
-        queue.push({ type: 'navigate', url, desc: `Navigate to ${url}` });
-      }
-      else if (part.match(/^(?:type|enter|input|put|write)\s+(.+)\s+(?:into|in|inside)\s+(.+)$/)) {
-        queue.push({ type: 'type', inputText: RegExp.$1.trim(), targetText: RegExp.$2.trim(), desc: `Type "${RegExp.$1.trim()}"` });
-      }
-      else if (part.match(/^(?:click|press|tap|hit|smash)(?:\s+on)?\s+(.+)$/)) {
-        queue.push({ type: 'click', targetText: RegExp.$1.trim(), desc: `Click "${RegExp.$1.trim()}"` });
-      }
-      else if (part.match(/^(?:wait|pause|stop|hold on)(?:\s+for)?\s+(\d+)\s+(?:second|seconds|sec|s)$/)) {
-        const secs = ScriptSanitizer.escapeForJS(RegExp.$1.trim());
-        queue.push({ type: 'inject_script', thought: `Pausing execution for ${secs} seconds.`, plan: `Wait ${secs}s`, script: `
-          return new Promise(resolve => setTimeout(() => resolve("Waited for ${secs} seconds."), parseInt('${secs}') * 1000));
-        `, desc: `Wait ${secs}s` });
-      }
-      else if (part.match(/^(?:wait|pause|stop)\s+for\s+(?:load|loading|element)\s*(.*)$/)) {
-        const selector = RegExp.$1.trim() || 'body';
-        queue.push({ type: 'wait_for_element', selector: selector === 'page' || !selector ? 'body' : selector, desc: `Wait for load` });
-      }
-      else if (part.match(/^(?:verify|double\s*check|make sure|confirm)\s+(.+)$/)) {
-        queue.push({ type: 'verify_action', expected_state: RegExp.$1.trim(), desc: `Verify: ${RegExp.$1.trim()}` });
-      }
-      else if (part.match(/^(?:scroll|swipe)\s+(up|down|to the top|to the bottom)$/)) {
-        const dir = RegExp.$1.includes('up') || RegExp.$1.includes('top') ? 'up' : 'down';
-        queue.push({ type: 'scroll', direction: dir, desc: `Scroll ${dir}` });
-      }
-      else if (part.match(/^(?:read|map|scan|analyze|look at)\s+(?:page|screen|site|website)$/)) {
-        queue.push({ type: 'read_page', desc: 'Scan page elements' });
-      }
-      // --- VLM (Visual Language Model) Emulation ---
-      else if (part.includes('what do you see') || part.includes('analyze visually') || part.includes('visual') || part.includes('vlm') || part.includes('describe the page') || part.includes('look at') || part.includes('what color') || part.includes('where is') || part.includes('what is this') || part.includes('can you tell me what')) {
-        const query = part.replace(/(?:what do you see|analyze visually|describe the page|look at|what is this|can you tell me what)\s*/i, '').trim() || 'general visual analysis';
-        queue.push({ type: 'vlm_analyze', query, desc: `VLM Analysis: ${query}` });
-      }
-      else if (part.match(/^(?:go back|back|previous page|return|rewind)$/)) {
-        queue.push({ type: 'go_back', desc: 'Go Back' });
-      }
-      else if (part.match(/^(?:refresh|reload|restart|f5)(?:\s+(?:page|screen|site))?$/)) {
-        queue.push({ type: 'refresh', desc: 'Refresh Page' });
-      }
-      else if (part.match(/^(?:copy|extract|grab)\s+(?:text|everything|all text)$/)) {
-        queue.push({ type: 'inject_script', thought: `Extracting all text from the page body.`, plan: `Run text extraction on body.`, script: `
-          const text = document.body.innerText;
-          // Pretending to copy to clipboard in a browser extension context
-          return "Copied " + text.length + " characters to clipboard.";
-        `, desc: `Copy Page Text` });
-      }
-      else if (part.match(/^(?:new tab|open a new tab|add tab|plus tab)$/)) {
-         // Fallback script because real UI tab addition happens in react state, 
-         // but we can acknowledge it in the log
-         queue.push({ type: 'reply_msg', message: "To open a new tab, you can click the '+' icon in the browser tab bar above.", desc: 'New Tab Request' });
-      }
-      else if (part.match(/^(?:close tab|exit tab|shut tab|kill tab)$/)) {
-         queue.push({ type: 'reply_msg', message: "To close this tab, click the 'x' next to the tab name in the bar above.", desc: 'Close Tab Request' });
-      }
-      else if (part.match(/^(?:verify|check|find|look for|make sure you see)\s+(.+)$/)) {
-        const querySafe = ScriptSanitizer.escapeForJS(RegExp.$1.trim());
-        queue.push({ type: 'inject_script', thought: `Verifying presence of ${RegExp.$1}`, plan: `Scan DOM for ${RegExp.$1}`, script: `
-          const query = "${querySafe}".toLowerCase();
-          const pageText = document.body.innerText.toLowerCase();
-          if (pageText.includes(query) || document.title.toLowerCase().includes(query)) {
-             return "Verification successful: " + query + " was found on the page.";
-          }
-          return "Verification failed: Could not find " + query + " on the page.";
-        `, desc: `Verify: ${RegExp.$1}` });
-      }
-      
-      // --- Advanced Automations ---
-      else if (part.includes('check email') || part.includes('read email')) {
-         queue.push({ type: 'navigate', url: 'https://mail.google.com', desc: 'Navigate to Gmail' });
-         queue.push({ type: 'inject_script', thought: 'Checking for unread emails.', plan: 'Scan DOM for unread messages.', script: `
-            const unread = document.querySelectorAll('.zE, .zA.zE');
-            if (unread.length === 0) return "No new unread emails found on the visible screen.";
-            return "Found " + unread.length + " unread emails. They are highlighted and ready for review.";
-         `, desc: 'Scan Unread Emails' });
-      }
-      else if (part.includes('schedule event') || part.includes('calendar')) {
-         queue.push({ type: 'navigate', url: 'https://calendar.google.com', desc: 'Navigate to Google Calendar' });
-         queue.push({ type: 'reply_msg', message: "I've navigated to your calendar. In a fully connected desktop environment, I would trigger an event creation block here.", desc: 'Calendar trigger' });
-      }
-      else if (part.includes('scrape') || part.includes('collect email') || part.includes('lead') || part.includes('contact')) {
-        queue.push({ type: 'inject_script', thought: 'Deploying Lead Generation bot to scrape emails and phone numbers.', plan: 'Execute DOM manipulation script to extract contact info.', script: `
-          // Real DOM execution: Lead Generation Scraper
-          const text = document.body.innerText;
-          const emails = [...new Set(text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9_-]+)/gi) || [])];
-          const phones = [...new Set(text.match(/(\\+?\\d{1,2}\\s?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}/gi) || [])];
-          const links = Array.from(document.querySelectorAll('a')).map(a => a.href).filter(h => h.includes('linkedin.com/in') || h.includes('twitter.com') || h.includes('instagram.com'));
-          
-          let result = "Extracted Leads from " + document.title + ":\\n";
-          if (emails.length) result += "- Emails: " + emails.join(', ') + "\\n";
-          if (phones.length) result += "- Phones: " + phones.join(', ') + "\\n";
-          if (links.length) result += "- Social Profiles: " + [...new Set(links)].join(', ') + "\\n";
-          
-          if (!emails.length && !phones.length && !links.length) result = "No contact information found on the current page.";
-          return result;
-        `, desc: 'Scrape Contact Info' });
-        
-        if (part.includes('csv')) {
-           queue.push({ type: 'reply_msg', message: "Lead generation scan complete! Extracted contacts have been compiled. In a full desktop environment, this would now be saved to leads.csv.", desc: 'Report lead gen status' });
-        } else {
-           queue.push({ type: 'reply_msg', message: "Lead generation scan complete! Extracted available contact information.", desc: 'Report lead gen status' });
-        }
-      }
-      else if (part.includes('twitter thread') || part.includes('summarize in') || part.includes('summerize in') || part.includes('summerzie in') || part.includes('summarise in') || part.includes('sumarize in') || part.includes('generate blog')) {
-        queue.push({ type: 'inject_script', thought: 'Deploying Content Creation bot to analyze page and generate content.', plan: 'Read page text and generate formatted content.', script: `
-          // Real DOM execution: Content Creator Bot
-          const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => h.innerText);
-          const paras = Array.from(document.querySelectorAll('p')).map(p => p.innerText).filter(t => t.length > 50).slice(0, 3);
-          
-          let content = "Content Generation Complete:\\n\\n";
-          if (headings.length > 0) content += "📌 Main Topic: " + headings[0] + "\\n\\n";
-          
-          content += "📝 Summary / Thread Draft:\\n";
-          paras.forEach((p, i) => {
-              content += (i+1) + ". " + p.substring(0, 100) + "...\\n";
-          });
-          
-          if (!paras.length) content = "Not enough text on page to generate content.";
-          return content;
-        `, desc: 'Generate Content' });
-        queue.push({ type: 'reply_msg', message: "Content generation complete! I've drafted the requested content based on the active page context.", desc: 'Report content status' });
-      }
-      else if (part.includes('research') || part.includes('compare product') || part.includes('gather stat')) {
-        queue.push({ type: 'inject_script', thought: 'Deploying Research bot to analyze page and extract key data points.', plan: 'Execute DOM manipulation script to extract tabular data and key paragraphs.', script: `
-          // Real DOM execution: Research Bot
-          const tables = Array.from(document.querySelectorAll('table')).map(t => t.innerText.substring(0, 200).replace(/\\n/g, ' '));
-          const listItems = Array.from(document.querySelectorAll('li')).map(l => l.innerText).filter(t => t.length > 20 && t.length < 200).slice(0, 10);
-          
-          let result = "Research Data Extracted:\\n";
-          if (tables.length) result += "Found " + tables.length + " data tables.\\n";
-          if (listItems.length) {
-              result += "Key Points:\\n";
-              listItems.forEach(li => result += " - " + li + "\\n");
-          }
-          if (!tables.length && !listItems.length) result += "No structured research data found on this page.";
-          
-          return result;
-        `, desc: 'Extract Research Data' });
-        queue.push({ type: 'reply_msg', message: "Research data gathered successfully. Ready to compare or analyze further.", desc: 'Report research status' });
-      }
-      
-      // --- Research & Information ---
-      else if (part.includes('summarize') || part.includes('summerize') || part.includes('summerzie') || part.includes('summarise') || part.includes('sumarize') || part.includes('summary') || part.includes('summerzie')) {
-        // Need to read page first before processing
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to prepare for summarization.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'summarize', desc: 'Summarize page' });
-      }
-      else if (part.includes('explain') || part.includes('break down') || part.includes('step-by-step')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to explain it.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'explain', desc: 'Explain content' });
-      }
-      else if (part.includes('answer') || part.includes('question')) {
-        const match = part.match(/(?:answer|question(?:s)? about) (.+)/i);
-        const query = match ? match[1] : part;
-        queue.push({ type: 'read_page_exact', thought: `Scanning the page to find the answer for: ${query}`, plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'answer_question', query, desc: `Answer question: ${query}` });
-      }
-      else if (part.includes('compare information') || part.includes('analyze multiple') || part.includes('compare source')) {
-        queue.push({ type: 'extract_page_content', task: 'compare_sources', desc: 'Compare sources' });
-      }
-      else if (part.includes('find') || part.includes('search') || part.includes('look for')) {
-         if (part.includes('on this page') || part.includes('in this article') || part.includes('specific information')) {
-            const match = part.match(/(?:find|look for) (.+) (?:on this page|in this article|specific information)/i);
-            const query = match ? match[1] : part;
-            queue.push({ type: 'read_page_exact', thought: `Scanning the page to find: ${query}`, plan: 'Read DOM', desc: 'Scan page content' });
-            queue.push({ type: 'extract_page_content', task: 'find_in_page', query, desc: `Find "${query}" in page` });
-         } else if (part.match(/^(?:search google|search for|search|look for|find)\s+(.+)$/)) {
-            let query = RegExp.$1.trim();
-            
-            // Check if they want to search ON a specific site (e.g., "search iphone on amazon")
-            const siteMatch = query.match(/(.+)\s+(?:on|in)\s+(.+)$/i);
-            
-            if (siteMatch && !part.includes('google')) {
-               const siteQuery = siteMatch[1].trim();
-               let siteName = siteMatch[2].trim().toLowerCase().replace(/\s+/g, '');
-               if (!siteName.includes('.')) siteName += '.com';
-               
-               queue.push({ type: 'navigate', url: 'https://' + siteName, desc: `Navigate to ${siteName}` });
-               queue.push({ type: 'type', inputText: siteQuery, targetText: 'search', press_enter: true, desc: `Type "${siteQuery}" into search box & Enter` });
-            } else if (part.includes('google')) {
-               // Explicit Google search
-               const finalQuery = query.replace(/google/i, '').trim() || query;
-               queue.push({ type: 'navigate', url: 'https://www.google.com', desc: `Navigate to Google` });
-               queue.push({ type: 'wait_for_element', selector: 'textarea[name="q"], input[name="q"]', desc: 'Wait for search bar' });
-               queue.push({ type: 'type', inputText: finalQuery, targetText: 'search', press_enter: true, desc: `Type "${finalQuery}" into search box & Enter` });
-            } else {
-               // Default behavior: Search on current page
-               queue.push({ type: 'type', inputText: query, targetText: 'search', press_enter: true, desc: `Type "${query}" into search box & Enter` });
-            }
-         }
-      }
-
-      else if (part.includes('csv')) {
-         queue.push({ type: 'inject_script', thought: "Exporting page data to CSV", plan: "Extract tables and lists into CSV format and download", script: `
-            let csvContent = "data:text/csv;charset=utf-8,";
-            const rows = document.querySelectorAll("table tr");
-            if (rows.length > 0) {
-                rows.forEach(row => {
-                    const cols = row.querySelectorAll("td, th");
-                    const rowData = Array.from(cols).map(c => '"' + (c.innerText || '').replace(/"/g, '""') + '"').join(",");
-                    csvContent += rowData + "\\r\\n";
-                });
-            } else {
-                csvContent += "Extracted Data\\n";
-                const items = document.querySelectorAll("li, h1, h2, h3, p");
-                items.forEach(item => {
-                    csvContent += '"' + (item.innerText || '').replace(/"/g, '""') + '"\\r\\n';
-                });
-            }
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "export.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            return "Successfully extracted DOM data and downloaded CSV file.";
-        `, desc: 'Export to CSV' });
-      }
-      else if (part.match(/open first (\d+) (?:website|link|result)/i)) {
-        const count = ScriptSanitizer.escapeForJS(RegExp.$1);
-        // Collect links and return them as JSON — the agent loop will open them as Bleumr tabs via IPC
-        queue.push({ type: 'inject_script', thought: `Collecting top ${count} links to open as Bleumr tabs.`, plan: `Scan DOM for top links and return their URLs.`, script: `
-            const links = Array.from(document.querySelectorAll('a')).filter(a => a.href && a.href.startsWith('http') && !a.href.includes('google.com/search') && !a.href.includes('google.com/url'));
-            const toOpen = links.slice(0, parseInt('${count}', 10));
-            return JSON.stringify({ open_urls: toOpen.map(l => l.href) });
-        `, desc: `Collect top ${count} links` });
-      }
-
-      // --- Writing & Editing ---
-      else if (part.includes('write email') || part.includes('write message') || part.includes('draft email')) {
-        queue.push({ type: 'text_processing', task: 'write_email', text: part, desc: 'Draft an email' });
-      }
-      else if (part.includes('rewrite') || part.includes('improve text') || part.includes('grammar') || part.includes('spell')) {
-        const match = part.match(/(?:rewrite|fix grammar for|improve) (.+)/i);
-        queue.push({ type: 'text_processing', task: 'rewrite', text: match ? match[1] : part, desc: 'Rewrite text' });
-      }
-      else if (part.includes('social media post') || part.includes('tweet') || part.includes('linkedin post')) {
-        queue.push({ type: 'text_processing', task: 'social_media', text: part, desc: 'Draft social media post' });
-      }
-      else if (part.includes('blog') || part.includes('article draft')) {
-        queue.push({ type: 'text_processing', task: 'draft_blog', text: part, desc: 'Draft blog post' });
-      }
-
-      // --- Productivity ---
-      else if (part.includes('take notes') || part.includes('study notes') || part.includes('create notes')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to take notes.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'take_notes', desc: 'Take study notes' });
-      }
-      else if (part.includes('task list') || part.includes('to-do') || part.includes('todo list')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to build task list.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'task_list', desc: 'Generate task list' });
-      }
-      else if (part.includes('pdf') || part.includes('document')) {
-        queue.push({ type: 'extract_page_content', task: 'summarize_pdf', desc: 'Summarize document' });
-      }
-      else if (part.includes('extract') || part.includes('key points')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to extract key points.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'extract_key_points', desc: 'Extract key points' });
-      }
-
-      // --- Shopping Assistance ---
-      else if (part.includes('compare price') || part.includes('find deal') || part.includes('alternative')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page for price points and products.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'shopping_comparison', desc: 'Compare prices' });
-      }
-      else if (part.includes('review') && (part.includes('summar') || part.includes('product'))) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page for reviews.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'summarize_reviews', desc: 'Summarize reviews' });
-      }
-      else if (part.includes('specification') || part.includes('specs')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page for product specs.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'product_specs', desc: 'Extract specifications' });
-      }
-
-      // --- Learning & Education ---
-      else if (part.includes('translate')) {
-        queue.push({ type: 'extract_page_content', task: 'translate', desc: 'Translate page' });
-      }
-      else if (part.includes('quiz') || part.includes('flashcard')) {
-        queue.push({ type: 'read_page_exact', thought: 'Scanning the page to generate quiz questions.', plan: 'Read DOM', desc: 'Scan page content' });
-        queue.push({ type: 'extract_page_content', task: 'create_quiz', desc: 'Generate pop quiz' });
-      }
-
-      // --- Automation & Web Tasks ---
-      else if (part.includes('fill form') || part.includes('automatically fill') || part.includes('auto fill')) {
-        queue.push({ type: 'auto_fill_form', desc: 'Autofill form fields' });
-      }
-      else if (part.includes('extract data') || part.includes('scrape') || part.includes('repetitive task')) {
-        queue.push({ type: 'extract_page_content', task: 'extract_data', desc: 'Scrape page data' });
-      }
-      else if (part.includes('generate script') || part.includes('code from example') || part.includes('write code')) {
-        queue.push({ type: 'text_processing', task: 'generate_code', text: part, desc: 'Generate code snippet' });
-      }
-
-      // --- Navigation & Web Help ---
-      else if (part.includes('suggest link') || part.includes('relevant link') || part.includes('contextual suggestion')) {
-        queue.push({ type: 'extract_page_content', task: 'suggest_links', desc: 'Find relevant links' });
-      }
-      else if (part.includes('help search') || part.includes('search more effectively')) {
-        queue.push({ type: 'text_processing', task: 'help_search', text: part, desc: 'Provide search tips' });
-      }
-      // --- NLP Fallback for Unstructured Natural Language ---
-      else {
-         const doc = nlp(part);
-         const verbs = doc.verbs().out('array');
-         const nouns = doc.nouns().out('array');
-         
-         if (verbs.length > 0) {
-            const primaryVerb = verbs[0].toLowerCase();
-            const target = nouns.join(' ') || part;
-            
-            const safeVerb = ScriptSanitizer.escapeForJS(primaryVerb);
-            const safeTarget = ScriptSanitizer.escapeForJS(target);
-            const safeNoun = nouns[0] ? ScriptSanitizer.escapeForJS(nouns[0]) : '';
-            const safePart = ScriptSanitizer.escapeForJS(part);
-            
-            if (['add', 'buy', 'purchase', 'get'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Auto-Cart Bot for: ${target}`, plan: `Find and click 'Add to Cart' or 'Buy' button for ${target}.`, script: `
-                  if (['buy', 'purchase'].includes('${safeVerb}')) {
-                      if (!window.confirm("Warning: JUMARI 1.0 is about to execute a purchase action for ${safeTarget}. Proceed?")) {
-                          return "User cancelled purchase action.";
-                      }
-                  }
-                  const btn = Array.from(document.querySelectorAll('button, a, div')).find(el => el.innerText && (el.innerText.toLowerCase().includes('add to cart') || el.innerText.toLowerCase().includes('buy')));
-                  if (btn) { btn.click(); return "Successfully triggered purchase action for ${safeTarget}."; }
-                  return "Could not find a buy button for ${safeTarget} on this page.";
-               `, desc: `Auto-Cart: ${target}` });
-            } else if (['post', 'publish', 'delete', 'send'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Risky Action Bot for ${target}`, plan: `Prompt user for confirmation before ${primaryVerb}.`, script: `
-                  if (window.confirm("Safety Check: JUMARI 1.0 is about to ${safeVerb} ${safeTarget}. Do you want to proceed?")) {
-                      const btns = Array.from(document.querySelectorAll('button, a, input')).filter(el => {
-                         const t = (el.innerText || el.value || '').toLowerCase();
-                         return t.includes('${safeVerb}') || t === 'submit';
-                      });
-                      if (btns.length > 0) { btns[0].click(); return "Confirmed and executed ${safeVerb}."; }
-                      return "Confirmed but could not find a button to ${safeVerb}.";
-                  }
-                  return "Action cancelled by user.";
-               `, desc: `Safety Check: ${primaryVerb}` });
-            } else if (['play', 'watch', 'listen'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Media Bot to play: ${target}`, plan: `Find and click the play button.`, script: `
-                  const playBtn = document.querySelector('video') || document.querySelector('[aria-label="Play"]');
-                  if (playBtn && typeof playBtn.play === 'function') { playBtn.play(); return "Playing media."; }
-                  else if (playBtn) { playBtn.click(); return "Clicked play button."; }
-                  return "No media found to play.";
-               `, desc: `Play Media: ${target}` });
-            } else if (['follow', 'like', 'subscribe', 'retweet', 'share', 'reply', 'comment', 'message', 'dm'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Social Media Bot to ${primaryVerb} ${target}`, plan: `Scan DOM for ${primaryVerb} action on ${target}.`, script: `
-                  let btns = Array.from(document.querySelectorAll('button, a, [role="button"], [aria-label]')).filter(el => {
-                      const txt = (el.innerText || el.getAttribute('aria-label') || '').toLowerCase();
-                      return txt.includes('${safeVerb}');
-                  });
-                  btns = [...new Set(btns.map(el => el.closest('button') || el.closest('a') || el.closest('[role="button"]') || el))].filter(b => b);
-                  
-                  if (btns.length > 0) {
-                      btns.forEach((btn, i) => setTimeout(() => { try { btn.click() } catch(e){} }, i * 800));
-                      return "Autonomously executed ${safeVerb} on " + btns.length + " items related to ${safeTarget}.";
-                  }
-                  return "Could not find elements to ${safeVerb}.";
-               `, desc: `Social: ${primaryVerb} ${target}` });
-            } else if (['scrape', 'extract', 'collect', 'gather'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Data Extraction Bot for ${target}`, plan: `Extract ${target} from current page structure.`, script: `
-                  const text = document.body.innerText;
-                  let result = "Extracted sample of ${safeTarget}:\\n";
-                  if ('${safeTarget}'.includes('email')) {
-                     const emails = [...new Set(text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9_-]+)/gi) || [])];
-                     result += emails.length ? emails.join(', ') : "No emails found.";
-                  } else {
-                     const words = text.split(/\\s+/);
-                     result += words.slice(0, 20).join(' ') + "...";
-                  }
-                  return result;
-               `, desc: `Extract: ${target}` });
-            } else if (['save', 'export', 'download', 'compile'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying File Bot to ${primaryVerb} ${target}`, plan: `Compile data and trigger ${primaryVerb}.`, script: `
-                  const data = document.body.innerText.slice(0, 5000);
-                  const blob = new Blob([data], { type: 'text/plain' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = '${safeTarget.replace(/[^a-zA-Z0-9]/g, '_')}.txt';
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                  return "Successfully compiled ${safeTarget} and triggered browser download.";
-               `, desc: `Save/Export: ${target}` });
-            } else if (['monitor', 'watch', 'track', 'alert'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Monitoring Bot for ${target}`, plan: `Set up interval or MutationObserver to track ${target}.`, script: `
-                  return new Promise(resolve => {
-                     const observer = new MutationObserver((mutations, obs) => {
-                         obs.disconnect();
-                         resolve("Detected DOM change related to ${safeTarget}. Alerting user.");
-                     });
-                     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-                     setTimeout(() => { observer.disconnect(); resolve("Monitoring complete. No immediate changes detected for ${safeTarget}."); }, 5000);
-                  });
-               `, desc: `Monitor: ${target}` });
-            } else if (['login', 'sign', 'authenticate'].includes(primaryVerb)) {
-               // Use stored profile email if available; credentials must be entered by the user
-               const profileEmail = userProfile?.email || '';
-               queue.push({ type: 'inject_script', thought: `Locating login form on ${target}`, plan: `Find email/username field and pre-fill with profile email. Password must be entered by the user.`, script: `
-                  const userField = document.querySelector('input[type="email"], input[type="text"], input[name*="user"], input[name*="email"]');
-                  const passField = document.querySelector('input[type="password"]');
-                  if (userField && '${profileEmail}') {
-                      userField.value = '${profileEmail}';
-                      userField.dispatchEvent(new Event('input', { bubbles: true }));
-                      if (passField) passField.focus();
-                      return "Email pre-filled from your profile. Please enter your password to continue.";
-                  }
-                  if (passField) passField.focus();
-                  return "Login form found. Please enter your credentials to continue.";
-               `, desc: `Pre-fill login: ${target}` });
-            } else if (['upload'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Upload Bot`, plan: `Find file input and prompt upload.`, script: `
-                  const fileInputs = document.querySelectorAll('input[type="file"]');
-                  if (fileInputs.length > 0) {
-                      fileInputs[0].click();
-                      return "Found file upload input and opened system dialog.";
-                  }
-                  return "No file upload fields found on this page.";
-               `, desc: `Upload File` });
-            } else if (['schedule', 'book'].includes(primaryVerb)) {
-               queue.push({ type: 'inject_script', thought: `Deploying Scheduling Bot`, plan: `Scan for calendar or booking elements.`, script: `
-                  const timeSlots = Array.from(document.querySelectorAll('button, a')).filter(el => /\\d{1,2}:\\d{2}/.test(el.innerText || ''));
-                  if(timeSlots.length > 0) {
-                     timeSlots[0].click();
-                     return "Found and clicked time slot: " + timeSlots[0].innerText;
-                  }
-                  return "Could not automatically find calendar time slots on the page.";
-               `, desc: `Schedule: ${target}` });
-            } else {
-               // Generic catch-all semantic action
-               queue.push({ type: 'inject_script', thought: `NLP resolved intent: Need to ${primaryVerb} ${target}.`, plan: `Scan DOM for elements related to ${primaryVerb} and ${target}.`, script: `
-                  // Generic AI DOM Scan
-                  let els = Array.from(document.querySelectorAll('button, a, input, [role="button"], [aria-label]')).filter(el => {
-                     const txt = (el.innerText || el.placeholder || el.getAttribute('aria-label') || '').toLowerCase();
-                     return txt.includes('${safeVerb}') || txt.includes('${safeNoun || '___'}');
-                  });
-                  els = [...new Set(els.map(el => el.closest('button') || el.closest('a') || el.closest('[role="button"]') || el))].filter(b => b);
-                  
-                  if (els.length > 0) { els[0].focus(); els[0].click(); return "Autonomously executed best match for ${safePart}."; }
-                  return "Could not automatically find an interactive element for ${safePart}.";
-               `, desc: `Autonomous: ${primaryVerb} ${target}` });
-            }
-         } else if (part.length > 3) {
-             // If we can't find a verb, treat it as a general search intent via Google
-             queue.push({ type: 'navigate', url: 'https://www.google.com', desc: `Navigate to Google` });
-             queue.push({ type: 'wait_for_element', selector: 'textarea[name="q"], input[name="q"]', desc: 'Wait for search bar' });
-             queue.push({ type: 'type', inputText: part, targetText: 'search', press_enter: true, desc: `Type "${part}" into search box & Enter` });
-         }
-      }
-    }
-    
-    return queue;
-  };
-
-  // Vision analysis — sends a base64 screenshot to a Groq vision model
-  const analyzeWithVision = async (base64: string, prompt: string): Promise<string> => {
-    if (!secureApiKey) return 'Vision unavailable: no API key configured.';
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${secureApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
-            ],
-          }],
-          max_tokens: 1500,
-          temperature: 0.2,
-        }),
-      });
-      if (!res.ok) {
-        // Fall back to llama-4-maverick if scout is unavailable
-        const retry = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${secureApiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-            messages: [{ role: 'user', content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
-            ]}],
-            max_tokens: 1500, temperature: 0.2,
-          }),
-        });
-        if (!retry.ok) return `Vision analysis failed (${res.status})`;
-        const d = await retry.json();
-        return d.choices?.[0]?.message?.content || 'No analysis returned.';
-      }
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || 'No analysis returned.';
-    } catch (e: any) {
-      return `Vision error: ${e.message}`;
-    }
-  };
-
-  const callLocalBrain = async (executeJS: (code: string) => Promise<any>, messages: Message[]) => {
-    const state = brainRef.current;
-    // Delay removed
-
-    if (state.queue.length === 0) {
-      // Check last system message to see if it was a failure or verification report
-      const lastSys = messages.slice().reverse().find(m => m.role === 'system');
-      let finalMsg = "All done! Is there anything else you need?";
-      if (lastSys && typeof lastSys.content === 'string') {
-          if (lastSys.content.toLowerCase().includes('error') || lastSys.content.toLowerCase().includes('failed') || lastSys.content.toLowerCase().includes('timeout')) {
-              finalMsg = "I've finished the queue, but there were some errors or failed verifications along the way. Let me know if you want me to try again!";
-          } else if (lastSys.content.includes('Verification request for')) {
-              finalMsg = "Task complete! Based on the verification scan, the task appears to be successfully executed.";
-          }
-      }
-
-      return JSON.stringify({
-        thought: "I have completed all tasks in the queue.",
-        plan: "Notify the user of the final status.",
-        action: "reply",
-        message: finalMsg
-      });
-    }
-
-    const intent = state.queue[0];
-
-    if (intent.type === 'wait_for_element') {
-       state.queue.shift();
-       return JSON.stringify({
-         thought: intent.thought || `Waiting for ${intent.selector} to ensure the page has loaded completely.`,
-         plan: intent.plan || `Wait for ${intent.selector}`,
-         action: "wait_for_element",
-         selector: intent.selector
-       });
-    }
-
-    if (intent.type === 'verify_action') {
-       state.queue.shift();
-       return JSON.stringify({
-         thought: intent.thought || `Double-checking the state of the task to verify success.`,
-         plan: intent.plan || `Verify completion`,
-         action: "verify",
-         expected: intent.expected_state || "Task completion state"
-       });
-    }
-
-    if (intent.type === 'inject_script') {
-       state.queue.shift();
-       return JSON.stringify({
-         thought: intent.thought || "Executing dynamic DOM automation script.",
-         plan: intent.plan || "Inject script into page.",
-         action: "inject_script",
-         script: intent.script
-       });
-    }
-
-    if (intent.type === 'read_page_exact') {
-       state.queue.shift();
-       return JSON.stringify({ thought: intent.thought, plan: intent.plan, action: "read_page" });
-    }
-
-    if (intent.type === 'screenshot') {
-       state.queue.shift();
-       return JSON.stringify({
-         thought: intent.thought || 'Taking a screenshot to visually analyze the current page state.',
-         plan: intent.plan || 'Capture and analyze screenshot with vision AI.',
-         action: 'screenshot',
-         prompt: intent.prompt || undefined,
-       });
-    }
-
-    if (intent.type === 'click_exact') {
-       if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No webview available.'});
-       const targetText = intent.target.toLowerCase();
-       const elementId = await executeJS(`
-          (function() {
-             const elements = Array.from(document.querySelectorAll('[data-orbit-id]'));
-             const targetText = \`${ScriptSanitizer.escapeForJS(targetText)}\`;
-             const el = elements.find(e => {
-                let text = (e.textContent || '').toLowerCase().trim();
-                let p = (e.getAttribute('placeholder') || '').toLowerCase();
-                let ariaLabel = (e.getAttribute('aria-label') || '').toLowerCase();
-                let title = (e.getAttribute('title') || '').toLowerCase();
-                let name = (e.getAttribute('name') || '').toLowerCase();
-                return text === targetText || p === targetText || ariaLabel === targetText || title === targetText || name === targetText;
-             });
-             return el ? el.getAttribute('data-orbit-id') : null;
-          })();
-       `);
-       
-       if (elementId) {
-          state.queue.shift();
-          return JSON.stringify({ thought: intent.thought, plan: intent.plan, action: 'click', element_id: Number(elementId) });
-       }
-       if (!intent.retries) intent.retries = 0;
-       if (intent.retries < 2) {
-          intent.retries++;
-          return JSON.stringify({ thought: `Could not find exact element '${targetText}'. Retrying (${intent.retries}/2)...`, plan: 'Wait for DOM to load.', action: 'inject_script', script: 'return new Promise(r => setTimeout(() => r("Waited 2s for DOM to load"), 2000));' });
-       }
-       state.queue.shift();
-       return JSON.stringify({ thought: "Could not find element to click after retries.", plan: "Skip", action: 'reply', message: "Failed to find the element to click." });
-    }
-
-    if (intent.type === 'type_exact') {
-       if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No webview available.'});
-       const targetText = intent.target.toLowerCase();
-       const elementId = await executeJS(`
-          (function() {
-             const elements = Array.from(document.querySelectorAll('[data-orbit-id]'));
-             const targetText = \`${ScriptSanitizer.escapeForJS(targetText)}\`;
-             const el = elements.find(e => {
-                let p = (e.getAttribute('placeholder') || '').toLowerCase();
-                let n = (e.getAttribute('name') || '').toLowerCase();
-                let ariaLabel = (e.getAttribute('aria-label') || '').toLowerCase();
-                let title = (e.getAttribute('title') || '').toLowerCase();
-                return p === targetText || n === targetText || ariaLabel === targetText || title === targetText;
-             });
-             return el ? el.getAttribute('data-orbit-id') : null;
-          })();
-       `);
-       
-       if (elementId) {
-          state.queue.shift();
-          return JSON.stringify({ thought: intent.thought, plan: intent.plan, action: 'type', element_id: Number(elementId), text: intent.text });
-       }
-       if (!intent.retries) intent.retries = 0;
-       if (intent.retries < 2) {
-          intent.retries++;
-          return JSON.stringify({ thought: `Could not find exact input '${targetText}'. Retrying (${intent.retries}/2)...`, plan: 'Wait for DOM to load.', action: 'inject_script', script: 'return new Promise(r => setTimeout(() => r("Waited 2s for DOM to load"), 2000));' });
-       }
-       state.queue.shift();
-       return JSON.stringify({ thought: "Could not find element to type into after retries.", plan: "Skip", action: 'reply', message: "Failed to find the element to type into." });
-    }
-
-    if (intent.type === 'reply_msg') {
-       state.queue.shift();
-       return JSON.stringify({ thought: "Task completed successfully.", plan: "Notify user", action: "reply", message: intent.message });
-    }
-
-    if (intent.type === 'vlm_analyze') {
-       if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No visual output available.'});
-       state.queue.shift();
-       
-       const visionData = await executeJS(`
-          (async function() {
-              try {
-                  const result = {
-                      images: [],
-                      layout: {},
-                      bigText: [],
-                      interactiveCount: 0,
-                      bodyBgColor: ''
-                  };
-                  
-                  // 1. Text Semantics
-                  const texts = Array.from(document.querySelectorAll('h1, h2, h3, [style*="font-size"]'))
-                      .filter(el => {
-                          const style = window.getComputedStyle(el);
-                          return parseInt(style.fontSize) > 18 && el.innerText.trim().length > 0;
-                      })
-                      .map(el => el.innerText.trim().replace(/\\n/g, ' ').substring(0, 80));
-                  
-                  result.bigText = [...new Set(texts)].slice(0, 6);
-
-                  // 2. UI/UX Elements
-                  result.interactiveCount = document.querySelectorAll('button, a[href], input, select, textarea').length;
-
-                  // 3. Layout Structure
-                  const header = document.querySelector('header');
-                  const footer = document.querySelector('footer');
-                  const nav = document.querySelector('nav');
-                  
-                  result.layout = {
-                      hasHeader: !!header,
-                      hasFooter: !!footer,
-                      hasNav: !!nav,
-                      pageTitle: document.title
-                  };
-
-                  // 4. Image Visual Analysis (Local Canvas Heuristics)
-                  const imgs = Array.from(document.querySelectorAll('img'))
-                      .filter(img => img.width > 50 && img.height > 50 && img.src && !img.src.startsWith('data:image/svg'));
-
-                  for (let i = 0; i < Math.min(imgs.length, 3); i++) {
-                      const img = imgs[i];
-                      try {
-                          const canvas = document.createElement('canvas');
-                          const ctx = canvas.getContext('2d');
-                          canvas.width = Math.min(img.width, 100);
-                          canvas.height = Math.min(img.height, 100);
-                          
-                          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                          const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                          
-                          let r=0, g=0, b=0, count=0;
-                          for (let j = 0; j < data.length; j += 16) {
-                              r += data[j]; g += data[j+1]; b += data[j+2]; count++;
-                          }
-                          r = Math.floor(r/count); g = Math.floor(g/count); b = Math.floor(b/count);
-                          
-                          // Basic color naming heuristic
-                          let colorName = "Mixed/Gray";
-                          if (r > 150 && g < 100 && b < 100) colorName = "Reddish";
-                          else if (g > 150 && r < 100 && b < 100) colorName = "Greenish";
-                          else if (b > 150 && r < 100 && g < 100) colorName = "Bluish";
-                          else if (r > 200 && g > 200 && b > 200) colorName = "Light/White";
-                          else if (r < 50 && g < 50 && b < 50) colorName = "Dark/Black";
-                          
-                          result.images.push({
-                              alt: img.alt || 'Unnamed image',
-                              dims: img.width + 'x' + img.height,
-                              colorInfo: colorName
-                          });
-                      } catch(e) {
-                          result.images.push({
-                              alt: img.alt || 'Unnamed image',
-                              dims: img.width + 'x' + img.height,
-                              colorInfo: "Cross-origin protected"
-                          });
-                      }
-                  }
-                  
-                  const bodyStyle = window.getComputedStyle(document.body);
-                  result.bodyBgColor = bodyStyle.backgroundColor;
-                  
-                  return result;
-              } catch(e) {
-                  return { error: e.message };
-              }
-          })();
-       `);
-
-       let outputMsg = "";
-       if (visionData && visionData.error) {
-           outputMsg = `**Visual Analysis Error:** ${visionData.error}`;
-       } else if (visionData) {
-           outputMsg = `**Local VLM Visual Analysis Complete**\n\n`;
-           outputMsg += `**Overall Scene:** The page is titled "${visionData.layout.pageTitle}". The base background color is detected as \`${visionData.bodyBgColor}\`. `;
-           
-           if (visionData.layout.hasNav || visionData.layout.hasHeader) {
-               outputMsg += `It has a standard web layout with a navigation or header bar. `;
-           }
-           outputMsg += `There are ${visionData.interactiveCount} interactive elements (buttons, links, inputs) visible in the DOM.\n\n`;
-
-           if (visionData.bigText && visionData.bigText.length > 0) {
-               outputMsg += `**Prominent Visual Text (Headers & Large Fonts):**\n`;
-               visionData.bigText.forEach((t: string) => outputMsg += `• "${t}"\n`);
-               outputMsg += `\n`;
-           } else {
-               outputMsg += `**Text:** No large headings detected visually.\n\n`;
-           }
-
-           if (visionData.images && visionData.images.length > 0) {
-               outputMsg += `**Visual Image Data (First ${visionData.images.length} large images analyzed):**\n`;
-               visionData.images.forEach((img: any, idx: number) => {
-                   outputMsg += `${idx + 1}. Size: ${img.dims} | Alt: "${img.alt}" | Canvas Scanned Dominant Color: ${img.colorInfo}\n`;
-               });
-           } else {
-               outputMsg += `**Images:** No significant visual images detected on the canvas.\n`;
-           }
-           
-           // Heuristic based on the user's specific query
-           if (intent.query && intent.query.length > 0 && intent.query !== 'general visual analysis') {
-               outputMsg += `\n**Regarding your query:** "${intent.query}"\n`;
-               const q = intent.query.toLowerCase();
-               if (q.includes('color') || q.includes('look like')) {
-                   outputMsg += `Based on pixel analysis, the dominant background is ${visionData.bodyBgColor}, and the primary images lean towards ${visionData.images.map((i:any)=>i.colorInfo).join(', ') || 'neutral'}.`;
-               } else if (q.includes('where is')) {
-                   outputMsg += `To find specific elements visually, check the primary headers listed above, or look for the ${visionData.interactiveCount} interactive zones.`;
-               } else if (q.includes('what is this') || q.includes('explain')) {
-                   outputMsg += `Visually, this appears to be a ${visionData.interactiveCount > 50 ? 'complex application or directory' : 'content page or landing page'} centered around "${visionData.layout.pageTitle}".`;
-               } else {
-                   outputMsg += `I scanned the DOM geometry and canvas pixels. Review the visual data points above to address your query!`;
-               }
-           }
-           
-           outputMsg += `\n\n*(Analysis performed 100% locally via Canvas pixel scanning and bounding box geometry)*`;
-       } else {
-           outputMsg = `Could not extract visual data from the current frame.`;
-       }
-
-       return JSON.stringify({
-           thought: `Simulating Local VLM to analyze visual geometry and rasterize canvas data for query: ${intent.query}`,
-           plan: "Scan page pixels, read bounds, format output.",
-           action: "reply",
-           message: outputMsg
-       });
-    }
-
-    if (intent.type === 'extract_page_content') {
-       if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No webview available to read.'});
-       state.queue.shift();
-       
-       const pageData = await executeJS(`
-          (function() {
-             const clone = document.cloneNode(true);
-             clone.querySelectorAll('script, style, nav, footer, iframe, img, svg').forEach(e => e.remove());
-             const pageText = clone.body.innerText.replace(/\\s+/g, ' ').substring(0, 5000);
-             const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => h.textContent?.trim()).filter(Boolean);
-             const firstParagraphs = Array.from(document.querySelectorAll('p')).slice(0, 3).map(p => p.textContent?.trim()).filter(Boolean);
-             const lists = Array.from(document.querySelectorAll('li')).map(li => li.textContent?.trim()).filter(Boolean);
-             const bolds = Array.from(document.querySelectorAll('b, strong')).map(b => b.textContent?.trim()).filter(Boolean);
-             const tables = Array.from(document.querySelectorAll('table tr')).map(tr => tr.textContent?.replace(/\\s+/g, ' ').trim()).filter(Boolean);
-             const links = Array.from(document.querySelectorAll('a')).map(a => a.href).filter(href => href && href.startsWith('http'));
-             const navLinks = Array.from(document.querySelectorAll('nav a')).map(a => a.textContent?.trim()).filter(Boolean);
-             return { pageText, headings, firstParagraphs, lists, bolds, tables, links, navLinks, title: document.title };
-          })();
-       `);
-
-       let outputMsg = "";
-       let pageText = pageData?.pageText || "";
-       let headings = pageData?.headings || [];
-       let firstParagraphs = pageData?.firstParagraphs || [];
-       let lists = pageData?.lists || [];
-       let bolds = pageData?.bolds || [];
-       let tables = pageData?.tables || [];
-       let links = pageData?.links || [];
-       let navLinks = pageData?.navLinks || [];
-       let docTitle = pageData?.title || 'Untitled Document';
-
-       // Heuristic NLP simulation
-       if (intent.task === 'summarize') {
-           if (headings.length > 0 || firstParagraphs.length > 0) {
-              outputMsg = `**Summary of this page:**\n\n**Main Topics:**\n${headings.slice(0, 3).map((h: string) => `• ${h}`).join('\n')}\n\n**Key Content:**\n${firstParagraphs.join(' ')}`;
-           } else {
-              outputMsg = `**Summary:**\n${pageText.substring(0, 300)}...`;
-           }
-           outputMsg += "\n\n*(Summary generated via local extraction heuristics)*";
-       } 
-       else if (intent.task === 'extract_key_points') {
-           outputMsg = `**Extracted Key Points:**\n\n`;
-           if (lists.length > 0) {
-              outputMsg += lists.slice(0, 5).map((l: string) => `• ${l}`).join('\n');
-           } else if (bolds.length > 0) {
-              outputMsg += bolds.slice(0, 5).map((b: string) => `• ${b}`).join('\n');
-           } else {
-              outputMsg += "Could not find structured key points. Try summarizing instead.";
-           }
-       }
-       else if (intent.task === 'shopping_comparison') {
-           const prices = pageText.match(/\$\d+(?:,\d{3})*(?:\.\d{2})?/g);
-           
-           if (prices && prices.length > 0) {
-              const numericPrices = prices.map((p: string) => parseFloat(p.replace(/[^0-9.]/g, ''))).sort((a: number, b: number) => a - b);
-              
-              outputMsg = `**🛍️ Shopping Analysis Complete:**\n\n`;
-              outputMsg += `I scanned the DOM and found ${prices.length} price points on this page.\n\n`;
-              outputMsg += `**Price Range Detected:**\n`;
-              outputMsg += `- Lowest price: $${numericPrices[0].toFixed(2)}\n`;
-              outputMsg += `- Highest price: $${numericPrices[numericPrices.length - 1].toFixed(2)}\n`;
-              outputMsg += `- Average price: $${(numericPrices.reduce((a: number,b: number)=>a+b,0)/numericPrices.length).toFixed(2)}\n\n`;
-              
-              if (headings.length > 0) {
-                  outputMsg += `**Related Products / Brands on page:**\n`;
-                  headings.slice(0,3).forEach((h: string) => outputMsg += `• ${h}\n`);
-              }
-              
-              outputMsg += `\n*(Calculated instantly using offline local heuristics. To get cross-site comparison, use the VLM to analyze Amazon vs BestBuy side-by-side!)*`;
-           } else {
-              outputMsg = "I scanned the page layout but couldn't find explicitly formatted price tags (e.g., $19.99). You might need to navigate to the product details directly.";
-           }
-       }
-       else if (intent.task === 'explain') {
-           outputMsg = `**Breaking it down:**\nI've analyzed the current page context. The primary focus appears to be on: ${docTitle}\n\nTo explain this simply: It revolves around the core concepts mentioned in the headers. (For deep semantic explanation, a local LLM or cloud connection is recommended.)`;
-       }
-       else if (intent.task === 'answer_question') {
-           const query = intent.query.toLowerCase();
-           const sentences = pageText.split(/(?<=[.?!])\s+/);
-           const matches = sentences.filter((s: string) => s.toLowerCase().includes(query));
-           if (matches.length > 0) {
-               outputMsg = `**Answer from page:**\n"${matches.slice(0, 2).join(' ')}"`;
-           } else {
-               outputMsg = `I searched the page for "${intent.query}" but couldn't find a direct answer.`;
-           }
-       }
-       else if (intent.task === 'find_in_page') {
-           const query = intent.query.toLowerCase();
-           const sentences = pageText.split(/(?<=[.?!])\s+/);
-           const matches = sentences.filter((s: string) => s.toLowerCase().includes(query));
-           if (matches.length > 0) {
-               outputMsg = `Found "${intent.query}" in context:\n\n"...${matches[0]}..."`;
-           } else {
-               outputMsg = `Could not find "${intent.query}" on this page.`;
-           }
-       }
-       else if (intent.task === 'compare_sources') {
-           outputMsg = `**Comparison Analysis:**\n\nBased on the current document, the main assertions are:\n${headings.slice(0,2).map((h: string) => `• ${h}`).join('\n')}\n\n*(To compare multiple sources, please open them in sequence or use the Cloud AI engine)*`;
-       }
-       else if (intent.task === 'take_notes') {
-           outputMsg = `**Study Notes:**\n\n${bolds.slice(0, 6).map((b: string) => `- ${b}`).join('\n')}\n\n*(Notes compiled from emphasized text)*`;
-       }
-       else if (intent.task === 'task_list') {
-           outputMsg = `**Generated Task List:**\n\n- [ ] Review main topic: ${docTitle}\n- [ ] Extract action items\n- [ ] Follow up on links\n\n*(Automated via local parsing)*`;
-       }
-       else if (intent.task === 'summarize_pdf') {
-           outputMsg = `**Document Extracted:**\n\nDetected document structure. Top terms:\n- ${docTitle}\n- Page Count: Est. 1\n\n*(Local engine parsed visible text as surrogate for PDF content)*`;
-       }
-       else if (intent.task === 'summarize_reviews') {
-           const stars = pageText.match(/[1-5]\s?(?:star|out of 5)/gi);
-           outputMsg = `**Review Summary:**\n\nI scanned the page for review metrics. Found ${stars ? stars.length : 0} specific star ratings.\n\nGeneral Sentiment: Looks mixed to positive based on keyword frequency.\n\n*(Local heuristic review scan complete)*`;
-       }
-       else if (intent.task === 'product_specs') {
-           if (tables.length > 0) {
-              outputMsg = `**Product Specifications:**\n\n${tables.slice(0, 5).join('\n')}`;
-           } else {
-              outputMsg = `**Product Specifications:**\n\nCould not locate a standard specification table. Check the manufacturer's main description block.`;
-           }
-       }
-       else if (intent.task === 'translate') {
-           outputMsg = `*(Local Engine Notice)*\n\nFull page translation requires massive vocabulary mapping. To translate: "${docTitle}", please switch to the Cloud AI engine or wait for Local LLM Max memory mode implementation.`;
-       }
-       else if (intent.task === 'create_quiz') {
-           if (headings.length > 0) {
-              outputMsg = `**Pop Quiz Generated!**\n\nQuestion 1: What is the significance of "${headings[0]}"?\n\nQuestion 2: How does "${headings[1] || 'the main topic'}" relate to the overall conclusion?\n\n*(Answers are hidden in the text!)*`;
-           } else {
-              outputMsg = `Not enough structured headings to generate a quiz automatically.`;
-           }
-       }
-       else if (intent.task === 'extract_data') {
-           outputMsg = `**Data Extraction Complete:**\n\nScraped ${links.length} external URLs from this page.\nSample Data:\n${links.slice(0,3).join('\n')}`;
-       }
-       else if (intent.task === 'suggest_links') {
-           outputMsg = `**Contextual Suggestions:**\n\nBased on your current page, you might want to visit:\n${navLinks.slice(0,4).map((l: string) => `🔗 ${l}`).join('\n')}`;
-       }
-
-       return JSON.stringify({
-           thought: `Extracting page content to perform task: ${intent.task}`,
-           plan: "Analyze page and return formatted output to user.",
-           action: "reply",
-           message: outputMsg
-       });
-    }
-
-    if (intent.type === 'text_processing') {
-       state.queue.shift();
-       let text = intent.text as string;
-       let outputMsg = "";
-
-       if (intent.task === 'rewrite') {
-           let improved = text.charAt(0).toUpperCase() + text.slice(1);
-           if (!improved.match(/[.?!]$/)) improved += '.';
-           improved = improved.replace(/\bu\b/ig, 'you')
-                              .replace(/\bur\b/ig, 'your')
-                              .replace(/\bi\b/g, 'I');
-           outputMsg = `**Rewritten Text:**\n${improved}\n\n*(Note: Performed via local rule-based heuristics)*`;
-       }
-       else if (intent.task === 'write_email') {
-           const subjectMatch = text.match(/(?:about|regarding) (.+)/i);
-           const subject = subjectMatch ? subjectMatch[1] : 'Inquiry';
-           outputMsg = `**Drafted Email:**\n\nSubject: ${subject.charAt(0).toUpperCase() + subject.slice(1)}\n\nHi there,\n\nI hope this email finds you well. I am writing to you regarding ${subject}.\n\nPlease let me know your thoughts.\n\nBest regards,\n[Your Name]\n\n*(Generated via local templates)*`;
-       }
-       else if (intent.task === 'social_media') {
-           outputMsg = `**Drafted Post:**\n\nJust thinking about how incredible the future of tech is. We're building tools that work completely locally, securing privacy and boosting speed. What are your thoughts on edge computing?\n\n#Tech #Innovation #Future #LocalAI\n\n*(Generated via local heuristics)*`;
-       }
-       else if (intent.task === 'draft_blog') {
-           outputMsg = `**Blog Post Outline:**\n\n**Title:** The Rise of Autonomous Local Agents\n\n**1. Introduction**\n- Hook: Why cloud APIs aren't the only answer.\n- Overview of edge computing.\n\n**2. Core Advantages**\n- Speed and zero latency.\n- Privacy and data security.\n\n**3. Conclusion**\n- Final thoughts on the hybrid future.\n\n*(Generated via local heuristics)*`;
-       }
-       else if (intent.task === 'generate_code') {
-           outputMsg = `**Generated Code Snippet:**\n\n\`\`\`javascript\n// Auto-generated script to extract all links\nconst links = Array.from(document.querySelectorAll('a')).map(a => a.href);\nconsole.log("Found " + links.length + " links.");\n// Filter out empty or anchor links\nconst validLinks = links.filter(l => l.startsWith('http'));\n\`\`\`\n\n*(Created by local code template engine)*`;
-       }
-       else if (intent.task === 'help_search') {
-           outputMsg = `**Search Tips:**\n\nTo find what you're looking for more effectively, try:\n1. Use quotes for exact matches (e.g., "local ai")\n2. Use a minus sign to exclude terms (e.g., apple -fruit)\n3. Try targeting a specific site (e.g., site:wikipedia.org AI)\n\n*(I can also do this for you, just say "Search Wikipedia for X")*`;
-       }
-
-       return JSON.stringify({
-           thought: "Processing text generation request locally.",
-           plan: "Apply local heuristics to generate text.",
-           action: "reply",
-           message: outputMsg
-       });
-    }
-
-    if (intent.type === 'auto_fill_form') {
-       state.queue.shift();
-       return JSON.stringify({
-           thought: "Auto-filling form fields with generated data.",
-           plan: "Inject script to map fields and populate values.",
-           action: "inject_script",
-           script: `
-               const inputs = Array.from(document.querySelectorAll('input, textarea'));
-               const visibleInputs = inputs.filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
-               
-               if (visibleInputs.length === 0) {
-                   return "I couldn't find any form fields to fill on this page.";
-               }
-
-               const filledFields = [];
-
-               visibleInputs.forEach(input => {
-                   const name = (input.name || input.id || input.placeholder || '').toLowerCase();
-                   let val = '';
-                   
-                   if (name.includes('name') && !name.includes('company')) val = 'Alex Mercer';
-                   else if (name.includes('email')) val = 'alex.mercer@example.com';
-                   else if (name.includes('phone') || name.includes('tel')) val = '(555) 019-8372';
-                   else if (name.includes('address') || name.includes('street')) val = '123 Innovation Way';
-                   else if (name.includes('city')) val = 'San Francisco';
-                   else if (name.includes('zip') || name.includes('postal')) val = '94105';
-                   else if (name.includes('company')) val = 'Bleumr AI Corp';
-                   
-                   if (val) {
-                       input.value = val;
-                       input.dispatchEvent(new Event('input', { bubbles: true }));
-                       input.dispatchEvent(new Event('change', { bubbles: true }));
-                       filledFields.push(name || 'field');
-                       
-                       const original = input.style.outline;
-                       input.style.outline = '3px solid #10b981';
-                       setTimeout(() => input.style.outline = original, 1000);
-                   }
-               });
-               
-               if (filledFields.length > 0) {
-                   return "Auto-filled " + filledFields.length + " fields.";
-               }
-               return "Found fields but couldn't determine what to fill them with.";
-           `
-       });
-    }
-
-    if (intent.type === 'navigate') {
-      state.queue.shift();
-      return JSON.stringify({
-        thought: `Command recognized: Navigate to ${intent.url}`,
-        plan: `Execute navigation.`,
-        action: "navigate",
-        url: intent.url
-      });
-    }
-
-    if (intent.type === 'go_back') {
-      state.queue.shift();
-      return JSON.stringify({
-        thought: `Command recognized: Go back to previous page`,
-        plan: `Execute back navigation.`,
-        action: "go_back"
-      });
-    }
-
-    if (intent.type === 'refresh') {
-      state.queue.shift();
-      return JSON.stringify({
-        thought: `Command recognized: Refresh current page`,
-        plan: `Execute page reload.`,
-        action: "refresh"
-      });
-    }
-
-    if (intent.type === 'click') {
-      if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No webview available.'});
-      
-      const targetText = intent.targetText?.toLowerCase() || '';
-      
-      const elId = await executeJS(`
-          (function() {
-              const elements = Array.from(document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"], [role="option"], [role="menuitem"], li, span'));
-              const targetText = \`${ScriptSanitizer.escapeForJS(targetText)}\`;
-              
-              // Filter visible elements loosely (they must have some width/height)
-              const visibleElements = elements.filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
-
-              // 1. Try exact match first
-              let targetEl = visibleElements.find(el => {
-                  const text = (el.innerText || el.textContent || '').toLowerCase().trim();
-                  let valueAttr = (el.getAttribute('value') || '').toLowerCase();
-                  return text === targetText || valueAttr === targetText;
-              });
-
-              // 2. Try partial match
-              if (!targetEl) {
-                  targetEl = visibleElements.find(el => {
-                      const tag = el.tagName.toLowerCase();
-                      let text = (el.innerText || el.textContent || '').toLowerCase().trim();
-                      let ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                      let titleAttr = (el.getAttribute('title') || '').toLowerCase();
-                      let valueAttr = (el.getAttribute('value') || '').toLowerCase();
-                      
-                      if (tag === 'input') {
-                          text = valueAttr || ariaLabel || titleAttr;
-                      }
-                      
-                      return text.includes(targetText) || 
-                             ariaLabel.includes(targetText) || 
-                             titleAttr.includes(targetText) || 
-                             valueAttr.includes(targetText) ||
-                             el.id.toLowerCase().includes(targetText);
-                  });
-              }
-
-              // 3. Try fuzzy synonym match
-              if (!targetEl) {
-                  const synonyms = {
-                      'buy': ['purchase', 'add to cart', 'checkout', 'get', 'order', 'shop'],
-                      'search': ['find', 'go', 'submit'],
-                      'login': ['sign in', 'log in', 'enter'],
-                      'next': ['continue', 'forward', '>']
-                  };
-                  let searchTerms = [targetText];
-                  for (const key in synonyms) {
-                      if (targetText.includes(key) || (synonyms as any)[key].includes(targetText)) {
-                          searchTerms = searchTerms.concat((synonyms as any)[key]);
-                          searchTerms.push(key);
-                      }
-                  }
-                  
-                  targetEl = visibleElements.find(el => {
-                      const text = (el.innerText || el.textContent || '').toLowerCase();
-                      const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                      const valueAttr = (el.getAttribute('value') || '').toLowerCase();
-                      const idAttr = (el.getAttribute('id') || '').toLowerCase();
-                      const classAttr = (el.className || '').toLowerCase();
-                      return searchTerms.some(term => 
-                          text.includes(term) || 
-                          ariaLabel.includes(term) || 
-                          valueAttr.includes(term) ||
-                          idAttr.includes(term) ||
-                          classAttr.includes(term)
-                      );
-                  });
-              }
-
-              // 4. Fallback for "search" buttons
-              if (!targetEl && visibleElements.length > 0 && targetText.includes('search')) {
-                 targetEl = visibleElements.find(el => {
-                     let ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                     let id = el.id.toLowerCase();
-                     let type = (el.getAttribute('type') || '').toLowerCase();
-                     return ariaLabel.includes('search') || id.includes('search') || type === 'submit' || type === 'search' || el.querySelector('svg');
-                 });
-              }
-
-              if (targetEl) {
-                  let elId = targetEl.getAttribute('data-orbit-id');
-                  if (!elId) {
-                      elId = Math.floor(Math.random() * 100000).toString();
-                      targetEl.setAttribute('data-orbit-id', elId);
-                  }
-                  return elId;
-              }
-              return null;
-          })();
-      `);
-
-      if (elId) {
-        state.queue.shift();
-        return JSON.stringify({
-          thought: `Found element matching '${intent.targetText}'.`,
-          plan: `Execute click.`,
-          action: "click",
-          element_id: Number(elId)
-        });
-      } else {
-        if (!intent.retries) intent.retries = 0;
-        if (intent.retries < 3) {
-           intent.retries++;
-           return JSON.stringify({ thought: `Could not immediately find '${intent.targetText}'. I will scroll down to reveal more content and try again. (Retry ${intent.retries}/3)`, plan: 'Scroll down.', action: 'scroll', direction: 'down' });
-        }
-        state.queue.shift();
-        return JSON.stringify({ thought: `Could not find element matching '${intent.targetText}' after scrolling.`, plan: `Skip step.`, action: "reply", message: `I searched everywhere but could not find anything matching "${intent.targetText}" to click. I tried scrolling but no luck.` });
-      }
-    }
-
-    if (intent.type === 'type') {
-       if (!executeJS) return JSON.stringify({ action: 'reply', message: 'Error: No webview available.'});
-       
-       const targetText = intent.targetText?.toLowerCase() || '';
-       
-       const elId = await executeJS(`
-           (function() {
-               const inputs = Array.from(document.querySelectorAll('input, textarea'));
-               const visibleInputs = inputs.filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
-               const targetText = \`${ScriptSanitizer.escapeForJS(targetText)}\`;
-               
-               // 1. Exact match
-               let targetEl = visibleInputs.find(el => {
-                  let ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                  let titleAttr = (el.getAttribute('title') || '').toLowerCase();
-                  let nameAttr = (el.getAttribute('name') || '').toLowerCase();
-                  const text = (el.placeholder || nameAttr || '').toLowerCase();
-                  return text === targetText || ariaLabel === targetText || titleAttr === targetText;
-               });
-
-               // 2. Partial match
-               if (!targetEl) {
-                   targetEl = visibleInputs.find(el => {
-                       let ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                       let titleAttr = (el.getAttribute('title') || '').toLowerCase();
-                       let nameAttr = (el.getAttribute('name') || '').toLowerCase();
-                       const text = (el.placeholder || nameAttr || '').toLowerCase();
-                       return text.includes(targetText) || ariaLabel.includes(targetText) || titleAttr.includes(targetText) || el.id.toLowerCase().includes(targetText);
-                   });
-               }
-               
-               // 3. Fallback for "search"
-               if (!targetEl && visibleInputs.length > 0 && targetText.includes('search')) {
-                  targetEl = visibleInputs.find(el => {
-                      let typeAttr = (el.getAttribute('type') || '').toLowerCase();
-                      let nameAttr = (el.getAttribute('name') || '').toLowerCase();
-                      let ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                      let placeholder = (el.placeholder || '').toLowerCase();
-                      return typeAttr === 'search' || nameAttr.includes('search') || ariaLabel.includes('search') || placeholder.includes('search');
-                  }) || visibleInputs.find(el => {
-                     return (el.getAttribute('type') || 'text').toLowerCase() === 'text';
-                  }) || visibleInputs[0];
-               }
-
-               if (targetEl) {
-                   let elId = targetEl.getAttribute('data-orbit-id');
-                   if (!elId) {
-                       elId = Math.floor(Math.random() * 100000).toString();
-                       targetEl.setAttribute('data-orbit-id', elId);
-                   }
-                   return elId;
-               }
-               return null;
-           })();
-       `);
-
-       if (elId) {
-         state.queue.shift();
-         return JSON.stringify({
-           thought: `Found input field matching '${intent.targetText}'.`,
-           plan: `Type '${intent.inputText}'.`,
-           action: "type",
-           element_id: Number(elId),
-           text: intent.inputText,
-           press_enter: intent.press_enter || false
-         });
-       } else {
-         if (!intent.retries) intent.retries = 0;
-         if (intent.retries < 2) {
-             intent.retries++;
-             return JSON.stringify({ thought: `Could not find '${intent.targetText}'. Retrying (${intent.retries}/2)...`, plan: 'Wait for DOM to load.', action: 'inject_script', script: 'return new Promise(r => setTimeout(() => r("Waited 2s for DOM to load"), 2000));' });
-         }
-         state.queue.shift();
-         return JSON.stringify({ thought: `Could not find input field matching '${intent.targetText}'.`, plan: `Skip step.`, action: "reply", message: `Could not find an input field matching "${intent.targetText}".` });
-       }
-    }
-    
-    if (intent.type === 'scroll') {
-       state.queue.shift();
-       return JSON.stringify({ thought: `Command recognized: Scroll ${intent.direction}`, plan: `Executing scroll.`, action: "scroll", direction: intent.direction });
-    }
-
-    if (intent.type === 'read_page') {
-       state.queue.shift();
-       return JSON.stringify({ thought: `Command recognized: Read page.`, plan: `Mapping DOM.`, action: "read_page" });
-    }
-
-    state.queue.shift();
-    return JSON.stringify({ action: "reply", message: "Intent not implemented." });
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2875,102 +634,22 @@ export default function App() {
     scrollToBottom();
   }, [messages]);
 
-  const parseAction = (text: string) => {
-    const jsonMatch = text.match(/\`\`\`json\s*([\s\S]*?)\s*\`\`\`/) || text.match(/(\{[\s\S]*"action"[\s\S]*\})/);
-    if (jsonMatch && jsonMatch[1]) {
-      try {
-        return JSON.parse(jsonMatch[1]);
-      } catch (e) {
-        console.error('Failed to parse AI action', e);
-      }
-    }
-    return null;
-  };
-
-  const callAI = async (currentMessages: Message[], signal?: AbortSignal, pageUrl?: string) => {
-    if (!checkRateLimit()) throw new Error('Rate limit reached — max 30 requests/min. Please wait a moment.');
-
-    // Inject current page URL + domain lock rule so the AI never leaves the current site
-    let pageContext = '';
-    if (pageUrl && pageUrl !== 'orbit://home' && !pageUrl.startsWith('orbit://')) {
-      try {
-        const domain = new URL(pageUrl).hostname;
-        pageContext = `\n\nCurrent page URL: ${pageUrl}\nCurrent domain: ${domain}\n\n⚠️ DOMAIN LOCK: The user is on ${domain}. If the user asks to search, find, look up, or do ANYTHING on this page — do it ON THIS SITE (${domain}) using the site's own search. NEVER navigate to Google, Bing, or any other site unless the user explicitly says "go to [different site]" or "open [different URL]". Stay on ${domain} until explicitly told to leave.`;
-      } catch {
-        pageContext = `\n\nCurrent page URL: ${pageUrl}`;
-      }
-    }
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    const systemContent = SYSTEM_PROMPT.replace('TODAY_DATE_PLACEHOLDER', `Today is ${todayStr}`) + pageContext;
-
-    // Build message history — collapse system/browser-feedback into the conversation
-    // as user-turn context so the AI always gets a valid user/assistant alternation
-    const history: { role: string; content: string }[] = [];
-    for (const m of currentMessages) {
-      if (m.role === 'user') {
-        history.push({ role: 'user', content: m.content });
-      } else if (m.role === 'assistant') {
-        history.push({ role: 'assistant', content: m.action?.message || m.content });
-      } else if (m.role === 'system' && m.isBrowserFeedback) {
-        // Append browser feedback to the last user message or as a new user turn
-        if (history.length > 0 && history[history.length - 1].role === 'user') {
-          history[history.length - 1].content += `\n${m.content}`;
-        } else {
-          history.push({ role: 'user', content: m.content });
-        }
-      }
-    }
-
-    const apiMessages = [
-      { role: 'system', content: systemContent },
-      ...history,
-    ];
-
-    // Always use Groq for the browser agent — needs structured JSON output
-    const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-    const authKey = secureApiKey;
-
-    if (!authKey) throw new Error('No API key configured. Add your key in Settings.');
-
-    // Try best models in order until one succeeds
-    const AGENT_MODELS = [
-      'meta-llama/llama-4-maverick-17b-128e-instruct',
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-      'openai/gpt-oss-120b',
-      'llama-3.3-70b-versatile',
-      'llama-3.1-8b-instant',
-    ];
-
-    let res: Response | null = null;
-    for (const model of AGENT_MODELS) {
-      const attempt = await fetch(GROQ_URL, {
-        method: 'POST',
-        signal,
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authKey}` },
-        body: JSON.stringify({ model, messages: apiMessages, temperature: 0.1, max_tokens: 2000 }),
-      });
-      if (attempt.ok || attempt.status === 429) { res = attempt; break; }
-      const err = await attempt.json().catch(() => ({}));
-      const msg = err.error?.message || '';
-      const isModelError = attempt.status === 403 || attempt.status === 404 ||
-        (attempt.status === 400 && (msg.includes('model') || msg.includes('not found') || msg.includes('blocked')));
-      if (!isModelError) { res = attempt; break; } // non-model error — surface it
-    }
-    if (!res) throw new Error('No available Groq models. Check your API key.');
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error?.message || `AI request failed (${res.status})`);
-    }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content ?? '';
-  };
-
   const handleUserSubmit = async (text: string, imageBase64?: string, imagePreview?: string) => {
     if (!text.trim() && !imageBase64) return;
-    if (isAgentWorking) return;
+
+    // If the BROWSER agent is mid-task, treat user input as a correction/redirect.
+    // Do NOT do this for the chat agent — those are separate pipelines and routing
+    // a chat-mode message into agentCorrectionRef would corrupt the browser agent loop.
+    if (isAgentWorking && agentMode === 'browser') {
+      agentCorrectionRef.current = text.trim();
+      // Show the correction in chat immediately so user sees it
+      setMessages(prev => [...prev, {
+        id: Date.now().toString() + '-correction',
+        role: 'user' as const,
+        content: text.trim(),
+      }]);
+      return;
+    }
 
     // ── UI command intercepts — fire FIRST before anything else ──────────────
     // These open panels directly without needing the AI or an API key.
@@ -2979,16 +658,18 @@ export default function App() {
     const isOpenVoice     = /\b(open|start|launch)\s+(the\s+)?voice(\s+chat)?\b/i.test(uiCmd);
     const isOpenWorkspace = /\b(open|launch|show)\s+(the\s+)?(workspace|cowork|mission\s+team|research\s+team)\b/i.test(uiCmd);
     const isOpenSettings  = /\b(open|go\s+to|show)\s+(the\s+)?settings\b/i.test(uiCmd);
+    const isOpenTrading   = /\b(open|show|launch|go to|view)\s+(the\s+)?(trading|trade|stocks?|crypto|portfolio|market)\b|^(trading|trade|crypto|portfolio)$/i.test(uiCmd);
 
-    if (isOpenScheduler || isOpenVoice || isOpenWorkspace || isOpenSettings) {
+    if (isOpenScheduler || isOpenVoice || isOpenWorkspace || isOpenSettings || isOpenTrading) {
       const msgId = Date.now().toString();
       const replies: Record<string, string> = {
         scheduler: 'Opening your scheduler.',
         voice:     'Launching voice chat.',
         workspace: 'Opening Workspace.',
         settings:  'Opening Settings.',
+        trading:   'Opening Trading dashboard.',
       };
-      const which = isOpenScheduler ? 'scheduler' : isOpenVoice ? 'voice' : isOpenWorkspace ? 'workspace' : 'settings';
+      const which = isOpenScheduler ? 'scheduler' : isOpenVoice ? 'voice' : isOpenWorkspace ? 'workspace' : isOpenTrading ? 'trading' : 'settings';
       setMessages(prev => [
         ...prev,
         { id: msgId + '-u', role: 'user' as const, content: text.trim() },
@@ -2998,6 +679,7 @@ export default function App() {
         if (isOpenScheduler) setShowScheduler(true);
         else if (isOpenVoice) setShowVoiceChat(true);
         else if (isOpenWorkspace) setShowWorkspace(true);
+        else if (isOpenTrading) setShowTrading(true);
         else if (isOpenSettings) setShowSettings(true);
       }, 200);
       return;
@@ -3068,7 +750,7 @@ export default function App() {
     // Home screen / no tab always routes to Chat Agent.
     const browserPatterns = /^(go to|navigate to|open (the )?browser|browse to|click( on)?|type into|fill (in|out)|scroll (down|up|the)|find on the (web|page|site)|take a screenshot|go back|reload|refresh (the )?page|open (a )?new tab|close (the )?tab|download|visit (the )?website|search (the )?(web|internet|online) for)/i;
     const isBrowserCommand = browserPatterns.test(processedInput.trim());
-    const universalQueue = isBrowserCommand ? parseCommandToQueue(processedInput) : [];
+    const universalQueue = isBrowserCommand ? parseCommandToQueue(processedInput, userProfile) : [];
 
     // True when the user has a real page loaded (not Bleumr home screen)
     const isOnRealPage = !!currentUrl && currentUrl !== 'orbit://home' && !currentUrl.startsWith('orbit://');
@@ -3225,9 +907,142 @@ export default function App() {
            for (const { token, replace } of remainingOps) {
              rawContent = replace ? token : rawContent + token;
            }
-           // Persist thread after response is complete
+           // ── Parse special tags from raw (unstripped) content BEFORE setMessages ──
+           // Side effects (events, setTimeout, setState) must NOT live inside a React state updater.
+           const parseScheduleFromRaw = (raw: string) => {
+             const scheduleRegex = /<schedule>([\s\S]*?)<\/schedule>/gi;
+             let match;
+             let foundAny = false;
+             while ((match = scheduleRegex.exec(raw)) !== null) {
+               try {
+                 const data = JSON.parse(match[1].trim());
+                 if (data.title && data.date) {
+                   addScheduleEvent(data);
+                   window.dispatchEvent(new Event('orbit_schedule_update'));
+                   window.dispatchEvent(new CustomEvent('orbit_scheduling_toast', { detail: data }));
+                   const [y, m, d] = data.date.split('-').map(Number);
+                   setSchedulerJumpDate(new Date(y, m - 1, d));
+                   foundAny = true;
+                 }
+               } catch (err) {
+                 console.warn('[Scheduler] Failed to parse schedule tag:', match[1], err);
+               }
+             }
+             if (foundAny) {
+               setTimeout(() => setShowScheduler(true), 800);
+             }
+           };
+
+           const openHtmlInBrowser = (raw: string): boolean => {
+             const loadHtml = (html: string) => {
+               setTimeout(async () => {
+                 setAppMode('browser');
+                 await BrowserService.loadHTML(html);
+               }, 400);
+             };
+             const openTagMatch = raw.match(/<open>([\s\S]*?)<\/open>/i);
+             if (openTagMatch) {
+               const target = openTagMatch[1].trim();
+               if (target === 'html') {
+                 const htmlMatch = raw.match(/```(?:html|HTML)\n?([\s\S]*?)```/s);
+                 if (htmlMatch) { loadHtml(htmlMatch[1].trim()); return true; }
+                 const stripped = raw.replace(/<open>[\s\S]*?<\/open>/gi, '').replace(/<schedule>[\s\S]*?<\/schedule>/gi, '').trim();
+                 if (stripped.length > 30) { loadHtml(stripped); return true; }
+               } else if (target.startsWith('http://') || target.startsWith('https://')) {
+                 setTimeout(() => { createTab(target); setAppMode('browser'); }, 400);
+                 return true;
+               }
+               return false;
+             }
+             const htmlBlockRegex = /```(?:html|HTML)\n?([\s\S]*?)```/gs;
+             let htmlMatch;
+             while ((htmlMatch = htmlBlockRegex.exec(raw)) !== null) {
+               if (htmlMatch[1].trim().length > 30) { loadHtml(htmlMatch[1].trim()); return true; }
+             }
+             const trimmed = raw.trim();
+             if (trimmed.match(/^<!DOCTYPE\s+html/i) || trimmed.match(/^<html[\s>]/i)) { loadHtml(trimmed); return true; }
+             return false;
+           };
+
+           const parseWorkspaceFromRaw = (raw: string) => {
+             const match = raw.match(/<workspace>([\s\S]*?)<\/workspace>/i);
+             if (!match) return;
+             const task = match[1].trim();
+             if (!task) return;
+             setTimeout(() => { setWorkspaceAutoTask(task); setShowWorkspace(true); }, 800);
+           };
+
+           // Fire parsers OUTSIDE setMessages — these have side effects
+           console.log('[onDone] rawContent length:', rawContent.length, 'has <schedule>:', /<schedule>/i.test(rawContent));
+           if (/<schedule>/i.test(rawContent)) console.log('[onDone] rawContent snippet:', rawContent.slice(rawContent.indexOf('<schedule>')));
+           parseScheduleFromRaw(rawContent);
+
+           // ── Fallback: if the user asked to schedule something but the model didn't
+           // output a <schedule> tag, attempt to extract the event from the user message.
+           if (!/<schedule>/i.test(rawContent) && /\b(schedule|remind|reminder|block (off|time)|set.*reminder|add.*calendar)\b/i.test(processedInput)) {
+             console.log('[Scheduler fallback] Model did not emit <schedule> tag — attempting extraction from user input');
+             const today = new Date();
+             const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+             const nextWeek = new Date(today); nextWeek.setDate(today.getDate() + 7);
+
+             // Parse date
+             let eventDate = today;
+             if (/\btomorrow\b/i.test(processedInput)) eventDate = tomorrow;
+             else if (/\bnext\s+week\b/i.test(processedInput)) eventDate = nextWeek;
+             else {
+               // Try to find explicit date like "March 30" or "3/30"
+               const monthMatch = processedInput.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/i);
+               if (monthMatch) {
+                 const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+                 const mIdx = monthNames.findIndex(m => monthMatch[1].toLowerCase().startsWith(m));
+                 if (mIdx >= 0) eventDate = new Date(today.getFullYear(), mIdx, parseInt(monthMatch[2]));
+               }
+             }
+
+             // Parse time
+             let startHour = 9;
+             const timeMatch = processedInput.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b/i);
+             if (timeMatch) {
+               startHour = parseInt(timeMatch[1]);
+               const isPM = /pm|p\.m\./i.test(timeMatch[3]);
+               if (isPM && startHour < 12) startHour += 12;
+               if (!isPM && startHour === 12) startHour = 0;
+             } else {
+               const hourMatch = processedInput.match(/\bfor\s+(\d{1,2})\b/);
+               if (hourMatch) startHour = parseInt(hourMatch[1]);
+             }
+
+             // Extract title — strip scheduling verbs and time references
+             let title = processedInput
+               .replace(/\b(can you |please |could you )?(schedule|remind me( to)?|set a reminder( to)?|add to calendar|block (off )?time for)\b/gi, '')
+               .replace(/\b(tomorrow|today|next week|this week)\b/gi, '')
+               .replace(/\b(at |for |by )?\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b/gi, '')
+               .replace(/\b(nothing much|hey|oh|um|uh)\b/gi, '')
+               .trim()
+               .replace(/^[\s,]+|[\s,]+$/g, '');
+             if (!title || title.length < 2) title = 'Reminder';
+             // Capitalize first letter
+             title = title.charAt(0).toUpperCase() + title.slice(1);
+
+             const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+             const fallbackEvent = { title, date: dateStr, startHour, endHour: startHour + 1 };
+             console.log('[Scheduler fallback] Created event:', fallbackEvent);
+             addScheduleEvent(fallbackEvent);
+             window.dispatchEvent(new Event('orbit_schedule_update'));
+             window.dispatchEvent(new CustomEvent('orbit_scheduling_toast', { detail: fallbackEvent }));
+             const [y, mo, d] = dateStr.split('-').map(Number);
+             setSchedulerJumpDate(new Date(y, mo - 1, d));
+             setTimeout(() => setShowScheduler(true), 800);
+           }
+
+           parseWorkspaceFromRaw(rawContent);
+           openHtmlInBrowser(rawContent);
+
+           const isRawHtmlDump = rawContent.trim().match(/^<!DOCTYPE\s+html/i) || rawContent.trim().match(/^<html[\s>]/i);
+           const cleanHtmlMsg = "Opening your page in the browser now ✓";
+
+           // Persist thread after response is complete (pure state update only)
            setMessages(prev => {
-             // Apply any remaining un-flushed tokens to displayed content (stripped)
              let base = prev;
              for (const { token, replace } of remainingOps) {
                const exists = base.some((m: any) => m.id === messageId);
@@ -3242,106 +1057,7 @@ export default function App() {
                }
              }
 
-             // Guard: if stream ended with zero content, inject a fallback message
              const hasResponse = base.some((m: any) => m.id === messageId && m.content?.trim()) || rawContent.trim().length > 0;
-
-             // Parse <schedule> blocks from RAW content (before stripping) so events are saved
-             const parseScheduleFromRaw = (raw: string) => {
-               const scheduleRegex = /<schedule>([\s\S]*?)<\/schedule>/gi;
-               let match;
-               let foundAny = false;
-               while ((match = scheduleRegex.exec(raw)) !== null) {
-                 try {
-                   const data = JSON.parse(match[1].trim());
-                   if (data.title && data.date) {
-                     addScheduleEvent(data);
-                     window.dispatchEvent(new Event('orbit_schedule_update'));
-                     window.dispatchEvent(new CustomEvent('orbit_scheduling_toast', { detail: data }));
-                     // Store the event date so scheduler auto-jumps to it when it opens
-                     const [y, m, d] = data.date.split('-').map(Number);
-                     setSchedulerJumpDate(new Date(y, m - 1, d));
-                     foundAny = true;
-                   }
-                 } catch (err) {
-                   console.warn('[Scheduler] Failed to parse schedule tag:', match[1], err);
-                 }
-               }
-               if (foundAny) {
-                 // Show toast immediately, then open scheduler so user can see the event
-                 setTimeout(() => setShowScheduler(true), 800);
-               }
-             };
-
-             // Detect HTML/<open> tags in RAW content, open in Orbit browser via Electron IPC
-             const openHtmlInBrowser = (raw: string): boolean => {
-               // Helper: loads HTML via Electron's main process (bypasses URL sanitizer)
-               const loadHtml = (html: string) => {
-                 setTimeout(async () => {
-                   setAppMode('browser');
-                   await BrowserService.loadHTML(html);
-                 }, 400);
-               };
-
-               // 1. Explicit <open>html</open> tag + code block (preferred path)
-               const openTagMatch = raw.match(/<open>([\s\S]*?)<\/open>/i);
-               if (openTagMatch) {
-                 const target = openTagMatch[1].trim();
-                 if (target === 'html') {
-                   const htmlMatch = raw.match(/```(?:html|HTML)\n?([\s\S]*?)```/s);
-                   if (htmlMatch) {
-                     loadHtml(htmlMatch[1].trim());
-                     return true;
-                   }
-                   // <open>html</open> present but no code block — model dumped raw HTML
-                   const stripped = raw.replace(/<open>[\s\S]*?<\/open>/gi, '').replace(/<schedule>[\s\S]*?<\/schedule>/gi, '').trim();
-                   if (stripped.length > 30) {
-                     loadHtml(stripped);
-                     return true;
-                   }
-                 } else if (target.startsWith('http://') || target.startsWith('https://')) {
-                   setTimeout(() => { createTab(target); setAppMode('browser'); }, 400);
-                   return true;
-                 }
-                 return false;
-               }
-               // 2. Fallback: detect ```html code blocks without <open> tag
-               const htmlBlockRegex = /```(?:html|HTML)\n?([\s\S]*?)```/gs;
-               let htmlMatch;
-               while ((htmlMatch = htmlBlockRegex.exec(raw)) !== null) {
-                 if (htmlMatch[1].trim().length > 30) {
-                   loadHtml(htmlMatch[1].trim());
-                   return true;
-                 }
-               }
-               // 3. Last resort: entire response IS raw HTML (model ignored code block instruction)
-               const trimmed = raw.trim();
-               if (trimmed.match(/^<!DOCTYPE\s+html/i) || trimmed.match(/^<html[\s>]/i)) {
-                 loadHtml(trimmed);
-                 return true;
-               }
-               return false;
-             };
-
-             // Parse <workspace> tag — opens Workspace with the task auto-submitted
-             const parseWorkspaceFromRaw = (raw: string) => {
-               const match = raw.match(/<workspace>([\s\S]*?)<\/workspace>/i);
-               if (!match) return;
-               const task = match[1].trim();
-               if (!task) return;
-               setTimeout(() => {
-                 setWorkspaceAutoTask(task);
-                 setShowWorkspace(true);
-               }, 800);
-             };
-
-             // Run parsers against raw (unstripped) content — display content is already clean
-             parseScheduleFromRaw(rawContent);
-             parseWorkspaceFromRaw(rawContent);
-             const didOpenHtml = openHtmlInBrowser(rawContent);
-
-             // If the model dumped raw HTML as its response, replace display with a clean message
-             const isRawHtmlDump = rawContent.trim().match(/^<!DOCTYPE\s+html/i) || rawContent.trim().match(/^<html[\s>]/i);
-             const cleanHtmlMsg = "Opening your page in the browser now ✓";
 
              const next: any[] = hasResponse
                ? base.map((m: any) => m.id === messageId
@@ -3357,11 +1073,9 @@ export default function App() {
              const firstUser = chatMsgs.find((m: any) => m.role === 'user');
              const lastMsg = chatMsgs[chatMsgs.length - 1];
              const preview = lastMsg ? derivePreview(lastMsg.content) : '';
-             // Use truncated first message as immediate title, then upgrade with AI summary
              const immediateTitle = firstUser ? deriveTitle(firstUser.content) : 'New Chat';
              upsertThreadMeta(activeThreadId, immediateTitle, preview, createdAt);
              setChatThreads(loadThreadsMeta());
-             // Only generate AI summary on the first exchange (2 messages: user + assistant)
              if (chatMsgs.length === 2 && firstUser && secureApiKey) {
                const userMsg = firstUser.content.slice(0, 300);
                const assistantMsg = (chatMsgs.find((m: any) => m.role === 'assistant')?.content ?? '').slice(0, 300);
@@ -3473,23 +1187,49 @@ export default function App() {
 
     let stepCount = 0;
     const MAX_STEPS = 50;
-    const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (50 steps need more time)
     const agentStartTime = Date.now();
     let hasError = false;
+    let consecutiveNudges = 0; // tracks back-to-back plain-text responses so we can bail
+    let consecutiveErrors = 0; // tracks back-to-back action errors (dead tab detection)
     agentAbortRef.current = false;
     const loopAbort = new AbortController();
+    chatAbortRef.current = loopAbort; // wire Stop button into the loop's abort controller
     setAgentStep(0);
     setAgentTotalSteps(MAX_STEPS);
     setAgentCurrentAction('Thinking...');
+    let completionForceBreak = false;
+    // Repeat-action detector: tracks last N actions to detect stuck loops
+    const actionHistory: string[] = [];
+    // Cycle detector: catches alternating patterns (A→B→A→B)
+    let totalActionsWithoutReply = 0;
+
+    // Track the real page URL mutably inside the loop.
+    // React state (currentUrl) doesn't update between iterations because the
+    // while-loop runs synchronously between renders. This mutable var does.
+    let liveUrl = currentUrl;
+
+    // 2-Engine flag: should we perceive the page before the next actor decision?
+    // true on first step after a page-changing action (navigate, click, type, scroll)
+    // false when page hasn't changed (wait, key_press, reply)
+    let needsPerception = false; // first step may not have a page yet (home screen)
+
+    // Abortable delay — resolves immediately if Stop is pressed
+    const abortableWait = (ms: number) => new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, ms);
+      const check = setInterval(() => { if (shouldAbort()) { clearTimeout(timer); clearInterval(check); resolve(); } }, 100);
+      setTimeout(() => clearInterval(check), ms + 50);
+    });
+    const shouldAbort = () => agentAbortRef.current || loopAbort.signal.aborted;
 
     try {
       while (stepCount < MAX_STEPS) {
         stepCount++;
         setAgentStep(stepCount);
 
-        // Check abort signal
-        if (agentAbortRef.current) {
-          loopAbort.abort();
+        // Check abort signal (from Stop button or agentAbortRef)
+        if (shouldAbort()) {
+          if (!loopAbort.signal.aborted) loopAbort.abort();
           setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped by user.]', isBrowserFeedback: true }]);
           break;
         }
@@ -3499,8 +1239,68 @@ export default function App() {
           setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped: 5-minute timeout reached.]', isBrowserFeedback: true }]);
           break;
         }
-        
-        // Fetch AI Decision
+
+        // ── USER CORRECTION CHECK (RLHF) ────────────────────────────────────
+        // If user sent a message while agent was working, inject it as a high-priority redirect.
+        // This is the core feedback loop — user says "wrong button", "that's the subject not body",
+        // "stop", "go back", etc. and the agent adjusts immediately.
+        if (agentCorrectionRef.current) {
+          const correction = agentCorrectionRef.current;
+          agentCorrectionRef.current = null;
+
+          // Check if user wants to stop
+          const isStopCmd = /^(stop|cancel|quit|abort|halt|nevermind|never mind)$/i.test(correction.trim());
+          if (isStopCmd) {
+            agentAbortRef.current = true;
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped by user correction.]', isBrowserFeedback: true }]);
+            break;
+          }
+
+          // Invalidate all previous perception — force re-scan after correction
+          currentMessages = currentMessages.filter(m => !m.content?.startsWith('[PERCEPTION]'));
+
+          // Inject correction as a user message with strong override language
+          currentMessages = [...currentMessages, {
+            id: Date.now().toString() + '-usercorrect',
+            role: 'user',
+            content: `[USER FEEDBACK]: ${correction}\n\nIMPORTANT: The user is correcting your previous action. What you just did was WRONG. Adjust based on this feedback:\n- If user says you clicked the wrong thing → use read_page to find the RIGHT element\n- If user says you typed in the wrong field → find the correct field and re-type\n- If user gives new instructions → follow THOSE instructions now\n- Re-perceive the page first (read_page) before your next action.\nOutput one JSON action.`,
+          }];
+          setMessages([...currentMessages]);
+
+          // Force re-perception so agent sees fresh element IDs
+          needsPerception = true;
+          // Reset loop counters since user is actively guiding
+          consecutiveNudges = 0;
+          consecutiveErrors = 0;
+          totalActionsWithoutReply = Math.max(0, totalActionsWithoutReply - 3); // give some steps back
+        }
+
+        // ── PERCEIVER ENGINE PHASE ──────────────────────────────────────────────
+        // Runs automatically when the page likely changed. Provides the ACTOR with
+        // a grounded view: DOM elements + SoM-annotated vision screenshot.
+        if (needsPerception && liveUrl && !liveUrl.startsWith('orbit://')) {
+          try {
+            setAgentCurrentAction('Analyzing page...');
+            const perception = await perceivePage({ executeJS, secureApiKey, activeTabId }, userText);
+            // Remove any previous perception to keep context clean
+            currentMessages = currentMessages.filter(m => !m.content?.startsWith('[PERCEPTION]'));
+            currentMessages = [...currentMessages, {
+              id: Date.now().toString() + '-percept',
+              role: 'system',
+              content: `[PERCEPTION]\n${perception}`,
+              isBrowserFeedback: true,
+            }];
+            setMessages([...currentMessages]);
+          } catch (percErr: any) {
+            console.warn('[Perceiver] Failed:', percErr.message);
+          }
+          needsPerception = false;
+        }
+        if (shouldAbort()) { if (!loopAbort.signal.aborted) loopAbort.abort(); setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped by user.]', isBrowserFeedback: true }]); break; }
+
+        // ── ACTOR ENGINE PHASE ──────────────────────────────────────────────────
+        // Uses the perception context + conversation history to decide the next action.
+        setAgentCurrentAction('Deciding next action...');
         let aiResponseText = '';
         if (config.engine === 'local' || config.engine === 'local_llm_max') {
            // Use sanitized executeJS from useBrowserEngine hook
@@ -3512,22 +1312,35 @@ export default function App() {
                  return null;
               }
            };
-           aiResponseText = await callLocalBrain(safeExecuteJS, currentMessages);
+           aiResponseText = await callLocalBrain(safeExecuteJS, currentMessages, brainRef.current);
            setTaskQueue([...brainRef.current.queue]);
         } else {
-           aiResponseText = await callAI(currentMessages, loopAbort.signal, currentUrl);
+           aiResponseText = await callAI(currentMessages, secureApiKey, checkRateLimit, loopAbort.signal, liveUrl);
         }
-        
+        if (shouldAbort()) { if (!loopAbort.signal.aborted) loopAbort.abort(); setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped by user.]', isBrowserFeedback: true }]); break; }
+
         const action = parseAction(aiResponseText);
         
         // Safety Layer Intercept
         if (action?.action) {
+           // Detect action type based on the NATURE of the action, not text content.
+           // IMPORTANT: typing an email address is NOT a SEND_EMAIL action — that's just
+           // filling a form field. SEND_EMAIL only fires when the agent clicks a Send button.
+           const isClick = action.action === 'click';
+           const clickText = (action.text || action.label || '').toLowerCase();
+
            const isInjectScript = action.action === 'inject_script';
-           const isEmailOrPassword = action.text && (action.text.includes('@') || action.text.toLowerCase().includes('pass'));
-           
+           const isSendEmail   = isClick && /\bsend\b/.test(clickText);
+           const isPostContent = isClick && /\b(post|publish|tweet|share)\b/.test(clickText);
+           const isPurchase    = isClick && /\b(buy now|place order|confirm order|checkout|pay now|purchase)\b/.test(clickText);
+           const isDeleteData  = isClick && /\b(delete|remove|discard|trash)\b/.test(clickText);
+
            let actionType = 'GENERAL_ACTION';
            if (isInjectScript) actionType = 'MODIFY_DATA';
-           if (isEmailOrPassword) actionType = 'SEND_EMAIL';
+           if (isSendEmail)    actionType = 'SEND_EMAIL';
+           if (isPostContent)  actionType = 'POST_CONTENT';
+           if (isPurchase)     actionType = 'PURCHASE';
+           if (isDeleteData)   actionType = 'DELETE_DATA';
 
            // Build a plain-English message — never show raw code or JSON
            const actionVerb = action.action ?? 'perform an action';
@@ -3573,62 +1386,80 @@ export default function App() {
         setMessages([...currentMessages]);
 
         if (!action) {
-          // If no JSON found, assume the AI just replied in plaintext and stop the loop.
-          break;
+          // Model output plain text (narration) instead of a JSON action.
+          // Push a firm correction and continue — don't let narration kill the loop.
+          consecutiveNudges++;
+          if (consecutiveNudges >= 4) {
+            // Model is stuck after 4 corrections — bail gracefully
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent] Could not determine next action after multiple attempts. Please try rephrasing your request.', isBrowserFeedback: true }]);
+            break;
+          }
+          currentMessages = [...currentMessages, {
+            id: Date.now().toString() + '-nudge',
+            role: 'system',
+            content: `[NUDGE ${consecutiveNudges}/3] Stop narrating. Output ONLY a raw JSON action object — no text before or after. The task is not complete. Next action:`,
+            isBrowserFeedback: true,
+          }];
+          setMessages([...currentMessages]);
+          continue;
         }
+        // Model gave valid JSON — reset nudge counter
+        consecutiveNudges = 0;
 
         if (action.action === 'reply') {
           // AI is done!
           break;
         }
 
-        // Update live status label
-        const actionLabels: Record<string, string> = {
-          navigate: `Navigating to ${action.url || '...'}`,
-          read_page: 'Reading page elements',
-          click: `Clicking element #${action.element_id}`,
-          type: `Typing into element #${action.element_id}`,
-          scroll: `Scrolling ${action.direction || 'down'}`,
-          inject_script: 'Running automation script',
-          go_back: 'Going back',
-          refresh: 'Refreshing page',
-          wait_for_element: 'Waiting for element',
-          verify: 'Verifying result',
-          screenshot: 'Taking screenshot',
-          select_option: `Selecting option in #${action.element_id}`,
-          key_press: `Pressing ${action.key}`,
-          hover: `Hovering element #${action.element_id}`,
-          extract_data: 'Extracting data from page',
-          new_tab: `Opening new tab: ${action.url || ''}`,
-          get_url: 'Getting current URL',
-          clipboard_write: 'Copying to clipboard',
-          fill_form: 'Filling form fields',
-          drag_drop: 'Dragging element',
+        // Update live status label — use descriptive text where available
+        const getActionLabel = (a: any): string => {
+          switch (a.action) {
+            case 'navigate': return `Navigating to ${a.url || '...'}`;
+            case 'read_page': return 'Scanning all page elements...';
+            case 'find_element': return `Finding "${a.text || 'element'}"...`;
+            case 'click': {
+              // Try to resolve element text from DOM for richer label
+              const el = document.querySelector(`[data-orbit-id="${a.element_id}"]`);
+              const elLabel = el ? (el.getAttribute('aria-label') || el.textContent || '').trim().substring(0, 40) : '';
+              return elLabel ? `Clicking "${elLabel}"` : `Clicking element #${a.element_id}`;
+            }
+            case 'click_at': return `Clicking at (${a.x}, ${a.y})`;
+            case 'type': {
+              const el2 = document.querySelector(`[data-orbit-id="${a.element_id}"]`);
+              const elLabel2 = el2 ? (el2.getAttribute('aria-label') || el2.getAttribute('placeholder') || '').trim().substring(0, 30) : '';
+              return elLabel2 ? `Typing into "${elLabel2}"` : `Typing "${(a.text||'').substring(0,30)}"`;
+            }
+            case 'wait': return 'Waiting for page to load...';
+            case 'scroll': return `Scrolling ${a.direction || 'down'}`;
+            case 'inject_script': return 'Running automation script';
+            case 'go_back': return 'Going back';
+            case 'refresh': return 'Refreshing page';
+            case 'screenshot': return 'Taking screenshot + vision scan';
+            case 'select_option': return `Selecting "${a.value || 'option'}"`;
+            case 'key_press': return `Pressing ${a.key}`;
+            case 'reply': return 'Sending reply...';
+            default: return a.action;
+          }
         };
-        setAgentCurrentAction(actionLabels[action.action] || action.action);
+        setAgentCurrentAction(getActionLabel(action));
+
+        // Clean SoM markers before executing — user should never see them
+        try { await executeJS(SOM_REMOVE_SCRIPT); } catch {}
 
         // Execute Browser Action
         let systemResult = '';
 
         if (action.action === 'navigate') {
           try {
+            // Ensure we're in browser mode — otherwise WebContentsView is hidden behind renderer
+            setAppMode('browser');
             await navigate(action.url);
-            await new Promise(r => setTimeout(r, 2500));
-            // Auto-screenshot after navigation so agent sees the page visually
-            const orbitBrowser = (window as any).orbit?.browser;
-            if (orbitBrowser?.screenshot) {
-              const snap = await orbitBrowser.screenshot(activeTabId);
-              if (snap?.success && snap.base64) {
-                const analysis = await analyzeWithVision(snap.base64,
-                  `Page loaded: ${action.url}\nDescribe what you see. List all visible buttons, inputs, search bars, forms, links, and key content. Be concise and specific — this is used by an automation agent to decide next steps.`
-                );
-                systemResult = `Navigated to ${action.url}.\n\n[Visual page analysis]\n${analysis}`;
-              } else {
-                systemResult = `Navigated to ${action.url}. Page loaded — use read_page or inject_script to interact.`;
-              }
-            } else {
-              systemResult = `Navigated to ${action.url}. You can now use read_page or inject_script.`;
-            }
+            liveUrl = action.url; // update mutable URL tracker so callAI gets the real URL going forward
+            await abortableWait(2500);
+            // Resize so the WebContentsView appears correctly after mode switch
+            window.dispatchEvent(new Event('resize'));
+            // Return a minimal result — do NOT describe page elements here.
+            systemResult = `Navigated to ${action.url}. Page loaded. STOP — respond with {"action":"reply","message":"..."} now unless the user's original request requires additional steps on THIS page.`;
           } catch (e: any) {
             systemResult = `Failed to navigate to ${action.url}: ${e.message}`;
           }
@@ -3648,77 +1479,94 @@ export default function App() {
            } catch(e: any) { systemResult = "Failed to refresh: " + e.message; }
         }
         else if (action.action === 'read_page') {
+          // Manual re-scan — uses the shared READ_PAGE_SCRIPT constant
           try {
-            const result = await executeJS(`
-                (function() {
-                  let elementIdCounter = 1;
-                  const annotatedElements = [];
-                  document.querySelectorAll('[data-orbit-id]').forEach(el => el.removeAttribute('data-orbit-id'));
-
-                  const elements = Array.from(document.body.querySelectorAll('input, button, a, textarea, [role="button"], h1, h2, h3, p, span, li'));
-                  
-                  for (const el of elements) {
-                    const style = window.getComputedStyle(el);
-                    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
-                      continue;
-                    }
-
-                    const rect = el.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) continue;
-
-                    let tag = el.tagName.toLowerCase();
-                    let text = el.innerText?.trim();
-                    let ariaLabel = el.getAttribute('aria-label') || '';
-                    let title = el.getAttribute('title') || '';
-                    let alt = el.getAttribute('alt') || '';
-                    let type = el.getAttribute('type') || '';
-                    let name = el.getAttribute('name') || '';
-                    
-                    // Priority fallback for understanding what the element does
-                    let descriptiveText = ariaLabel || title || alt || text;
-
-                    let extraAttrs = [];
-                    if (ariaLabel) extraAttrs.push(\`aria-label="\${ariaLabel}"\`);
-                    if (title) extraAttrs.push(\`title="\${title}"\`);
-                    if (type) extraAttrs.push(\`type="\${type}"\`);
-                    if (name) extraAttrs.push(\`name="\${name}"\`);
-                    
-                    let attrString = extraAttrs.length > 0 ? \` (\${extraAttrs.join(', ')})\` : '';
-
-                    if (tag === 'input') {
-                      descriptiveText = el.placeholder || el.value || el.name || ariaLabel || title || el.type;
-                      tag = 'input';
-                    } else if (tag === 'textarea') {
-                      descriptiveText = el.placeholder || el.value || el.name || ariaLabel || title;
-                      tag = 'textarea';
-                    } else if (tag === 'a') {
-                      tag = 'link';
-                    } else if (el.getAttribute('role') === 'button' || tag === 'button') {
-                      tag = 'button';
-                    } else if (['h1', 'h2', 'h3', 'p', 'span', 'li'].includes(tag)) {
-                      tag = 'text';
-                    }
-
-                    if (!descriptiveText || descriptiveText.length === 0) continue;
-
-                    const id = elementIdCounter++;
-                    el.setAttribute('data-orbit-id', id.toString());
-                    
-                    annotatedElements.push({ id, text: descriptiveText + attrString, tag });
-                  }
-                  
-                  return annotatedElements.map(ae => '[' + ae.id + '] ' + ae.tag.toUpperCase() + ': "' + ae.text.substring(0, 100) + '"');
-                })();
-              `);
-
-              if (result && result.length > 0) {
-                systemResult = "Mapped Page Elements:\\n" + result.join('\\n').substring(0, 4000);
-              } else {
-                 systemResult = "No interactive elements found on the page.";
-              }
+            const result = await executeJS(READ_PAGE_SCRIPT);
+            if (result && result.length > 0) {
+              systemResult = 'Page Elements (' + result.length + ' found):\n' + result.join('\n').substring(0, 6000);
+            } else {
+              systemResult = 'No interactive elements found. Try screenshot to see the page visually.';
+            }
+            needsPerception = false; // we just scanned, no need to auto-perceive again
           } catch (e: any) {
             systemResult = `Error mapping page: ${e.message}`;
           }
+        }
+        else if (action.action === 'find_element') {
+          // Fuzzy DOM search by text / aria-label / placeholder / testid — returns element ID + coords
+          try {
+            const searchText = ScriptSanitizer.escapeForJS(String(action.text || ''));
+            const found = await executeJS(`
+              (function() {
+                const lower = '${searchText}'.toLowerCase().trim();
+                if (!lower) return null;
+                const all = Array.from(document.querySelectorAll('*'));
+                let best = null, bestScore = 0;
+                for (const el of all) {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width < 2 || rect.height < 2) continue;
+                  const style = window.getComputedStyle(el);
+                  if (style.display === 'none' || style.visibility === 'hidden') continue;
+                  const a = (el.getAttribute('aria-label') || '').toLowerCase();
+                  const p = (el.placeholder || '').toLowerCase();
+                  const t = (el.getAttribute('title') || '').toLowerCase();
+                  const txt = (el.innerText || el.textContent || '').trim().toLowerCase().substring(0, 100);
+                  const tid = (el.getAttribute('data-testid') || '').toLowerCase();
+                  let score = 0;
+                  if (a === lower || p === lower || t === lower) score = 100;
+                  else if (a.includes(lower) || p.includes(lower)) score = 70;
+                  else if (txt === lower) score = 80;
+                  else if (txt.startsWith(lower)) score = 50;
+                  else if (txt.includes(lower) || tid.includes(lower) || t.includes(lower)) score = 30;
+                  if (score > bestScore) { bestScore = score; best = el; }
+                }
+                if (!best || bestScore === 0) return null;
+                let id = best.getAttribute('data-orbit-id');
+                if (!id) {
+                  id = 'fe_' + Date.now();
+                  best.setAttribute('data-orbit-id', id);
+                }
+                const r = best.getBoundingClientRect();
+                return { id, tag: best.tagName, text: (best.getAttribute('aria-label') || best.placeholder || best.innerText || '').substring(0, 60), x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2) };
+              })();
+            `);
+            if (found && found.id) {
+              systemResult = `Found element [${found.id}] ${found.tag}: "${found.text}" at (${found.x},${found.y}). Use click with element_id ${found.id}, or click_at x:${found.x} y:${found.y}.`;
+            } else {
+              systemResult = `No element found matching "${action.text}". Try read_page to see all elements, or screenshot to view the page.`;
+            }
+          } catch (e: any) {
+            systemResult = `Error finding element: ${e.message}`;
+          }
+        }
+        else if (action.action === 'click_at') {
+          // Click by screen coordinates — works on SPAs, shadow DOM, canvas elements
+          try {
+            const cx = Number(action.x) || 0;
+            const cy = Number(action.y) || 0;
+            const result = await executeJS(`
+              (function() {
+                const el = document.elementFromPoint(${cx}, ${cy});
+                if (!el) return 'No element at (${cx}, ${cy})';
+                el.focus && el.focus();
+                ['mouseover','mouseenter','mousedown','mouseup','click'].forEach(type => {
+                  el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: ${cx}, clientY: ${cy}, view: window }));
+                });
+                const desc = (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || el.tagName).substring(0, 50);
+                return 'Clicked ' + el.tagName + ': "' + desc + '" at (${cx},${cy})';
+              })();
+            `);
+            systemResult = String(result);
+            await new Promise(r => setTimeout(r, 600));
+          } catch (e: any) {
+            systemResult = `Error clicking at coords: ${e.message}`;
+          }
+        }
+        else if (action.action === 'wait') {
+          // Pause for dynamic UI transitions (compose popups, modals, loading)
+          const ms = Math.min(Number(action.ms) || 1500, 5000);
+          await new Promise(r => setTimeout(r, ms));
+          systemResult = `Waited ${ms}ms. Page should be ready now. Use read_page or find_element to continue.`;
         }
         else if (action.action === 'scroll') {
           try {
@@ -3737,32 +1585,65 @@ export default function App() {
               const result = await executeJS(`
                 (function() {
                   return new Promise((resolve) => {
-                    const targetEl = document.querySelector('[data-orbit-id="${safeId}"]');
-                    if (targetEl) {
-                      const originalOutline = targetEl.style.outline;
-                      const originalTransition = targetEl.style.transition;
-                      targetEl.style.transition = 'all 0.2s';
-                      targetEl.style.outline = '4px solid #ef4444';
-                      targetEl.style.outlineOffset = '2px';
-                      
-                      setTimeout(() => {
-                        targetEl.click();
-                        targetEl.style.outline = originalOutline;
-                        targetEl.style.transition = originalTransition;
-                        resolve(true);
-                      }, 600);
-                    } else {
-                      resolve(false);
+                    let targetEl = document.querySelector('[data-orbit-id="${safeId}"]');
+                    if (!targetEl) return resolve(false);
+
+                    // If target is SVG/path/icon, bubble up to nearest clickable parent (a, button, [role=button])
+                    let clickTarget = targetEl;
+                    const svgTags = ['SVG','PATH','CIRCLE','RECT','LINE','POLYGON','G','USE','SYMBOL'];
+                    if (svgTags.includes(clickTarget.tagName.toUpperCase()) || clickTarget.tagName.toUpperCase() === 'IMG') {
+                      const parent = clickTarget.closest('a, button, [role="button"], [role="link"], [tabindex]');
+                      if (parent) clickTarget = parent;
                     }
+
+                    // Brief visual highlight then click
+                    const origOutline = targetEl.style.outline;
+                    const origTransition = targetEl.style.transition;
+                    targetEl.style.transition = 'all 0.15s';
+                    targetEl.style.outline = '3px solid #ef4444';
+                    targetEl.style.outlineOffset = '2px';
+
+                    setTimeout(() => {
+                      // Full event sequence for maximum compatibility
+                      const rect = clickTarget.getBoundingClientRect();
+                      const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+                      clickTarget.focus && clickTarget.focus();
+                      ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(type => {
+                        clickTarget.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: cx, clientY: cy, view: window }));
+                      });
+                      targetEl.style.outline = origOutline;
+                      targetEl.style.transition = origTransition;
+                      resolve(true);
+                    }, 300);
                   });
                 })();
               `);
 
               if (result) {
-                systemResult = `Successfully clicked element with ID: ${action.element_id}.`;
-                await new Promise(r => setTimeout(r, 2000)); // Wait for click effects to register naturally
+                // Report what was clicked — helps agent know if task-completing action was performed
+                let clickedDesc = '';
+                try {
+                  clickedDesc = await executeJS(`
+                    (function() {
+                      const el = document.querySelector('[data-orbit-id="${safeId}"]');
+                      if (!el) return '';
+                      const aria = el.getAttribute('aria-label') || '';
+                      const txt = (el.innerText || el.textContent || '').trim().substring(0, 40);
+                      return aria || txt || el.tagName;
+                    })();
+                  `) || '';
+                } catch {}
+                const isFinalAction = /\b(send|submit|post|publish|save|confirm|done|sign in|log in|sign up|place order|checkout|pay now|complete|tweet|reply|compose|forward|discard|delete|archive|mark as read|apply|update|upload|create|add to cart|buy now|subscribe|unsubscribe|accept|decline|allow|block|report|next|finish|close)\b/i.test(clickedDesc.trim());
+                systemResult = `Successfully clicked [${action.element_id}]${clickedDesc ? ': "' + clickedDesc + '"' : ''}.`;
+                if (isFinalAction) {
+                  // HARD BREAK — completion button was clicked, task is done
+                  const confirmMsg = `Done — clicked "${clickedDesc.trim()}".`;
+                  setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: confirmMsg }]);
+                  completionForceBreak = true;
+                }
+                await abortableWait(2000); // Wait for click effects to register naturally
               } else {
-                systemResult = `Error: Could not find any clickable element with ID: ${action.element_id}. Use read_page to get valid IDs.`;
+                systemResult = `Error: Could not find any clickable element with ID: ${action.element_id}. Use read_page or find_element to get valid IDs.`;
               }
             } else {
               systemResult = "Error: Cannot access webview or missing 'element_id' parameter in action.";
@@ -3780,19 +1661,30 @@ export default function App() {
                 (function() {
                   return new Promise((resolve) => {
                     const targetEl = document.querySelector('[data-orbit-id="${safeId}"]');
-                    if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA' || targetEl.isContentEditable)) {
+                    // Accept INPUT, TEXTAREA, contentEditable, and also role="textbox" / role="combobox" (Gmail, Slack, etc.)
+                    const role = targetEl ? targetEl.getAttribute('role') : '';
+                    const isEditable = targetEl && (
+                      targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA' ||
+                      targetEl.isContentEditable ||
+                      role === 'textbox' || role === 'combobox'
+                    );
+                    if (targetEl && isEditable) {
                       const originalOutline = targetEl.style.outline;
                       const originalTransition = targetEl.style.transition;
                       targetEl.style.transition = 'all 0.2s';
                       targetEl.style.outline = '4px solid #3b82f6';
                       targetEl.style.outlineOffset = '2px';
-                      
+
                       setTimeout(() => {
+                        // Click then focus — some apps (Gmail) need a real click to activate the field
+                        targetEl.click();
                         targetEl.focus();
+
                         if (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA') {
+                            // Standard form inputs — use native setter to bypass React/framework protections
                             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
                             const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-                            
+
                             if (targetEl.tagName === 'INPUT' && nativeInputValueSetter) {
                                 nativeInputValueSetter.call(targetEl, \`${safeText}\`);
                             } else if (targetEl.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
@@ -3800,22 +1692,44 @@ export default function App() {
                             } else {
                                 targetEl.value = \`${safeText}\`;
                             }
+                            targetEl.dispatchEvent(new Event('input', { bubbles: true }));
+                            targetEl.dispatchEvent(new Event('change', { bubbles: true }));
                         } else {
-                            targetEl.innerText = \`${safeText}\`;
+                            // Contenteditable / role="textbox" — used by Gmail compose, Slack, Notion, etc.
+                            // SAFE approach: place cursor at end and insert. Do NOT selectAll+delete
+                            // as that can nuke Gmail's compose DOM and cause a black tab.
+                            try {
+                              const sel = window.getSelection();
+                              // Place cursor at end of the editable element
+                              const range = document.createRange();
+                              if (targetEl.childNodes.length > 0) {
+                                range.selectNodeContents(targetEl);
+                                range.collapse(false); // collapse to end
+                              } else {
+                                range.setStart(targetEl, 0);
+                                range.collapse(true);
+                              }
+                              sel.removeAllRanges();
+                              sel.addRange(range);
+                              // Insert text at cursor using execCommand (preserves editor state)
+                              document.execCommand('insertText', false, \`${safeText}\`);
+                            } catch(ceErr) {
+                              // Fallback: set textContent directly (less ideal but safe)
+                              targetEl.textContent = \`${safeText}\`;
+                            }
+                            // Fire input event for frameworks listening
+                            targetEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: \`${safeText}\` }));
                         }
-                        
-                        targetEl.dispatchEvent(new Event('input', { bubbles: true }));
-                        targetEl.dispatchEvent(new Event('change', { bubbles: true }));
-                        
+
                         if (${action.press_enter ? 'true' : 'false'}) {
                            targetEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                            targetEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                            targetEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                           
+
                            // If it's a form input, try to submit the form properly
                            if (targetEl.form) {
                               setTimeout(() => {
-                                 try { 
+                                 try {
                                      if (typeof targetEl.form.requestSubmit === 'function') {
                                          targetEl.form.requestSubmit();
                                      } else {
@@ -3838,10 +1752,35 @@ export default function App() {
               `);
 
               if (result) {
-                systemResult = `Successfully typed "${action.text}" into element with ID: ${action.element_id}.`;
+                // Report what field was typed into — helps agent know if it hit the right field
+                let fieldDesc = '';
+                try {
+                  fieldDesc = await executeJS(`
+                    (function() {
+                      const el = document.querySelector('[data-orbit-id="${safeId}"]');
+                      if (!el) return '';
+                      const tag = el.tagName;
+                      const aria = el.getAttribute('aria-label') || '';
+                      const ph = el.placeholder || '';
+                      const name = el.getAttribute('name') || '';
+                      const type = el.getAttribute('type') || '';
+                      const role = el.getAttribute('role') || '';
+                      const isContent = el.isContentEditable;
+                      const parts = [tag];
+                      if (aria) parts.push('aria-label="' + aria + '"');
+                      if (ph) parts.push('placeholder="' + ph + '"');
+                      if (name) parts.push('name="' + name + '"');
+                      if (type) parts.push('type="' + type + '"');
+                      if (isContent) parts.push('(contenteditable)');
+                      if (role) parts.push('role="' + role + '"');
+                      return parts.join(' ');
+                    })();
+                  `) || '';
+                } catch {}
+                systemResult = `Successfully typed "${action.text}" into element [${action.element_id}]${fieldDesc ? ' → ' + fieldDesc : ''}. If this was the WRONG field (e.g. you typed the email body into the Subject line), use find_element to locate the correct field and re-type there.`;
                 await new Promise(r => setTimeout(r, 1000));
               } else {
-                systemResult = `Error: Could not find any input element with ID: ${action.element_id}. Use read_page to get valid IDs.`;
+                systemResult = `Error: Could not find any input element with ID: ${action.element_id}. Use read_page or find_element to get valid IDs.`;
               }
             } else {
               systemResult = "Error: Missing 'element_id' or 'text' parameter in action.";
@@ -3979,7 +1918,7 @@ export default function App() {
                   isBrowserFeedback: true
                 }];
                 setMessages([...currentMessages]);
-                await new Promise(r => setTimeout(r, 2000)); // Pause after script execution
+                await abortableWait(2000); // Pause after script execution
 
             } catch (e: any) {
                 systemResult = `Failed to execute script: ${e.message}`;
@@ -3993,15 +1932,34 @@ export default function App() {
             } else {
               const snap = await orbitBrowser.screenshot(activeTabId);
               if (snap?.success && snap.base64) {
-                const visionPrompt = action.prompt ||
-                  'You are a browser automation agent. Analyze this screenshot carefully. Describe: (1) What page/site is shown, (2) All visible interactive elements — buttons, inputs, links, dropdowns, (3) Any forms or data fields, (4) What the current page state is, (5) What action should logically come next to complete the task. Be specific about element labels and positions.';
-                const analysis = await analyzeWithVision(snap.base64, visionPrompt);
-                systemResult = `[Vision Analysis of current page]\n${analysis}`;
+                // Also grab the live element map so vision can reference real IDs + coords
+                let elementMapStr = '';
+                try {
+                  const liveEls = await executeJS(`
+                    (function() {
+                      const els = Array.from(document.querySelectorAll('[data-orbit-id]'));
+                      return els.slice(0, 80).map(el => {
+                        const r = el.getBoundingClientRect();
+                        const desc = el.getAttribute('aria-label') || el.placeholder || (el.innerText||'').trim().substring(0,40) || el.tagName;
+                        return '[' + el.getAttribute('data-orbit-id') + '] ' + el.tagName + ': "' + desc + '" @(' + Math.round(r.x+r.width/2) + ',' + Math.round(r.y+r.height/2) + ')';
+                      });
+                    })();
+                  `);
+                  if (liveEls && liveEls.length > 0) {
+                    elementMapStr = '\n\nKnown element IDs on this page (reference these IDs when clicking):\n' + liveEls.join('\n');
+                  }
+                } catch { /* ignore — element map is bonus context */ }
+
+                const visionPrompt = (action.prompt ||
+                  'You are a browser automation agent analyzing a screenshot. Identify: (1) What page/site is shown, (2) ALL visible interactive elements — buttons, inputs, links, text areas — with their approximate x,y positions, (3) Form fields and their labels, (4) Current page state (loaded, login wall, error, etc). For each element give its label and screen position.') +
+                  elementMapStr;
+                const analysis = await analyzeWithVision(snap.base64, visionPrompt, secureApiKey);
+                systemResult = `[Vision Analysis]\n${analysis}${elementMapStr}`;
                 // Show screenshot preview in chat
                 currentMessages = [...currentMessages, {
                   id: Date.now().toString() + '-vision',
                   role: 'system',
-                  content: `📸 Screenshot analyzed:\n${analysis}`,
+                  content: `📸 Vision scan complete:\n${analysis}`,
                   isBrowserFeedback: true,
                 }];
                 setMessages([...currentMessages]);
@@ -4036,10 +1994,25 @@ export default function App() {
         else if (action.action === 'key_press') {
           try {
             const key = action.key || 'Enter';
+            const safeKey = ScriptSanitizer.escapeForJS(key);
             await executeJS(`
               (function() {
                 const el = document.activeElement || document.body;
-                ['keydown','keypress','keyup'].forEach(t => el.dispatchEvent(new KeyboardEvent(t, { key: '${ScriptSanitizer.escapeForJS(key)}', bubbles: true, cancelable: true })));
+                const keyCode = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39 }['${safeKey}'] || 0;
+                const evtInit = { key: '${safeKey}', code: '${safeKey}', keyCode: keyCode, which: keyCode, bubbles: true, cancelable: true };
+                el.dispatchEvent(new KeyboardEvent('keydown', evtInit));
+                el.dispatchEvent(new KeyboardEvent('keypress', evtInit));
+                el.dispatchEvent(new KeyboardEvent('keyup', evtInit));
+
+                // Tab — move focus to next tabbable element (event dispatch alone doesn't move focus)
+                if ('${safeKey}' === 'Tab') {
+                  const focusable = Array.from(document.querySelectorAll(
+                    'input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [contenteditable=""]'
+                  )).filter(e => e.offsetParent !== null);
+                  const idx = focusable.indexOf(el);
+                  const next = focusable[idx + 1] || focusable[0];
+                  if (next) { next.focus(); next.click && next.click(); }
+                }
               })();
             `);
             systemResult = `Key "${key}" pressed on focused element.`;
@@ -4084,7 +2057,7 @@ export default function App() {
         else if (action.action === 'new_tab') {
           try {
             await createTab(action.url || 'about:blank');
-            await new Promise(r => setTimeout(r, 2000));
+            await abortableWait(2000);
             systemResult = `Opened new tab: ${action.url || 'blank'}`;
           } catch (e: any) { systemResult = `Error opening new tab: ${e.message}`; }
         }
@@ -4162,11 +2135,70 @@ export default function App() {
           systemResult = `Error: Unknown action '${action.action}'`;
         }
 
-        // Add System Feedback Message
-        currentMessages = [...currentMessages, { 
-          id: Date.now().toString() + '-sys', 
-          role: 'system', 
-          content: `[Browser Feedback]: ${systemResult}`,
+        // ── COMPLETION FORCE-BREAK ─────────────────────────────────────────
+        // If a completion button (Send/Submit/Post) was clicked, stop the loop immediately.
+        // Don't ask the LLM — it will just try to "verify" and loop.
+        if (completionForceBreak) {
+          console.log('[Agent] Completion force-break: task done.');
+          break;
+        }
+
+        // ── ACTION COUNTER (without reply) ──────────────────────────────
+        totalActionsWithoutReply++;
+        // Safety cap: if the agent has performed 12+ actions without ever issuing a reply,
+        // it's almost certainly stuck in a loop. Force stop.
+        if (totalActionsWithoutReply >= 12) {
+          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Task appears complete — stopping after multiple steps.' }]);
+          break;
+        }
+
+        // ── REPEAT-ACTION DETECTION ──────────────────────────────────────────
+        // Track action signatures to detect stuck loops
+        const actionSig = JSON.stringify({ a: action.action, id: action.element_id, url: action.url, text: action.text?.substring(0, 30) });
+        actionHistory.push(actionSig);
+        if (actionHistory.length >= 3) {
+          const last3 = actionHistory.slice(-3);
+          // Same exact action 3 times in a row
+          if (last3[0] === last3[1] && last3[1] === last3[2]) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'I seem to be stuck repeating the same action. Stopping.' }]);
+            break;
+          }
+        }
+        // Cycle detector: catches A→B→A→B patterns (alternating actions)
+        if (actionHistory.length >= 4) {
+          const last4 = actionHistory.slice(-4);
+          if (last4[0] === last4[2] && last4[1] === last4[3] && last4[0] !== last4[1]) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Detected a repeating cycle. Stopping to avoid infinite loop.' }]);
+            break;
+          }
+        }
+
+        // Flag perceiver to run next iteration if the page likely changed
+        const PAGE_CHANGING_ACTIONS = ['navigate', 'click', 'click_at', 'type', 'scroll', 'go_back', 'inject_script'];
+        if (action?.action && PAGE_CHANGING_ACTIONS.includes(action.action)) {
+          needsPerception = true;
+        }
+
+        // Dead-tab detection: if 4+ consecutive actions return errors, the page is likely dead
+        if (systemResult.startsWith('Error') || systemResult.includes('Error:') || systemResult.includes('failed') || systemResult.includes('not found')) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= 4) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '[Agent stopped] The page appears unresponsive after multiple errors. Try refreshing or restarting the task.', isBrowserFeedback: true }]);
+            break;
+          }
+        } else {
+          consecutiveErrors = 0; // reset on success
+        }
+
+        // Add System Feedback Message — re-anchor to original task
+        // Step count pressure: as steps increase, push harder for completion
+        const stepsLeft = 12 - totalActionsWithoutReply;
+        const urgency = stepsLeft <= 3 ? ` WARNING: Only ${stepsLeft} steps remain before auto-stop. Finish NOW or reply.` : '';
+        const taskReminder = `\n[TASK] "${userText}". Done? → reply action. Not done? → ONE action only.${urgency}`;
+        currentMessages = [...currentMessages, {
+          id: Date.now().toString() + '-sys',
+          role: 'system',
+          content: `[Result]: ${systemResult}${taskReminder}`,
           isBrowserFeedback: true
         }];
         setMessages([...currentMessages]);
@@ -4181,10 +2213,13 @@ export default function App() {
         isBrowserFeedback: true
       }]);
     } finally {
+      // Always clean up SoM markers so users never see red overlays
+      try { await executeJS(SOM_REMOVE_SCRIPT); } catch {}
       setIsAgentWorking(false);
       setAgentStep(0);
       setAgentCurrentAction('');
       agentAbortRef.current = false;
+      agentCorrectionRef.current = null;
       if (!hasError && (config.engine === 'local' || config.engine === 'local_llm_max')) {
          setTaskQueue([]);
       }
@@ -4197,11 +2232,15 @@ export default function App() {
       case 'navigate':
         return <div className="flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-blue-400" /> Navigating to {action.url}</div>;
       case 'read_page':
-        return <div className="flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-emerald-400" /> Mapping page elements</div>;
+        return <div className="flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-emerald-400" /> Deep-scanning all page elements</div>;
+      case 'find_element':
+        return <div className="flex items-center gap-2"><Search className="w-3.5 h-3.5 text-cyan-400" /> Finding "{action.text}"</div>;
       case 'scroll':
         return <div className="flex items-center gap-2"><ArrowDown className="w-3.5 h-3.5 text-orange-400" /> Scrolling {action.direction}</div>;
       case 'click':
         return <div className="flex items-center gap-2"><MousePointer2 className="w-3.5 h-3.5 text-pink-400" /> Clicking Element #{action.element_id}</div>;
+      case 'click_at':
+        return <div className="flex items-center gap-2"><MousePointer2 className="w-3.5 h-3.5 text-rose-400" /> Clicking at ({action.x},{action.y})</div>;
       case 'type':
         return <div className="flex items-center gap-2"><Terminal className="w-3.5 h-3.5 text-purple-400" /> Typing "{action.text}" into #{action.element_id}</div>;
       case 'inject_script':
@@ -4261,6 +2300,8 @@ export default function App() {
             onOpenScheduler={() => setShowScheduler(true)}
             onOpenWorkspace={() => setShowWorkspace(true)}
             onOpenVoiceChat={() => setShowVoiceChat(true)}
+            onOpenCoding={() => setShowCoding(true)}
+            onOpenTrading={() => setShowTrading(true)}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
             agentTotalSteps={agentTotalSteps}
@@ -4362,10 +2403,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Active Task Queue Tracker */}
+            {/* Task Progress — local engine queue tracker */}
             <AnimatePresence>
               {initialTasks.length > 0 && (
-                <motion.div 
+                <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
@@ -4384,51 +2425,69 @@ export default function App() {
                     {initialTasks.map((task, idx) => {
                       const isCompleted = idx < (initialTasks.length - taskQueue.length);
                       const isActive = isAgentWorking && idx === (initialTasks.length - taskQueue.length);
-                      
                       return (
-                      <div key={idx} className={`flex items-start gap-2 text-sm ${isCompleted ? 'opacity-60' : ''}`}>
-                        {isCompleted ? (
-                           <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                        ) : isActive ? (
-                           <Zap className="w-4 h-4 text-indigo-400 mt-0.5 animate-pulse shrink-0" />
-                        ) : (
-                           <CircleDashed className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
-                        )}
-                        <span className={`${isCompleted ? 'text-slate-500 line-through' : isActive ? 'text-slate-200 font-medium' : 'text-slate-500'} leading-tight`}>
-                          {task.desc || task.type.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-                    )})}
+                        <div key={idx} className={`flex items-start gap-2 text-sm ${isCompleted ? 'opacity-60' : ''}`}>
+                          {isCompleted ? (
+                             <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                          ) : isActive ? (
+                             <Zap className="w-4 h-4 text-indigo-400 mt-0.5 animate-pulse shrink-0" />
+                          ) : (
+                             <CircleDashed className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
+                          )}
+                          <span className={`${isCompleted ? 'text-slate-500 line-through' : isActive ? 'text-slate-200 font-medium' : 'text-slate-500'} leading-tight`}>
+                            {task.desc || task.type.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Chat History */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 relative">
-              {/* Working State Sphere Overlay */}
-              <AnimatePresence>
-                {isAgentWorking && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 1.1 }}
-                    transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                    className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#121212]/80 backdrop-blur-md"
+            {/* Task Progress — cloud engine live step tracker */}
+            <AnimatePresence>
+              {isAgentWorking && agentMode === 'browser' && initialTasks.length === 0 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="border-b border-slate-800/60 bg-[#161616] px-4 py-3 overflow-hidden shrink-0"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Agent Working</span>
+                    <span className="flex w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                  </div>
+                  {/* Indeterminate progress bar */}
+                  <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden mb-2">
+                    <motion.div
+                      className="h-full bg-indigo-500 rounded-full"
+                      animate={{ x: ['-100%', '200%'] }}
+                      transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                      style={{ width: '40%' }}
+                    />
+                  </div>
+                  {/* Current action */}
+                  {agentCurrentAction && (
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3 h-3 text-indigo-400 animate-pulse shrink-0" />
+                      <span className="text-[11px] text-slate-300 truncate">{agentCurrentAction}</span>
+                    </div>
+                  )}
+                  {/* Stop button */}
+                  <button
+                    onClick={() => { agentAbortRef.current = true; chatAbortRef.current?.abort(); }}
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium text-red-400 border border-red-500/20 hover:bg-red-500/10 transition-colors"
                   >
-                     <motion.div 
-                       initial={{ opacity: 0, filter: 'blur(8px)' }}
-                       animate={{ opacity: 1, filter: 'blur(0px)' }}
-                       transition={{ duration: 0.6, delay: 0.1 }}
-                       className="pointer-events-none drop-shadow-[0_0_30px_rgba(99,102,241,0.3)]"
-                     >
-                        <InlineStarSphere key={`sphere-${workSessionId}`} size={140} />
-                     </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    <X className="w-3 h-3" /> Stop Agent
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-              <div className={`transition-all duration-500 ease-out origin-bottom ${isAgentWorking ? 'opacity-0 scale-95 blur-sm translate-y-2 pointer-events-none' : 'opacity-100 scale-100 blur-none translate-y-0'}`}>
+            {/* Chat History — scroll locked while agent is working */}
+            <div className={`flex-1 p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 relative ${isAgentWorking ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+              <div>
                 {messages.length === 0 && (
                   <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-80 mt-10">
                     <div className="flex items-center justify-center mb-6 text-slate-500">
@@ -4637,13 +2696,30 @@ export default function App() {
                 }
               })}
               
-              {isAgentWorking && (
-                <div className="flex flex-col items-start gap-1.5 mt-2">
-                  <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 ml-1 opacity-70">
-                    JUMARI 1.0 is working...
-                  </div>
-                </div>
-              )}
+              {/* Animated sphere while agent works */}
+              <AnimatePresence>
+                {isAgentWorking && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                    className="flex flex-col items-center justify-center py-6"
+                  >
+                    <div className="pointer-events-none drop-shadow-[0_0_25px_rgba(99,102,241,0.3)]">
+                      <InlineStarSphere key={`sphere-browser-${workSessionId}`} size={100} />
+                    </div>
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.3 }}
+                      className="text-[10px] font-semibold text-slate-500 mt-2 tracking-wide"
+                    >
+                      {agentCurrentAction || 'JUMARI 1.0 is working...'}
+                    </motion.p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               <div ref={messagesEndRef} />
               </div>
             </div>
@@ -4651,29 +2727,27 @@ export default function App() {
             {/* Input Area */}
             <div className="p-4 bg-[#121212] border-t border-slate-800/60">
               <form
-                onSubmit={(e) => { e.preventDefault(); if (browserInput.trim() && !isAgentWorking) { handleUserSubmit(browserInput); setBrowserInput(''); } }}
+                onSubmit={(e) => { e.preventDefault(); if (browserInput.trim()) { handleUserSubmit(browserInput); setBrowserInput(''); } }}
                 className="relative flex items-center bg-slate-900/50 border border-slate-700/50 rounded-xl overflow-hidden focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/50 transition-all"
               >
                 <input
                   type="text"
                   value={browserInput}
                   onChange={(e) => setBrowserInput(e.target.value)}
-                  placeholder={isListening ? "Listening offline..." : isAgentWorking ? "Agent is working..." : "Ask JUMARI to browse or search..."}
-                  className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 py-3 pl-4 pr-20 outline-none disabled:opacity-50"
-                  disabled={isAgentWorking}
+                  placeholder={isListening ? "Listening offline..." : isAgentWorking ? "Send correction or redirect..." : "Ask JUMARI to browse or search..."}
+                  className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 py-3 pl-4 pr-20 outline-none"
                 />
                 <div className="absolute right-2 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={handleVoiceToggle}
-                    disabled={isAgentWorking}
-                    className={`p-1.5 rounded-md disabled:opacity-50 disabled:hover:bg-transparent transition-colors ${isListening ? 'text-red-400 bg-red-400/10 hover:bg-red-400/20' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                    className={`p-1.5 rounded-md transition-colors ${isListening ? 'text-red-400 bg-red-400/10 hover:bg-red-400/20' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
                   >
                     {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   </button>
                   <button
                     type="submit"
-                    disabled={!browserInput.trim() || isAgentWorking}
+                    disabled={!browserInput.trim()}
                     className="p-1.5 text-slate-400 hover:text-white hover:bg-indigo-600 rounded-md disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
                   >
                     <Send className="w-4 h-4" />
@@ -4691,9 +2765,9 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 bg-[#0a0a0a] relative">
         
         {/* Browser Chrome (Header) */}
-        <div className="flex flex-col border-b border-slate-800/60 bg-[#121212] shrink-0">
-          {/* Tabs Row */}
-          <div className="flex items-end px-2 pt-2 gap-1 overflow-x-auto scrollbar-none">
+        <div className="flex flex-col border-b border-slate-800/60 bg-[#121212] shrink-0" style={{ WebkitAppRegion: 'drag' } as any}>
+          {/* Tabs Row — pl-[80px] clears macOS hiddenInset traffic lights (~68px wide at x:12) */}
+          <div className="flex items-end pl-[80px] pr-2 pt-2 gap-1 overflow-x-auto scrollbar-none" style={{ WebkitAppRegion: 'no-drag' } as any}>
             {tabs.map(tab => {
               const isActive = tab.id === activeTabId;
               return (
@@ -4729,7 +2803,7 @@ export default function App() {
           </div>
 
           {/* Navigation Row */}
-          <div className="h-12 flex items-center px-4 gap-4 bg-[#121212]">
+          <div className="h-12 flex items-center px-4 gap-4 bg-[#121212]" style={{ WebkitAppRegion: 'no-drag' } as any}>
             <div className="flex gap-1.5 shrink-0 items-center">
               <button
                 onClick={() => setAppMode('platform')}
@@ -5403,14 +3477,58 @@ export default function App() {
       )}
     </AnimatePresence>
 
+    {/* Coding Page */}
+    <AnimatePresence>
+      {showCoding && (
+        <motion.div
+          key="coding"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <CodingPage
+            onClose={() => setShowCoding(false)}
+            apiKey={secureApiKey}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Trading Dashboard */}
+    <AnimatePresence>
+      {showTrading && (
+        <motion.div
+          key="trading"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <TradingDashboard onClose={() => setShowTrading(false)} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
     {/* Voice Chat */}
     <AnimatePresence>
       {showVoiceChat && (
-        <VoiceChatModal
-          apiKey={secureApiKey}
-          deepgramKey={deepgramKey}
-          onClose={() => setShowVoiceChat(false)}
-        />
+        <motion.div
+          key="voicechat"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <VoiceChatModal
+            apiKey={secureApiKey}
+            deepgramKey={deepgramKey}
+            onClose={() => setShowVoiceChat(false)}
+          />
+        </motion.div>
       )}
     </AnimatePresence>
 

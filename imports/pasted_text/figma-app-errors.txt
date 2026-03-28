@@ -1,0 +1,850 @@
+(index):1  Failed to load resource: net::ERR_FAILED
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+/files/team/1582910461128543437/recents-and-sharing?fuid=1582910459543656929:1 Specifying 'overflow: visible' on img, video and canvas tags may cause them to produce visual content outside of the element bounds. See https://github.com/WICG/view-transitions/blob/main/debugging_overflow_on_images.md for details.
+ [Violation] Permissions policy violation: unload is not allowed in this document.
+(anonymous) @ vendor-core-ade2edec…4781c7.min.js.br:63
+/api/make/fetch_ds_code_gen_status:1  Failed to load resource: the server responded with a status of 400 ()
+/api/integrations/supabase/gwbKOYQbsxZg5e6bQ8biRz/connection:1  Failed to load resource: the server responded with a status of 403 ()
+ [Violation] Permissions policy violation: unload is not allowed in this document.
+(anonymous) @ vendor-core-ade2edec…4781c7.min.js.br:63
+/api/make/fetch_ds_code_gen_status:1  Failed to load resource: the server responded with a status of 400 ()
+ [esbuild-wasm] Initializing from URL: /webpack-artifacts/assets/2b68f2d3d5e8b3d6.wasm
+ [esbuild-wasm] Initialized
+ [bundleCode] Found 4 CSS files in VFS
+ [bundleCode] Total CSS size to be processed by lightningcss: 0.01MB
+ [lightningcss-wasm] Initialized
+ [lightningCSS] Processing 0.01MB of CSS (environment: browser)
+ [lightningCSS] Encoded size: 0.01MB
+ [lightningCSS] Transform completed successfully
+/api/make/fetch_ds_code_gen_status:1  Failed to load resource: the server responded with a status of 400 ()
+ [bundleCode] Found 4 CSS files in VFS
+ [bundleCode] Total CSS size to be processed by lightningcss: 0.01MB
+ [lightningCSS] Processing 0.01MB of CSS (environment: browser)
+ [lightningCSS] Encoded size: 0.01MB
+ [lightningCSS] Transform completed successfully
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Failed to reload /src/app/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:41:33 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (151:20)
+
+  149 |           id: (Date.now() + 1).toString(),
+  150 |           role: 'system',
+> 151 |           content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+      |                     ^
+  152 |         }
+  153 |       ]);
+  154 |     } finally {
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:126:12)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2312:14)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseExprListItem (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2788:18)
+    at TypeScriptParserMixin.parseExprList (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2732:22)
+    at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2506:26)
+    at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:2686:26)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1166:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2602:14)
+    at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2553:10)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1837:12)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:41:33 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (151:20)
+
+  149 |           id: (Date.now() + 1).toString(),
+  150 |           role: 'system',
+> 151 |           content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+      |                     ^
+  152 |         }
+  153 |       ]);
+  154 |     } finally {
+  Plugin: vite:react-babel
+  File: app/App.tsx:151:20
+  149|            id: (Date.now() + 1).toString(),
+  150|            role: 'system',
+  151|            content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+     |                      ^
+  152|          }
+  153|        ]);
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:126:12)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2312:14)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseExprListItem (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2788:18)
+      at TypeScriptParserMixin.parseExprList (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2732:22)
+      at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2506:26)
+      at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:2686:26)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1166:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2602:14)
+      at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2553:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1837:12)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502893400:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (151:20)
+
+  149 |           id: (Date.now() + 1).toString(),
+  150 |           role: 'system',
+> 151 |           content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+      |                     ^
+  152 |         }
+  153 |       ]);
+  154 |     } finally {
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:126:12)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2312:14)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseExprListItem (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2788:18)
+    at TypeScriptParserMixin.parseExprList (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2732:22)
+    at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2506:26)
+    at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:2686:26)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1166:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2602:14)
+    at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2553:10)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1837:12)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:41:34 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (151:20)
+
+  149 |           id: (Date.now() + 1).toString(),
+  150 |           role: 'system',
+> 151 |           content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+      |                     ^
+  152 |         }
+  153 |       ]);
+  154 |     } finally {
+  Plugin: vite:react-babel
+  File: app/App.tsx:151:20
+  149|            id: (Date.now() + 1).toString(),
+  150|            role: 'system',
+  151|            content: \`Error: \${err.message}. Ensure Ollama is running and CORS is enabled: \n\\\`OLLAMA_ORIGINS="*" ollama run \${config.model}\\\`\`,
+     |                      ^
+  152|          }
+  153|        ]);
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:126:12)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2312:14)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseExprListItem (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2788:18)
+      at TypeScriptParserMixin.parseExprList (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2732:22)
+      at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2506:26)
+      at TypeScriptParserMixin.parseArrayLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:2686:26)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1166:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2602:14)
+      at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2553:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1837:12)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Failed to reload /src/app/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:43:07 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (193:30)
+
+  191 |                 <div
+  192 |                   key={msg.id}
+> 193 |                   className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+      |                               ^
+  194 |                 >
+  195 |                   <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+  196 |                     {msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'Orbit AI'}
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.jsxParseAttributeValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:330:16)
+    at TypeScriptParserMixin.jsxParseAttribute (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:414:43)
+    at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:440:30)
+    at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4171:20)
+    at TypeScriptParserMixin.jsxParseOpeningElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:430:19)
+    at TypeScriptParserMixin.jsxParseElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:470:35)
+    at TypeScriptParserMixin.jsxParseElement (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:559:19)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:573:21)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at fn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3708:23)
+    at TypeScriptParserMixin.tryParse (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/util.ts:174:20)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3707:20)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1813:16)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2602:14)
+    at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2553:10)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1837:12)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:43:07 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (193:30)
+
+  191 |                 <div
+  192 |                   key={msg.id}
+> 193 |                   className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+      |                               ^
+  194 |                 >
+  195 |                   <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+  196 |                     {msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'Orbit AI'}
+  Plugin: vite:react-babel
+  File: app/App.tsx:193:30
+  191|                  <div
+  192|                    key={msg.id}
+  193|                    className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+     |                                ^
+  194|                  >
+  195|                    <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.jsxParseAttributeValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:330:16)
+      at TypeScriptParserMixin.jsxParseAttribute (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:414:43)
+      at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:440:30)
+      at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4171:20)
+      at TypeScriptParserMixin.jsxParseOpeningElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:430:19)
+      at TypeScriptParserMixin.jsxParseElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:470:35)
+      at TypeScriptParserMixin.jsxParseElement (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:559:19)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:573:21)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at fn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3708:23)
+      at TypeScriptParserMixin.tryParse (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/util.ts:174:20)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3707:20)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1813:16)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2602:14)
+      at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2553:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1837:12)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773502987296:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (193:30)
+
+  191 |                 <div
+  192 |                   key={msg.id}
+> 193 |                   className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+      |                               ^
+  194 |                 >
+  195 |                   <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+  196 |                     {msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'Orbit AI'}
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.jsxParseAttributeValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:330:16)
+    at TypeScriptParserMixin.jsxParseAttribute (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:414:43)
+    at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:440:30)
+    at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4171:20)
+    at TypeScriptParserMixin.jsxParseOpeningElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:430:19)
+    at TypeScriptParserMixin.jsxParseElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:470:35)
+    at TypeScriptParserMixin.jsxParseElement (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:559:19)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:573:21)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at fn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3708:23)
+    at TypeScriptParserMixin.tryParse (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/util.ts:174:20)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3707:20)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1813:16)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2602:14)
+    at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2553:10)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1837:12)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:43:08 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (193:30)
+
+  191 |                 <div
+  192 |                   key={msg.id}
+> 193 |                   className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+      |                               ^
+  194 |                 >
+  195 |                   <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+  196 |                     {msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'Orbit AI'}
+  Plugin: vite:react-babel
+  File: app/App.tsx:193:30
+  191|                  <div
+  192|                    key={msg.id}
+  193|                    className={\`flex flex-col gap-1.5 \${msg.role === 'user' ? 'items-end' : 'items-start'}\`}
+     |                                ^
+  194|                  >
+  195|                    <div className="flex items-center gap-2 text-xs font-medium text-slate-500 px-1">
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.jsxParseAttributeValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:330:16)
+      at TypeScriptParserMixin.jsxParseAttribute (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:414:43)
+      at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:440:30)
+      at TypeScriptParserMixin.jsxParseOpeningElementAfterName (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4171:20)
+      at TypeScriptParserMixin.jsxParseOpeningElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:430:19)
+      at TypeScriptParserMixin.jsxParseElementAt (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:470:35)
+      at TypeScriptParserMixin.jsxParseElement (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:559:19)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:573:21)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at fn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3708:23)
+      at TypeScriptParserMixin.tryParse (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/util.ts:174:20)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3707:20)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1813:16)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at TypeScriptParserMixin.parseFunctionBody (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2602:14)
+      at TypeScriptParserMixin.parseArrowExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2553:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1837:12)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1162:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:44:01 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+ 3:44:02 PM [vite] (client) ✨ new dependencies optimized: lucide-react, motion/react
+vendor-191557b646cc979f.min.js.br:3 Datadog Browser SDK: The data provided has been discarded as it is over the limit of 225280 characters: IMG[src="data:image/png;base64,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
+g @ vendor-191557b646cc979f.min.js.br:3
+vendor-191557b646cc979f.min.js.br:3 Datadog Browser SDK: The data provided has been discarded as it is over the limit of 225280 characters: IMG[src="data:image/png;base64,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
+g @ vendor-191557b646cc979f.min.js.br:3
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Failed to reload /src/app/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:55:46 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (130:28)
+
+  128 |         headers: { 
+  129 |           'Content-Type': 'application/json',
+> 130 |           'Authorization': \`Bearer \${config.apiKey}\`
+      |                             ^
+  131 |         },
+  132 |         body: JSON.stringify({
+  133 |           model: config.model,
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:126:12)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2312:14)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2315:16)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:55:46 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (130:28)
+
+  128 |         headers: { 
+  129 |           'Content-Type': 'application/json',
+> 130 |           'Authorization': \`Bearer \${config.apiKey}\`
+      |                             ^
+  131 |         },
+  132 |         body: JSON.stringify({
+  133 |           model: config.model,
+  Plugin: vite:react-babel
+  File: app/App.tsx:130:28
+  128|          headers: { 
+  129|            'Content-Type': 'application/json',
+  130|            'Authorization': \`Bearer \${config.apiKey}\`
+     |                              ^
+  131|          },
+  132|          body: JSON.stringify({
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:126:12)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2312:14)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2315:16)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+app-sicgmnl6cdhdxaa546mklvcot3sasdf26somgkiadclo3vfzqyeq.makeproxy-c.figma.site/src/app/App.tsx?t=1773503746100:1  Failed to load resource: the server responded with a status of 500 ()
+ [vite] Internal Server Error
+app/App.tsx: Expecting Unicode escape sequence \uXXXX. (130:28)
+
+  128 |         headers: { 
+  129 |           'Content-Type': 'application/json',
+> 130 |           'Authorization': \`Bearer \${config.apiKey}\`
+      |                             ^
+  131 |         },
+  132 |         body: JSON.stringify({
+  133 |           model: config.model,
+    at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parse-error.ts:95:45)
+    at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+    at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1439:16)
+    at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1465:23)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:1048:14)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:631:13)
+    at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:4094:13)
+    at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:278:10)
+    at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:121:10)
+    at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/tokenizer/index.ts:126:12)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2312:14)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+    at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2315:16)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2378:12)
+    at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3638:20)
+    at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2218:17)
+    at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:2085:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:1174:21)
+    at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+    at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+    at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+    at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+    at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+    at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+    at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+    at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+    at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:55:46 PM [vite] Internal server error: app/App.tsx: Expecting Unicode escape sequence \uXXXX. (130:28)
+
+  128 |         headers: { 
+  129 |           'Content-Type': 'application/json',
+> 130 |           'Authorization': \`Bearer \${config.apiKey}\`
+      |                             ^
+  131 |         },
+  132 |         body: JSON.stringify({
+  133 |           model: config.model,
+  Plugin: vite:react-babel
+  File: app/App.tsx:130:28
+  128|          headers: { 
+  129|            'Content-Type': 'application/json',
+  130|            'Authorization': \`Bearer \${config.apiKey}\`
+     |                              ^
+  131|          },
+  132|          body: JSON.stringify({
+      at toParseError (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parse-error.ts:95:45)
+      at TypeScriptParserMixin.raise (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1503:19)
+      at TypeScriptParserMixin.readWord1 (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1439:16)
+      at TypeScriptParserMixin.readWord (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1465:23)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:1048:14)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:631:13)
+      at TypeScriptParserMixin.getTokenFromCode (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:4094:13)
+      at TypeScriptParserMixin.nextToken (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:278:10)
+      at TypeScriptParserMixin.next (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:121:10)
+      at TypeScriptParserMixin.eat (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/tokenizer/index.ts:126:12)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2312:14)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+      at TypeScriptParserMixin.parseObjectProperty (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2315:16)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2378:12)
+      at TypeScriptParserMixin.parseObjPropValue (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3638:20)
+      at TypeScriptParserMixin.parsePropertyDefinition (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2218:17)
+      at TypeScriptParserMixin.parseObjectLike (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:2085:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:1174:21)
+      at TypeScriptParserMixin.parseExprAtom (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/jsx/index.ts:583:22)
+      at TypeScriptParserMixin.parseExprSubscripts (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:734:23)
+      at TypeScriptParserMixin.parseUpdate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:713:21)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:675:23)
+      at TypeScriptParserMixin.parseMaybeUnary (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3855:20)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:409:14)
+      at TypeScriptParserMixin.parseExprOps (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:421:23)
+      at TypeScriptParserMixin.parseMaybeConditional (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:376:23)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:301:21)
+      at TypeScriptParserMixin.parseMaybeAssign (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/plugins/typescript/index.ts:3727:22)
+      at callback (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:257:12)
+      at TypeScriptParserMixin.allowInAnd (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3192:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:256:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site/node_modules/.pnpm/@babel+parser@7.28.4/node_modules/@babel/parser/parser/expression.ts:3306:17)
+(anonymous) @ code_components_prev…153e7b.min.js.br:90
+ 3:55:58 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+ 4:03:32 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/index.css
+(index):1 Access to fetch at 'https://api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org' from origin 'https://27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+(index):1 Access to fetch at 'https://api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org' from origin 'https://27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+(index):1 Access to fetch at 'https://api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org' from origin 'https://27b73a1c-f6cf-4073-8292-500475d0ff0b-v2-figmaiframepreview.figma.site' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org:1  Failed to load resource: net::ERR_FAILED
+api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org:1  Failed to load resource: net::ERR_FAILED
+api.allorigins.win/get?url=https%3A%2F%2Fhttpbin.org:1  Failed to load resource: net::ERR_FAILED

@@ -147,7 +147,7 @@ function AstronautCharacter({ agent, status, selected, onClick, streamText, phas
               <div className="flex items-center gap-1.5 mb-1">
                 <motion.div
                   className="h-1.5 w-1.5 rounded-full shrink-0"
-                  style={{ background: agent.accent }}
+                  style={{ background: agent.accent, willChange: 'opacity' }}
                   animate={{ opacity: [1, 0.25, 1] }}
                   transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
                 />
@@ -197,7 +197,7 @@ function AstronautCharacter({ agent, status, selected, onClick, streamText, phas
 
       {/* Glow halo under character */}
       <motion.div className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full blur-2xl"
-        style={{ width: 80, height: 24, background: agent.accent }}
+        style={{ width: 80, height: 24, background: agent.accent, willChange: 'opacity' }}
         animate={{ opacity: thinking ? [0.3, 0.7, 0.3] : done ? 0.5 : selected ? 0.35 : 0.15 }}
         transition={{ duration: 1.4, repeat: Infinity }}
       />
@@ -206,6 +206,7 @@ function AstronautCharacter({ agent, status, selected, onClick, streamText, phas
       <motion.div
         animate={thinking ? { y: [0, -2, 0] } : { y: 0 }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ willChange: 'transform' }}
       >
         <svg width="90" height="100" viewBox="0 0 90 100" fill="none" xmlns="http://www.w3.org/2000/svg" overflow="visible">
           <defs>
@@ -235,7 +236,7 @@ function AstronautCharacter({ agent, status, selected, onClick, streamText, phas
           <motion.g
             animate={thinking ? { rotate: [0, -4, 0], translateY: [0, 1.5, 0] } : { rotate: 0, translateY: 0 }}
             transition={{ duration: 1.9, repeat: Infinity, ease: 'easeInOut' }}
-            style={{ transformOrigin: '15px 68px' }}
+            style={{ transformOrigin: '15px 68px', willChange: 'transform' }}
           >
             <ellipse cx="11" cy="72" rx="7" ry="13" fill={`url(#suit-${agent.id})`} transform="rotate(-8 11 72)" />
             <ellipse cx="10" cy="76" rx="6.5" ry="2.2" fill={agent.accent} opacity="0.45" transform="rotate(-8 10 76)" />
@@ -480,35 +481,443 @@ function Desk({ agent, status }: { agent: typeof AGENTS[number]; status: AgentSt
 
 
 // ─── Smart download helpers ───────────────────────────────────────────────────
-type ExportFormat = 'md' | 'html' | 'csv' | 'json' | 'txt';
+type ExportFormat = 'pdf' | 'md' | 'html' | 'csv' | 'json' | 'txt';
 
 interface FormatMeta { ext: ExportFormat; label: string; mime: string; icon: string }
 const FORMAT_META: FormatMeta[] = [
-  { ext: 'md',   label: '.md',   mime: 'text/markdown',  icon: '📝' },
-  { ext: 'html', label: '.html', mime: 'text/html',       icon: '📊' },
+  { ext: 'pdf',  label: 'PDF',   mime: 'text/html',       icon: '📄' },
+  { ext: 'html', label: 'HTML',  mime: 'text/html',       icon: '📊' },
+  { ext: 'md',   label: '.md',   mime: 'text/markdown',   icon: '📝' },
   { ext: 'csv',  label: '.csv',  mime: 'text/csv',        icon: '📋' },
   { ext: 'json', label: '.json', mime: 'application/json',icon: '🗂' },
   { ext: 'txt',  label: '.txt',  mime: 'text/plain',      icon: '📄' },
 ];
 
+// ─── Document template system ─────────────────────────────────────────────────
+
+type DocType =
+  | 'business_plan'
+  | 'research_report'
+  | 'strategy'
+  | 'competitive_analysis'
+  | 'marketing_plan'
+  | 'investment_memo'
+  | 'technical_doc'
+  | 'project_plan'
+  | 'content_strategy'
+  | 'generic';
+
+function detectDocType(task: string): DocType {
+  const t = task.toLowerCase();
+  if (/business plan|startup plan|company plan|venture plan/.test(t))        return 'business_plan';
+  if (/invest|pitch deck|term sheet|valuation|funding|seed|series [a-c]/.test(t)) return 'investment_memo';
+  if (/competit|market landscape|competitor|benchmark|compare compan/.test(t)) return 'competitive_analysis';
+  if (/market(ing)? plan|go.to.market|gtm|campaign|launch plan|brand strat/.test(t)) return 'marketing_plan';
+  if (/research|analysis|study|findings|survey|data|report/.test(t))         return 'research_report';
+  if (/strategy|strategic|roadmap|vision|long.term|direction/.test(t))       return 'strategy';
+  if (/technical|architecture|system design|infra|stack|engineering|api/.test(t)) return 'technical_doc';
+  if (/project plan|sprint|timeline|milestone|deliverable|scope/.test(t))    return 'project_plan';
+  if (/content|editorial|blog|seo|social media|copy|newsletter/.test(t))     return 'content_strategy';
+  return 'generic';
+}
+
+function getDocTemplate(docType: DocType, task: string): string {
+  const templates: Record<DocType, string> = {
+    business_plan: `
+DOCUMENT TYPE: Business Plan
+REQUIRED STRUCTURE — follow this exactly:
+# [Company / Venture Name]
+## Executive Summary
+One compelling paragraph: what the business is, who it serves, why now, what it needs.
+
+## The Problem
+What pain exists. Who suffers from it. How big the gap is. Real evidence.
+
+## The Solution
+What the product/service does. Key differentiators. Why it's better than status quo.
+
+## Market Opportunity
+TAM / SAM / SOM with real numbers. Market trends supporting timing.
+
+## Business Model
+How it makes money. Pricing structure. Unit economics if calculable.
+
+## Go-To-Market Strategy
+Launch channel, customer acquisition approach, first 90 days, growth levers.
+
+## Competitive Landscape
+| Competitor | Strength | Weakness | Our Edge |
+Fill this table.
+
+## Traction & Milestones
+What exists today. What the next 6–12 months look like. Key metrics to hit.
+
+## Team
+Key roles needed / present. Why this team can execute.
+
+## Financial Projections
+Year 1–3 revenue targets. Key cost assumptions. Path to profitability.
+
+## Next Steps
+3–5 specific, actionable items to move forward this week.`,
+
+    investment_memo: `
+DOCUMENT TYPE: Investment Memo
+REQUIRED STRUCTURE — follow this exactly:
+# Investment Memo: [Company / Opportunity Name]
+## The Opportunity
+One crisp paragraph — why this investment is worth considering now.
+
+## Market Size & Timing
+TAM/SAM/SOM. Why the market is ready. Tailwinds. Data-backed.
+
+## Business Model
+Revenue streams. Unit economics. Scalability. Margins.
+
+## Traction
+Revenue, users, growth rate, retention, key partnerships — whatever exists.
+
+## Competitive Moat
+What makes this defensible. Network effects, IP, switching costs, brand.
+
+## Team
+Founders and key hires. Relevant experience. Why them.
+
+## Deal Terms
+Raise amount, valuation, instrument (SAFE/equity), use of funds breakdown.
+
+## Risks & Mitigations
+| Risk | Likelihood | Mitigation |
+Table format.
+
+## Return Scenario Analysis
+Bear / Base / Bull case outcomes with rationale.
+
+## Recommendation
+Clear verdict: invest / pass / follow-up. With reasoning.
+
+## Next Steps
+What happens next. Due diligence items. Decision timeline.`,
+
+    competitive_analysis: `
+DOCUMENT TYPE: Competitive Analysis
+REQUIRED STRUCTURE — follow this exactly:
+# Competitive Analysis: [Market / Category]
+## Executive Summary
+Market overview in 3 sentences. Who the main players are. Key battleground.
+
+## Market Overview
+Size, growth rate, key trends. Who is winning and why today.
+
+## Competitor Profiles
+For each major competitor (minimum 3):
+### [Competitor Name]
+- **Founded / Size:**
+- **Core Offering:**
+- **Target Customer:**
+- **Pricing Model:**
+- **Key Strengths:**
+- **Known Weaknesses:**
+
+## Head-to-Head Comparison
+| Feature / Dimension | [Us / Target] | Competitor A | Competitor B | Competitor C |
+Fill every cell with specific data.
+
+## Positioning Map
+Describe the X/Y axes (e.g. price vs. quality) and where each player sits.
+
+## Whitespace & Gaps
+Where the market is underserved. What no one is doing well.
+
+## Strategic Recommendations
+What to do based on this analysis. Where to compete, where to avoid.
+
+## Next Steps
+3–5 specific actions to take based on findings.`,
+
+    marketing_plan: `
+DOCUMENT TYPE: Marketing Plan
+REQUIRED STRUCTURE — follow this exactly:
+# Marketing Plan: [Product / Brand]
+## Executive Summary
+Goal, timeframe, top-line strategy, expected outcome.
+
+## Target Audience
+Primary persona (demographics, psychographics, pain points, channels they use).
+Secondary persona if relevant.
+
+## Positioning & Messaging
+Core value proposition. Tagline. Key messages per audience segment.
+
+## Channel Strategy
+For each channel (minimum 4 — pick what's relevant):
+### [Channel Name]
+- **Goal:**
+- **Tactics:**
+- **Content types:**
+- **KPIs:**
+- **Budget allocation:**
+
+## Campaign Calendar
+| Month | Campaign | Channel | Goal | Budget |
+Fill for next 3–6 months.
+
+## Budget Breakdown
+Total budget. Allocation by channel. Expected CAC and ROAS.
+
+## KPIs & Success Metrics
+What we measure. Baseline. Target. How we track.
+
+## Next Steps
+3–5 specific actions to begin immediately.`,
+
+    research_report: `
+DOCUMENT TYPE: Research Report
+REQUIRED STRUCTURE — follow this exactly:
+# Research Report: [Topic]
+## Abstract
+What this report covers, why it matters, and the core conclusion in 2–3 sentences.
+
+## Key Findings
+5–7 bullet points. The most important things someone should take away.
+
+## Background & Context
+Why this topic matters. What's been established. What's still unknown.
+
+## Methodology
+How this analysis was conducted. Sources used. Scope and limitations.
+
+## Detailed Analysis
+Break into thematic sections with subheadings. Use data, examples, and evidence. Include tables where comparisons exist.
+
+## What the Data Shows
+The patterns, trends, or conclusions the analysis surfaces.
+
+## Implications
+What this means for the reader's situation, industry, or decision.
+
+## Recommendations
+Specific, prioritized actions based on findings.
+
+## Appendix / Sources
+List key references, data points, or sources cited.
+
+## Next Steps
+What to do with this information.`,
+
+    strategy: `
+DOCUMENT TYPE: Strategic Plan
+REQUIRED STRUCTURE — follow this exactly:
+# Strategic Plan: [Organization / Initiative]
+## Executive Summary
+Where we are. Where we're going. How we get there. 1 paragraph.
+
+## Situation Analysis
+### Strengths
+### Weaknesses
+### Opportunities
+### Threats
+(Full SWOT — be specific, not generic)
+
+## Strategic Objectives
+3–5 objectives. Each should be specific and measurable.
+
+## Strategic Pillars
+For each pillar:
+### Pillar [N]: [Name]
+- **What it means:**
+- **Why it matters:**
+- **Key initiatives:**
+- **Owner / Accountable:**
+- **Success metric:**
+
+## Execution Roadmap
+| Initiative | Q1 | Q2 | Q3 | Q4 | Owner | KPI |
+Fill the full year.
+
+## Resource Requirements
+People, budget, technology, partnerships needed.
+
+## Risk Register
+| Risk | Impact | Probability | Mitigation |
+Table format.
+
+## KPIs & Measurement Cadence
+What we track. How often. Who reviews.
+
+## Next Steps
+Immediate actions to activate this strategy.`,
+
+    technical_doc: `
+DOCUMENT TYPE: Technical Document
+REQUIRED STRUCTURE — follow this exactly:
+# [System / Architecture / Feature Name]
+## Overview
+What this system does. Who uses it. Why it was built this way.
+
+## Architecture Diagram (Description)
+Describe the components and how they connect. Use ASCII diagram or structured list.
+
+## Core Components
+For each component:
+### [Component Name]
+- **Purpose:**
+- **Technology:**
+- **Interfaces:**
+- **Key decisions / tradeoffs:**
+
+## Data Flow
+Step-by-step: how data moves through the system. Inputs → Processing → Outputs.
+
+## API / Interface Contracts
+Endpoints, schemas, or interfaces. Use code blocks for specifics.
+
+## Infrastructure & Deployment
+Where it runs. How it's deployed. Environment configuration.
+
+## Security Considerations
+Auth, data protection, threat model, known risks.
+
+## Scaling & Performance
+Bottlenecks. Scaling strategy. SLAs or latency targets.
+
+## Known Limitations & Tech Debt
+Be honest about what's imperfect and why.
+
+## Runbook / Operational Notes
+How to deploy, monitor, debug, and roll back.
+
+## Next Steps
+What gets built next. Prioritized.`,
+
+    project_plan: `
+DOCUMENT TYPE: Project Plan
+REQUIRED STRUCTURE — follow this exactly:
+# Project Plan: [Project Name]
+## Project Overview
+Goal, scope, key stakeholders, success definition.
+
+## Objectives & Success Criteria
+| Objective | Success Metric | Target |
+Table format.
+
+## Scope
+### In Scope
+### Out of Scope
+### Assumptions
+
+## Team & Roles
+| Role | Responsibility | Person |
+Table format.
+
+## Milestones & Timeline
+| Milestone | Deliverable | Due Date | Owner | Status |
+Fill for each phase.
+
+## Detailed Task Breakdown
+For each phase:
+### Phase [N]: [Name]
+- [ ] Task 1
+- [ ] Task 2
+(Checkable tasks)
+
+## Budget
+| Category | Estimated Cost | Notes |
+Table format.
+
+## Risk Register
+| Risk | Impact | Probability | Mitigation | Owner |
+
+## Dependencies
+What this project depends on. What depends on this project.
+
+## Communication Plan
+How the team stays aligned. Cadence, tools, escalation path.
+
+## Next Steps
+First 5 things to do to activate this plan.`,
+
+    content_strategy: `
+DOCUMENT TYPE: Content Strategy
+REQUIRED STRUCTURE — follow this exactly:
+# Content Strategy: [Brand / Product]
+## Executive Summary
+Content goal, primary channel, audience, expected outcome.
+
+## Audience & Voice
+### Primary Audience
+Who they are. What they care about. Where they consume content.
+### Brand Voice & Tone
+Adjectives. Examples of on-brand vs. off-brand language.
+
+## Content Pillars
+3–5 themes that anchor all content:
+### Pillar [N]: [Name]
+- **Why it matters to audience:**
+- **Content types:**
+- **Example topics:**
+
+## Channel Strategy
+| Channel | Goal | Format | Frequency | KPI |
+Table format.
+
+## Editorial Calendar
+| Week | Topic | Pillar | Format | Channel | CTA |
+Fill 4–8 weeks.
+
+## SEO / Discovery
+Target keywords. Content gaps. Competitive search landscape.
+
+## Distribution & Promotion
+How each piece gets amplified after publishing.
+
+## Metrics & Measurement
+What success looks like. Monthly / quarterly review cadence.
+
+## Next Steps
+First content pieces to produce. Publication targets.`,
+
+    generic: `
+DOCUMENT TYPE: Strategic Deliverable
+REQUIRED STRUCTURE — follow this exactly:
+# [Title Derived From Task]
+## Executive Summary
+The full answer to the task in 2–3 sentences. What was asked, what was found, what is recommended.
+
+## Key Findings
+5–7 bullet points of the most important takeaways.
+
+## Background
+Context needed to understand this document.
+
+## Analysis
+The core substance. Break into clear sections with ## subheadings. Use tables for comparisons. Use numbered lists for processes. Use bullet lists for options.
+
+## Recommendations
+Specific, prioritized actions. Not vague advice — real steps.
+
+## Implementation Considerations
+What could go wrong. Dependencies. Resources needed.
+
+## Next Steps
+3–5 specific things to do right now, this week.`,
+  };
+
+  return templates[docType];
+}
+
 /** Detect which formats are most relevant given content + original task */
 function detectFormats(text: string, task: string): ExportFormat[] {
   const hasMarkdownTable = /\|.+\|.+\|/.test(text);
-  const hasHeaders       = /^#{1,4}\s/m.test(text);
-  const hasBullets       = /^[-*]\s/m.test(text) || /^\d+\.\s/m.test(text);
-  const hasCodeBlock     = /```/.test(text);
   const taskLc           = task.toLowerCase();
-  const wantsChart       = /graph|chart|visual|dashboard|plot|report|data|analytic/i.test(taskLc);
   const wantsData        = /table|spreadsheet|csv|data|dataset|numbers|metrics|kpi/i.test(taskLc);
   const wantsJson        = /json|api|schema|struct|object/i.test(taskLc);
-  const wantsPlan        = /plan|strategy|roadmap|outline|doc|report|business|proposal/i.test(taskLc);
 
-  const out: ExportFormat[] = [];
-  if (hasHeaders || hasBullets || wantsPlan) out.push('md');
-  if (wantsChart || hasMarkdownTable)        out.push('html');
-  if (hasMarkdownTable || wantsData)         out.push('csv');
-  if (wantsJson)                             out.push('json');
-  out.push('txt'); // always available
+  // PDF is always the primary output — it's the professional deliverable format
+  const out: ExportFormat[] = ['pdf', 'html', 'md'];
+  if (hasMarkdownTable || wantsData) out.push('csv');
+  if (wantsJson)                     out.push('json');
+  out.push('txt');
   return [...new Set(out)] as ExportFormat[];
 }
 
@@ -534,7 +943,6 @@ function buildContent(text: string, format: ExportFormat, task: string): string 
       const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
       return [parsed.headers, ...parsed.rows].map(r => r.map(escape).join(',')).join('\n');
     }
-    // Fallback: convert each line to a single-column CSV
     return text.split('\n').map(l => `"${l.replace(/"/g, '""')}"`).join('\n');
   }
 
@@ -542,88 +950,356 @@ function buildContent(text: string, format: ExportFormat, task: string): string 
     return JSON.stringify({ task, generated: new Date().toISOString(), content: text }, null, 2);
   }
 
-  if (format === 'html') {
-    const parsed = parseMarkdownTable(text);
-    const chartScript = parsed ? (() => {
-      const numeric = parsed.headers.slice(1).filter((_, ci) =>
-        parsed.rows.some(r => !isNaN(parseFloat(r[ci + 1]))));
-      if (numeric.length === 0) return '';
-      const labels = JSON.stringify(parsed.rows.map(r => r[0]));
-      const datasets = JSON.stringify(numeric.map((h, ci) => ({
-        label: h,
-        data: parsed.rows.map(r => parseFloat(r[ci + 1]) || 0),
-        backgroundColor: ['#818cf8','#22d3ee','#34d399','#f59e0b','#f87171'][ci % 5] + 'cc',
-        borderColor:     ['#818cf8','#22d3ee','#34d399','#f59e0b','#f87171'][ci % 5],
-        borderWidth: 2,
-      })));
-      return `
-<div style="max-width:700px;margin:40px auto 0">
-  <canvas id="chart" height="320"></canvas>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-  new Chart(document.getElementById('chart'), {
-    type: 'bar',
-    data: { labels: ${labels}, datasets: ${datasets} },
-    options: { responsive:true, plugins:{ legend:{ labels:{ color:'#e2e8f0' } } }, scales:{ x:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } }, y:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' }, beginAtZero:true } } }
-  });
-</script>`;
-    })() : '';
+  if (format === 'html' || format === 'pdf') {
+    const dateStr  = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+    const colors   = ['#818cf8','#22d3ee','#34d399','#f59e0b','#f87171','#c084fc','#fb7185'];
 
-    // Simple markdown → HTML (headers, bullets, code, bold, paragraphs)
-    const md2html = (md: string) => md
-      .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // ── Collect ALL markdown tables for chart generation ─────────────────
+    const allTables: Array<{ headers: string[]; rows: string[][] }> = [];
+    const tableRegex = /(\|.+\|\n)([\s\S]*?)(?=\n[^|]|\n$|$)/g;
+    let tm: RegExpExecArray | null;
+    const fullText = text;
+    while ((tm = tableRegex.exec(fullText)) !== null) {
+      const block = tm[0];
+      const lines = block.split('\n').filter(l => /\|.+\|/.test(l) && !/^[\s|:-]+$/.test(l));
+      if (lines.length >= 2) {
+        const headers = lines[0].split('|').map(s => s.trim()).filter(Boolean);
+        const rows    = lines.slice(1).map(l => l.split('|').map(s => s.trim()).filter(Boolean));
+        allTables.push({ headers, rows });
+      }
+    }
+
+    // Build chart blocks for tables with numeric columns
+    const chartBlocks: string[] = [];
+    allTables.forEach((tbl, ti) => {
+      const numericCols = tbl.headers.slice(1).map((h, ci) => ({
+        h, ci,
+        vals: tbl.rows.map(r => parseFloat(r[ci + 1])).filter(v => !isNaN(v)),
+      })).filter(c => c.vals.length >= tbl.rows.length * 0.5);
+      if (numericCols.length === 0) return;
+      const labels   = JSON.stringify(tbl.rows.map(r => r[0] || ''));
+      const datasets = JSON.stringify(numericCols.map(({ h, ci, vals: _ }) => ({
+        label: h,
+        data:  tbl.rows.map(r => parseFloat(r[ci + 1]) || 0),
+        backgroundColor: colors[ci % colors.length] + '99',
+        borderColor:     colors[ci % colors.length],
+        borderWidth: 2,
+        borderRadius: 4,
+      })));
+      chartBlocks.push(`<div class="chart-wrap"><canvas id="chart${ti}"></canvas></div>
+<script>
+(function(){
+  var ctx=document.getElementById('chart${ti}');
+  if(!ctx)return;
+  new Chart(ctx,{type:'bar',data:{labels:${labels},datasets:${datasets}},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#94a3b8',font:{size:12}}}},scales:{x:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,0.05)'},beginAtZero:true}}}});
+})();
+</script>`);
+    });
+
+    // ── Markdown → HTML ───────────────────────────────────────────────────
+    const md2html = (md: string): string => {
+      const lines  = md.split('\n');
+      const output: string[] = [];
+      let inList   = false;
+      let listType = 'ul';
+      let inTable  = false;
+      let tableHtml = '';
+
+      const flushList = () => {
+        if (inList) { output.push(`</${listType}>`); inList = false; }
+      };
+      const flushTable = () => {
+        if (inTable) { output.push('</tbody></table></div>'); inTable = false; tableHtml = ''; }
+      };
+
+      lines.forEach((line, i) => {
+        // Table
+        if (/^\|.+\|/.test(line)) {
+          if (/^[\s|:-]+$/.test(line)) return; // separator row
+          flushList();
+          const cells = line.split('|').map(s => s.trim()).filter(Boolean);
+          if (!inTable) {
+            // first row = header
+            inTable = true;
+            output.push('<div class="table-wrap"><table><thead><tr>' +
+              cells.map(c => `<th>${inlineFormat(c)}</th>`).join('') +
+              '</tr></thead><tbody>');
+          } else {
+            output.push('<tr>' + cells.map(c => `<td>${inlineFormat(c)}</td>`).join('') + '</tr>');
+          }
+          return;
+        }
+        if (inTable) flushTable();
+
+        // Headings
+        const h4 = line.match(/^####\s+(.+)/);
+        const h3 = line.match(/^###\s+(.+)/);
+        const h2 = line.match(/^##\s+(.+)/);
+        const h1 = line.match(/^#\s+(.+)/);
+        if (h1) { flushList(); output.push(`<h1>${inlineFormat(h1[1])}</h1>`); return; }
+        if (h2) { flushList(); output.push(`<h2>${inlineFormat(h2[1])}</h2>`); return; }
+        if (h3) { flushList(); output.push(`<h3>${inlineFormat(h3[1])}</h3>`); return; }
+        if (h4) { flushList(); output.push(`<h4>${inlineFormat(h4[1])}</h4>`); return; }
+
+        // Code block
+        if (line.startsWith('```')) {
+          flushList();
+          // just push a marker; handled by later replace
+          output.push(line); return;
+        }
+
+        // Bullets
+        const ul = line.match(/^[-*]\s+(.+)/);
+        const ol = line.match(/^(\d+)\.\s+(.+)/);
+        const cb = line.match(/^- \[([x ])\]\s+(.+)/i);
+        if (cb) {
+          if (!inList || listType !== 'ul') { flushList(); output.push('<ul class="checklist">'); inList = true; listType = 'ul'; }
+          const checked = cb[1].toLowerCase() === 'x';
+          output.push(`<li class="check-item ${checked ? 'checked' : ''}">${inlineFormat(cb[2])}</li>`);
+          return;
+        }
+        if (ul) {
+          if (!inList || listType !== 'ul') { flushList(); output.push('<ul>'); inList = true; listType = 'ul'; }
+          output.push(`<li>${inlineFormat(ul[1])}</li>`); return;
+        }
+        if (ol) {
+          if (!inList || listType !== 'ol') { flushList(); output.push('<ol>'); inList = true; listType = 'ol'; }
+          output.push(`<li>${inlineFormat(ol[2])}</li>`); return;
+        }
+
+        flushList();
+
+        // HR
+        if (/^---+$/.test(line.trim())) { output.push('<hr />'); return; }
+
+        // Blank line
+        if (!line.trim()) { output.push(''); return; }
+
+        // Paragraph
+        output.push(`<p>${inlineFormat(line)}</p>`);
+      });
+
+      flushList();
+      flushTable();
+
+      // Fix code blocks
+      let html = output.join('\n');
+      html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+      return html;
+    };
+
+    const inlineFormat = (s: string) => s
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-      .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
-      .replace(/(<li>[\s\S]+?<\/li>)/g, '<ul>$1</ul>')
-      .replace(/\n{2,}/g, '</p><p>')
-      .replace(/^(?!<[h|u|p|l|c|p])(.+)$/gm, '$1')
-      .replace(/\|(.+)\|/g, (m) => {
-        const cells = m.split('|').map(s => s.trim()).filter(Boolean);
-        return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
-      });
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+    // ── Extract H2 sections for sidebar TOC ──────────────────────────────
+    const h2Matches = [...text.matchAll(/^##\s+(.+)$/gm)].map(m => m[1]);
+    const tocHtml = h2Matches.length > 1
+      ? `<nav class="toc"><div class="toc-title">Contents</div><ul>${
+          h2Matches.map((h, i) => `<li><a href="#sec${i}">${h}</a></li>`).join('')
+        }</ul></nav>`
+      : '';
+
+    // Inject section IDs
+    let bodyHtml = md2html(text);
+    let secIdx   = 0;
+    bodyHtml = bodyHtml.replace(/<h2>/g, () => `<h2 id="sec${secIdx++}">`);
+
+    // Append chart blocks after the first table-wrap each
+    let chartIdx = 0;
+    bodyHtml = bodyHtml.replace(/<\/div>\n(?=<[^t])/g, (m) => {
+      if (chartIdx < chartBlocks.length) return m + chartBlocks[chartIdx++] + '\n';
+      return m;
+    });
+    // Append remaining charts at end
+    while (chartIdx < chartBlocks.length) bodyHtml += chartBlocks[chartIdx++];
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>${task.slice(0, 60)}</title>
+<title>${task.slice(0, 80)}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#04060e;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:48px 32px;max-width:860px;margin:0 auto;line-height:1.7}
-  h1{font-size:2rem;font-weight:800;color:#fff;margin-bottom:8px;background:linear-gradient(135deg,#818cf8,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-  h2{font-size:1.3rem;font-weight:700;color:#c7d2fe;margin:32px 0 12px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:6px}
-  h3{font-size:1.05rem;font-weight:600;color:#a5b4fc;margin:24px 0 8px}
-  h4{font-size:.95rem;font-weight:600;color:#94a3b8;margin:16px 0 6px}
-  p{margin:12px 0;color:#cbd5e1}
-  ul,ol{margin:10px 0 10px 24px;color:#cbd5e1}
-  li{margin:4px 0}
-  strong{color:#e2e8f0}
-  code{background:rgba(99,102,241,0.15);color:#a5b4fc;padding:2px 6px;border-radius:4px;font-size:.88em}
-  pre{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;overflow-x:auto;margin:16px 0}
-  pre code{background:none;color:#e2e8f0;padding:0}
-  table{width:100%;border-collapse:collapse;margin:20px 0;font-size:.9rem}
-  th,td{padding:10px 14px;border:1px solid rgba(255,255,255,0.08);text-align:left}
-  th{background:rgba(99,102,241,0.18);color:#c7d2fe;font-weight:600}
-  tr:nth-child(even){background:rgba(255,255,255,0.025)}
-  .meta{font-size:.75rem;color:rgba(255,255,255,0.25);margin-bottom:40px}
-  .badge{display:inline-block;background:rgba(99,102,241,0.2);color:#818cf8;border:1px solid rgba(99,102,241,0.3);border-radius:6px;padding:2px 10px;font-size:.72rem;font-weight:700;letter-spacing:.06em;margin-bottom:16px}
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --ink: #1e293b; --ink2: #334155; --ink3: #475569;
+  --accent: #4f46e5; --accent2: #0ea5e9; --accent3: #10b981;
+  --bg: #ffffff; --bg2: #f8fafc; --bg3: #f1f5f9;
+  --border: #e2e8f0; --border2: #cbd5e1;
+  --radius: 10px;
+}
+html { font-size: 15px; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  line-height: 1.75;
+}
+
+/* ── Cover ── */
+.cover {
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0c1a3a 100%);
+  color: #fff; padding: 72px 64px 60px; position: relative; overflow: hidden;
+  page-break-after: always;
+}
+.cover::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 70% 40%, rgba(99,102,241,0.25) 0%, transparent 70%);
+  pointer-events: none;
+}
+.cover-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(99,102,241,0.25); border: 1px solid rgba(99,102,241,0.5);
+  color: #a5b4fc; border-radius: 20px; padding: 4px 14px; font-size: .7rem;
+  font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 28px;
+}
+.cover h1 {
+  font-size: 2.6rem; font-weight: 800; line-height: 1.2; color: #fff;
+  max-width: 720px; margin-bottom: 20px;
+}
+.cover-sub {
+  font-size: 1rem; color: rgba(255,255,255,0.55); max-width: 600px; margin-bottom: 48px;
+}
+.cover-meta {
+  display: flex; gap: 32px; flex-wrap: wrap;
+  border-top: 1px solid rgba(255,255,255,0.12); padding-top: 24px;
+}
+.cover-meta-item { display: flex; flex-direction: column; gap: 2px; }
+.cover-meta-label { font-size: .65rem; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: .08em; }
+.cover-meta-value { font-size: .85rem; color: rgba(255,255,255,0.8); font-weight: 500; }
+
+/* ── Layout ── */
+.layout { display: flex; align-items: flex-start; max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+.toc {
+  width: 220px; flex-shrink: 0; position: sticky; top: 32px;
+  padding: 24px 0 24px 0; margin-right: 40px; align-self: flex-start;
+}
+.toc-title {
+  font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink3); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid var(--accent);
+  display: inline-block;
+}
+.toc ul { list-style: none; }
+.toc li { margin: 0; }
+.toc a {
+  display: block; padding: 5px 0; font-size: .78rem; color: var(--ink3);
+  text-decoration: none; border-left: 2px solid transparent;
+  padding-left: 10px; transition: all .15s;
+}
+.toc a:hover { color: var(--accent); border-color: var(--accent); }
+
+.main { flex: 1; min-width: 0; padding: 40px 0 80px; }
+
+/* ── Headings ── */
+h1 { font-size: 1.9rem; font-weight: 800; color: var(--ink); margin: 0 0 8px; line-height: 1.25; }
+h2 {
+  font-size: 1.2rem; font-weight: 700; color: var(--ink);
+  margin: 44px 0 14px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+h2::before {
+  content: ''; display: inline-block; width: 4px; height: 18px;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+  border-radius: 2px; flex-shrink: 0;
+}
+h3 { font-size: 1rem; font-weight: 700; color: var(--ink2); margin: 28px 0 10px; }
+h4 { font-size: .9rem; font-weight: 600; color: var(--ink3); margin: 20px 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* ── Body copy ── */
+p { margin: 10px 0; color: var(--ink2); }
+ul, ol { margin: 10px 0 10px 22px; color: var(--ink2); }
+li { margin: 5px 0; }
+strong { color: var(--ink); font-weight: 600; }
+em { font-style: italic; color: var(--ink2); }
+a { color: var(--accent); text-decoration: underline; }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+/* ── Checklist ── */
+.checklist { list-style: none; margin-left: 0; }
+.check-item { padding: 4px 0 4px 26px; position: relative; }
+.check-item::before {
+  content: '☐'; position: absolute; left: 0; color: var(--ink3); font-size: 1rem;
+}
+.check-item.checked::before { content: '☑'; color: var(--accent3); }
+
+/* ── Tables ── */
+.table-wrap { overflow-x: auto; margin: 20px 0; border-radius: var(--radius); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+thead { background: linear-gradient(135deg, #4f46e5, #0ea5e9); }
+thead th { color: #fff; font-weight: 600; padding: 11px 16px; text-align: left; white-space: nowrap; }
+tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:nth-child(even) { background: var(--bg3); }
+tbody tr:hover { background: #eff6ff; }
+td { padding: 10px 16px; color: var(--ink2); vertical-align: top; }
+
+/* ── Code ── */
+code { background: #f1f5f9; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-size: .85em; font-family: 'SF Mono', 'Fira Code', monospace; }
+pre { background: #0f172a; border-radius: var(--radius); padding: 20px; overflow-x: auto; margin: 16px 0; }
+pre code { background: none; color: #e2e8f0; padding: 0; font-size: .85rem; }
+
+/* ── Charts ── */
+.chart-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin: 24px 0; max-width: 680px; }
+
+/* ── Print / PDF ── */
+@media print {
+  @page { size: A4; margin: 20mm 18mm; }
+  body { font-size: 13px; }
+  .cover { page-break-after: always; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .toc { display: none; }
+  .layout { display: block; padding: 0; }
+  .main { padding: 0; }
+  h2 { page-break-after: avoid; margin-top: 28px; }
+  h3 { page-break-after: avoid; }
+  .table-wrap, .chart-wrap { page-break-inside: avoid; }
+  thead { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cover-badge, h2::before { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 </style>
 </head>
 <body>
-<span class="badge">BLEUMR RESEARCH CENTER</span>
-<h1>${task}</h1>
-<p class="meta">Generated ${new Date().toLocaleString()} · Bleumr Mission Team · 3-agent synthesis</p>
-<div>${md2html(text)}</div>
-${chartScript}
+
+<!-- Cover Page -->
+<div class="cover">
+  <div class="cover-badge">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="#a5b4fc" stroke-width="1.5"/><path d="M6 3v3l2 1" stroke="#a5b4fc" stroke-width="1.2" stroke-linecap="round"/></svg>
+    Bleumr Mission Team · 3-Agent Synthesis
+  </div>
+  <h1>${task}</h1>
+  <p class="cover-sub">A professional deliverable produced by Planner, Researcher, and Synth — the Bleumr Mission Team intelligence system.</p>
+  <div class="cover-meta">
+    <div class="cover-meta-item">
+      <span class="cover-meta-label">Generated</span>
+      <span class="cover-meta-value">${dateStr}</span>
+    </div>
+    <div class="cover-meta-item">
+      <span class="cover-meta-label">System</span>
+      <span class="cover-meta-value">JUMARI 1.0 · Bleumr</span>
+    </div>
+    <div class="cover-meta-item">
+      <span class="cover-meta-label">Rounds</span>
+      <span class="cover-meta-value">5 Agent Dialogue Rounds</span>
+    </div>
+    <div class="cover-meta-item">
+      <span class="cover-meta-label">Classification</span>
+      <span class="cover-meta-value">Confidential</span>
+    </div>
+  </div>
+</div>
+
+<!-- Body -->
+<div class="layout">
+  ${tocHtml}
+  <div class="main">
+    ${bodyHtml}
+  </div>
+</div>
+
 </body>
 </html>`;
   }
@@ -631,7 +1307,17 @@ ${chartScript}
   return text;
 }
 
-function triggerDownload(content: string, filename: string, mime: string) {
+function triggerDownload(content: string, filename: string, mime: string, isPdf = false) {
+  if (isPdf) {
+    // Open HTML in a new window and trigger the browser's Save as PDF dialog
+    const pw = window.open('', '_blank', 'width=900,height=700');
+    if (pw) {
+      pw.document.write(content);
+      pw.document.close();
+      pw.onload = () => { pw.focus(); pw.print(); };
+    }
+    return;
+  }
   const blob = new Blob([content], { type: mime });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -999,7 +1685,7 @@ function FileCabinetPanel({
                     {/* Download again */}
                     <button onClick={() => {
                       const meta = FORMAT_META.find(m => m.ext === file.format)!;
-                      if (meta) triggerDownload(file.content, `${file.name}.${file.format}`, meta.mime);
+                      if (meta) triggerDownload(file.content, `${file.name}.${file.format}`, meta.mime, file.format === 'pdf');
                     }}
                       className="p-1.5 rounded-lg transition-all hover:scale-105 ml-auto"
                       style={{ background: 'rgba(255,255,255,0.04)', color: '#475569', border: '1px solid rgba(255,255,255,0.07)' }}>
@@ -1122,7 +1808,7 @@ function TopViewOffice({
         )}
         {/* Center glow beneath emblem */}
         <div className="absolute left-1/2 -translate-x-1/2 top-1/3 -translate-y-1/2 rounded-full pointer-events-none"
-          style={{ width: 200, height: 200, background: 'radial-gradient(circle,rgba(99,102,241,0.07) 0%,transparent 70%)', filter: 'blur(8px)' }} />
+          style={{ width: 200, height: 200, background: 'radial-gradient(circle,rgba(99,102,241,0.07) 0%,transparent 70%)', filter: 'blur(8px)', willChange: 'transform', transform: 'translateZ(0)' }} />
         {/* Edge fade vignette */}
         <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 80% 80% at 50% 50%,transparent 40%,rgba(3,4,10,0.7) 100%)' }} />
       </div>
@@ -1766,22 +2452,28 @@ Keep it direct, human. Synth is reading this whole conversation to write the fin
       let full = '';
       setStreaming('');
 
+      const docType = detectDocType(task);
+      const docTemplate = getDocTemplate(docType, task);
+
       await groq(
         AGENTS[2].model,
         [
           {
             role: 'system',
             content: `${BLEUMR_AGENT_PREFIX}
-You're Synth — you just watched Planner and Researcher go back and forth for four rounds: a plan, a pushback, a revision, a final check. Now you write the actual deliverable for the user. Not a recap of the conversation — the finished product.
+You're Synth — the final writer on the Bleumr Mission Team. You just watched Planner and Researcher debate for four rounds. Now you write the finished deliverable. Not a recap — the actual document someone would pay a consultant $5,000 to produce.
 
-- Pull the best of everything from both of them
-- Write at professional consultant level: structured, specific, actionable
-- Rich markdown: ## headers, numbered steps, bullets, tables where useful
-- Real numbers, real examples, real timelines where available
-- Thorough — this is a deep-work document, not a quick summary
-- Close with "Next Steps": 3–5 things the user can act on today
+STRICT RULES:
+- Follow the document template structure below EXACTLY — every section, in order
+- Fill every section with real, specific content from the agent conversation — no placeholders, no "TBD"
+- Every table must be fully populated with real data
+- Use real numbers, real timelines, real examples wherever possible
+- If a section has no data from the conversation, use your knowledge to fill it intelligently
+- Write at McKinsey / Tier-1 consultant level — precise, structured, actionable
+- THOROUGH: this is a deep-work document saved to File Cabinet — make every section worth reading
+- Produce markdown output only — no preamble, no "here is your document", just the document itself
 
-This gets saved to the File Cabinet. Make it worth keeping.`,
+${docTemplate}`,
           },
           {
             role: 'user',
@@ -1799,7 +2491,7 @@ ${refinedPlan}
 === RESEARCHER FINAL (Round 4) ===
 ${finalResearch}
 
-Write the complete final deliverable:`,
+Write the complete final deliverable following the template structure exactly:`,
           },
         ],
         signal,
@@ -1887,9 +2579,9 @@ Write the complete final deliverable:`,
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(135deg,#04060e 0%,#060a18 60%,#040810 100%)', fontFamily: 'inherit' }}>
 
-      {/* Minimal top bar — close + phase rail + view toggle */}
-      <div className="flex items-center justify-between px-4 py-2 shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+      {/* Minimal top bar — pl-[90px] clears macOS hiddenInset traffic lights */}
+      <div className="flex items-center justify-between pl-[90px] pr-4 py-2 shrink-0"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <div className="flex items-center gap-2">
           {phase !== 'idle' && <PhaseRail phase={phase} />}
         </div>
@@ -2327,7 +3019,8 @@ Write the complete final deliverable:`,
               const formats = detectFormats(o.text, lastTask);
               const doDownload = (fmt: ExportFormat) => {
                 const meta = FORMAT_META.find(m => m.ext === fmt)!;
-                triggerDownload(buildContent(o.text, fmt, lastTask), `${slug}.${fmt}`, meta.mime);
+                const ext  = fmt === 'pdf' ? 'pdf' : fmt;
+                triggerDownload(buildContent(o.text, fmt, lastTask), `${slug}.${ext}`, meta.mime, fmt === 'pdf');
               };
 
               return (

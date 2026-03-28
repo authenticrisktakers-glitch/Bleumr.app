@@ -727,9 +727,9 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
     >
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-30" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)', filter: 'blur(60px)' }} />
-        <div className="absolute -bottom-24 right-16 w-80 h-80 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 70%)', filter: 'blur(60px)' }} />
-        <div className="absolute top-1/2 left-1/3 w-64 h-64 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, rgba(14,165,233,0.2) 0%, transparent 70%)', filter: 'blur(80px)' }} />
+        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-30" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)', filter: 'blur(60px)', willChange: 'transform', transform: 'translateZ(0)' }} />
+        <div className="absolute -bottom-24 right-16 w-80 h-80 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 70%)', filter: 'blur(60px)', willChange: 'transform', transform: 'translateZ(0)' }} />
+        <div className="absolute top-1/2 left-1/3 w-64 h-64 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, rgba(14,165,233,0.2) 0%, transparent 70%)', filter: 'blur(60px)', willChange: 'transform', transform: 'translateZ(0)' }} />
       </div>
 
       {/* ── Top header ── */}

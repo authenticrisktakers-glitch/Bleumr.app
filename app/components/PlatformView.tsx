@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { shimmerDuration } from '../services/CPUAccelerator';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X } from 'lucide-react';
@@ -43,6 +43,8 @@ interface PlatformViewProps {
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
+  onOpenCoding?: () => void;
+  onOpenTrading?: () => void;
   onSchedule?: (text: string) => void;
   agentStep?: number;
   agentTotalSteps?: number;
@@ -237,6 +239,8 @@ export const PlatformView = memo(function PlatformView({
   onOpenScheduler,
   onOpenWorkspace,
   onOpenVoiceChat,
+  onOpenCoding,
+  onOpenTrading,
   onSchedule,
   agentStep = 0,
   agentTotalSteps = 50,
@@ -303,6 +307,52 @@ export const PlatformView = memo(function PlatformView({
     e.target.value = '';
   }, []);
 
+  // ── Memoised heavy computations ──────────────────────────────────────────
+  // Avoid recreating on every keystroke / state change
+  const lastAssistantId = useMemo(
+    () => [...messages].reverse().find(m => m.role === 'assistant')?.id,
+    [messages]
+  );
+
+  // ── Memoised style objects (no GC churn on every render) ─────────────────
+  const glowHaloStyle = useMemo<React.CSSProperties>(() => ({
+    filter: isFocused
+      ? 'drop-shadow(0 0 18px rgba(56,189,248,0.45)) drop-shadow(0 0 40px rgba(56,189,248,0.15))'
+      : 'drop-shadow(0 0 4px rgba(56,189,248,0.08))',
+    transition: 'filter 0.55s cubic-bezier(0.4,0,0.2,1)',
+  }), [isFocused]);
+
+  const borderRingStyle = useMemo<React.CSSProperties>(() => ({
+    padding: '1px',
+    '--shimmer-duration': shimmerDuration,
+    ...(isFocused ? {} : {
+      background: 'linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(56,189,248,0.05) 50%, rgba(255,255,255,0.02) 100%)',
+    }),
+    transition: 'background 0.55s cubic-bezier(0.4,0,0.2,1)',
+  } as React.CSSProperties), [isFocused, shimmerDuration]);
+
+  const glassFormStyle = useMemo<React.CSSProperties>(() => ({
+    background: isFocused ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.02)',
+    backdropFilter: 'blur(40px) saturate(180%) brightness(1.1)',
+    WebkitBackdropFilter: 'blur(40px) saturate(180%) brightness(1.1)',
+    boxShadow: isFocused
+      ? 'inset 0 1.5px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(255,255,255,0.04)'
+      : 'inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(255,255,255,0.03)',
+    transition: 'background 0.55s cubic-bezier(0.4,0,0.2,1), box-shadow 0.55s cubic-bezier(0.4,0,0.2,1)',
+  }), [isFocused]);
+
+  const causticRimStyle = useMemo<React.CSSProperties>(() => ({
+    background: isFocused
+      ? 'linear-gradient(90deg, transparent, rgba(255,255,255,0.55) 30%, rgba(255,255,255,0.55) 70%, transparent)'
+      : 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2) 35%, rgba(255,255,255,0.2) 65%, transparent)',
+    filter: 'blur(0.4px)',
+    transition: 'background 0.55s',
+  }), [isFocused]);
+
+  const inputTextStyle = useMemo<React.CSSProperties>(() => ({
+    color: isFocused ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.75)',
+  }), [isFocused]);
+
   return (
     <div className="fixed inset-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]">
 
@@ -327,6 +377,8 @@ export const PlatformView = memo(function PlatformView({
         onOpenScheduler={onOpenScheduler}
         onOpenWorkspace={onOpenWorkspace}
         onOpenVoiceChat={onOpenVoiceChat}
+        onOpenCoding={onOpenCoding}
+        onOpenTrading={onOpenTrading}
         onSchedule={(text) => { onSchedule?.(text); }}
       />
 
@@ -368,6 +420,7 @@ export const PlatformView = memo(function PlatformView({
                       WebkitBackdropFilter: 'blur(32px) saturate(180%)',
                       border: '1px solid rgba(255,255,255,0.12)',
                       boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.2)',
+                      willChange: 'transform, opacity',
                     }}
                   >
                     {/* Active agent */}
@@ -443,9 +496,8 @@ export const PlatformView = memo(function PlatformView({
             }}
           >
             <div className="max-w-3xl mx-auto w-full pt-8 flex flex-col gap-6">
+              {/* lastAssistantId is memoised above — not recomputed on every render */}
               {(() => {
-                // Find the last assistant message id — only that one gets an active sphere
-                const lastAssistantId = [...messages].reverse().find(m => m.role === 'assistant')?.id;
                 return messages.map((msg, idx) => {
                   // Find the user message that triggered this assistant response
                   const prevUserMsg = msg.role === 'assistant'
@@ -500,6 +552,7 @@ export const PlatformView = memo(function PlatformView({
                 border: '1px solid rgba(99,102,241,0.25)',
                 backdropFilter: 'blur(20px)',
                 boxShadow: '0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(99,102,241,0.08)',
+                willChange: 'transform, opacity',
               }}
             >
               {/* Pulse dot */}
@@ -545,53 +598,23 @@ export const PlatformView = memo(function PlatformView({
             {/* Outer ambient glow halo */}
             <div
               className="relative rounded-full"
-              style={{
-                filter: isFocused
-                  ? 'drop-shadow(0 0 18px rgba(56,189,248,0.45)) drop-shadow(0 0 40px rgba(56,189,248,0.15))'
-                  : 'drop-shadow(0 0 4px rgba(56,189,248,0.08))',
-                transition: 'filter 0.55s cubic-bezier(0.4,0,0.2,1)',
-              }}
+              style={glowHaloStyle}
             >
               {/* Gradient border ring — panning shimmer when focused */}
               <div
                 className={`rounded-full ${isFocused ? 'orbit-shimmer-border' : ''}`}
-                style={{
-                  padding: '1px',
-                  '--shimmer-duration': shimmerDuration,
-                  ...(isFocused ? {} : {
-                    background: 'linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(56,189,248,0.05) 50%, rgba(255,255,255,0.02) 100%)',
-                  }),
-                  transition: 'background 0.55s cubic-bezier(0.4,0,0.2,1)',
-                } as React.CSSProperties}
+                style={borderRingStyle}
               >
                 {/* Glass pill body */}
                 <form
                   onSubmit={handleSubmit}
                   className="relative flex items-center rounded-full overflow-hidden"
-                  style={{
-                    // Transparent glass pill — more see-through, less void
-                    background: isFocused
-                      ? 'rgba(0,0,0,0.10)'            // very light tint when typing
-                      : 'rgba(255,255,255,0.02)',      // nearly invisible at rest
-                    backdropFilter: 'blur(40px) saturate(180%) brightness(1.1)',
-                    WebkitBackdropFilter: 'blur(40px) saturate(180%) brightness(1.1)',
-                    // Inner specular: bright 1px top rim, faint bottom
-                    boxShadow: isFocused
-                      ? 'inset 0 1.5px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(255,255,255,0.04)'
-                      : 'inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(255,255,255,0.03)',
-                    transition: 'all 0.55s cubic-bezier(0.4,0,0.2,1)',
-                  }}
+                  style={glassFormStyle}
                 >
                   {/* Top caustic rim line */}
                   <div
                     className="absolute top-0 left-[10%] right-[10%] h-px pointer-events-none z-0"
-                    style={{
-                      background: isFocused
-                        ? 'linear-gradient(90deg, transparent, rgba(255,255,255,0.55) 30%, rgba(255,255,255,0.55) 70%, transparent)'
-                        : 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2) 35%, rgba(255,255,255,0.2) 65%, transparent)',
-                      filter: 'blur(0.4px)',
-                      transition: 'all 0.55s',
-                    }}
+                    style={causticRimStyle}
                   />
 
                   {/* Diagonal glass refraction shimmer */}
@@ -626,10 +649,7 @@ export const PlatformView = memo(function PlatformView({
                     onBlur={() => setIsFocused(false)}
                     placeholder={isListening ? 'Listening...' : attachedImage ? 'Ask about this image...' : 'Ask Anything'}
                     className="relative z-10 w-full bg-transparent text-sm placeholder-white/20 py-2.5 pl-4 pr-28 outline-none disabled:opacity-50 transition-all duration-300"
-                    style={{
-                      color: isFocused ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.75)',
-                      textShadow: isFocused ? '0 0 20px rgba(255,255,255,0.25)' : 'none',
-                    }}
+                    style={inputTextStyle}
                     disabled={isAgentWorking}
                     autoFocus
                   />

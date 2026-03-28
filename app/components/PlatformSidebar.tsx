@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3 } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Code2, BarChart3 } from 'lucide-react';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
 
@@ -19,6 +19,8 @@ interface PlatformSidebarProps {
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
+  onOpenCoding?: () => void;
+  onOpenTrading?: () => void;
   onSchedule?: (dateStr: string) => void;
 }
 
@@ -58,11 +60,27 @@ export function PlatformSidebar({
   onOpenScheduler,
   onOpenWorkspace,
   onOpenVoiceChat,
+  onOpenCoding,
+  onOpenTrading,
   onSchedule,
 }: PlatformSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredThread, setHoveredThread] = useState<string | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  }, []);
+
+  const sidebarStyle = useMemo<React.CSSProperties>(() => ({
+    background: 'linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.05) 100%)',
+    backdropFilter: 'blur(48px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(48px) saturate(180%)',
+    borderRight: '1px solid rgba(255,255,255,0.08)',
+    boxShadow: '4px 0 40px rgba(0,0,0,0.5), inset -1px 0 0 rgba(255,255,255,0.04)',
+    borderRadius: '0 4px 4px 0',
+    willChange: 'transform',
+  }), []);
 
   const filteredThreads = useMemo(() => {
     const threads = chatThreads ?? [];
@@ -146,14 +164,7 @@ export function PlatformSidebar({
 
       <div
         className="fixed top-0 left-0 h-full w-[260px] z-40 flex flex-col text-slate-300 font-sans animate-in slide-in-from-left-8 duration-300 ease-out"
-        style={{
-          background: 'linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.05) 100%)',
-          backdropFilter: 'blur(48px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(48px) saturate(180%)',
-          borderRight: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '4px 0 40px rgba(0,0,0,0.5), inset -1px 0 0 rgba(255,255,255,0.04)',
-          borderRadius: '0 4px 4px 0',
-        }}
+        style={sidebarStyle}
       >
 
       {/* Header: Search + New Chat + Close */}
@@ -163,7 +174,7 @@ export function PlatformSidebar({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={handleSearchChange}
             placeholder="Search chats"
             className="w-full text-[13px] text-white placeholder-slate-600 py-2 pl-6 pr-2 outline-none bg-transparent border-none"
           />
@@ -238,6 +249,38 @@ export function PlatformSidebar({
           >
             <Layers3 className="w-4 h-4 shrink-0 text-violet-500" />
             Mission Team
+          </button>
+
+          {/* Coding */}
+          <button
+            onClick={() => { onOpenCoding?.(); onClose(); }}
+            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-emerald-400 hover:text-emerald-300 transition-colors text-left w-full"
+            style={{
+              position: 'relative',
+              zIndex: 0,
+              marginTop: -4,
+              background: 'rgba(16,185,129,0.04)',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <Code2 className="w-4 h-4 shrink-0 text-emerald-500" />
+            Code
+          </button>
+
+          {/* Trading */}
+          <button
+            onClick={() => { onOpenTrading?.(); onClose(); }}
+            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-amber-400 hover:text-amber-300 transition-colors text-left w-full"
+            style={{
+              position: 'relative',
+              zIndex: 0,
+              marginTop: -4,
+              background: 'rgba(245,158,11,0.04)',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <BarChart3 className="w-4 h-4 shrink-0 text-amber-500" />
+            Trading
           </button>
 
         </div>

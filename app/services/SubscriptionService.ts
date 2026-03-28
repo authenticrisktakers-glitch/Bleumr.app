@@ -84,8 +84,16 @@ class SubscriptionService {
   // ── License key validation ──────────────────────────────────────────────────
 
   async validateLicenseKey(key: string): Promise<SubscriptionTier | null> {
+    const trimmed = key.trim().toUpperCase();
+
+    // Admin override keys — bypass Supabase, grant stellur locally
+    const ADMIN_STELLUR_KEYS = new Set([
+      'BLM-WFA4-S5KL-N957', // founder admin key
+    ]);
+    if (ADMIN_STELLUR_KEYS.has(trimmed)) return 'stellur';
+
     if (SUPABASE_VALIDATE_URL.includes('REPLACE_WITH_YOUR_PROJECT')) {
-      // License server not configured — all keys rejected until Supabase is live
+      // License server not configured — all other keys rejected until Supabase is live
       return null;
     }
 
