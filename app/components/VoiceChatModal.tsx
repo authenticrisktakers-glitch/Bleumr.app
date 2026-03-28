@@ -372,7 +372,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
   const voiceStateRef = useRef<VoiceState>('idle');
   const mutedRef      = useRef(false);
-  const closedRef     = useRef(false); // true after modal is closed — blocks all callbacks
+  const closedRef     = useRef(false);
   const streamRef     = useRef<MediaStream | null>(null);
   const audioCtxRef   = useRef<AudioContext | null>(null);
   const analyserRef   = useRef<AnalyserNode | null>(null);
@@ -382,16 +382,21 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const silentRef     = useRef(0);
   const scrollRef     = useRef<HTMLDivElement>(null);
   const historyRef    = useRef<{ role: string; content: string }[]>([]);
-  const volAnimRef       = useRef<number>(0); // for speaking fake volume / deepgram analyser
-  const audioElemRef     = useRef<HTMLAudioElement | null>(null);
+  const volAnimRef    = useRef<number>(0);
+  const audioElemRef  = useRef<HTMLAudioElement | null>(null);
   const audioBlobUrlRef  = useRef<string | null>(null);
   const audioCtxSpkRef   = useRef<AudioContext | null>(null);
+  const apiKeyRef     = useRef(apiKey);
+  const deepgramKeyRef = useRef(deepgramKey);
+  const systemPromptRef = useRef(systemPrompt);
+  apiKeyRef.current = apiKey;
+  deepgramKeyRef.current = deepgramKey;
+  systemPromptRef.current = systemPrompt;
 
   const setVS = (s: VoiceState) => { voiceStateRef.current = s; setVoiceState(s); };
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
   const stopSpeaking = useCallback(() => {
-    // Stop Deepgram audio element
     if (audioElemRef.current) {
       audioElemRef.current.pause();
       audioElemRef.current.src = '';
@@ -403,13 +408,12 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     }
     audioCtxSpkRef.current?.close().catch(() => {});
     audioCtxSpkRef.current = null;
-    // Stop Web Speech fallback
     window.speechSynthesis?.cancel();
     cancelAnimationFrame(volAnimRef.current);
   }, []);
 
   const cleanup = useCallback(() => {
-    closedRef.current = true;          // block all async callbacks immediately
+    closedRef.current = true;
     cancelAnimationFrame(animRef.current);
     stopSpeaking();
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -421,18 +425,12 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  // ── Close with full cleanup ────────────────────────────────────────────────
-  const handleClose = useCallback(() => {
-    cleanup();
-    onClose();
-  }, [cleanup, onClose]);
+  const handleClose = useCallback(() => { cleanup(); onClose(); }, [cleanup, onClose]);
 
-  // ── Scroll transcript to bottom ────────────────────────────────────────────
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns, liveText]);
 
-  // ── Preload voices (Chrome needs this call early) ─────────────────────────
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.speechSynthesis?.getVoices();
@@ -441,16 +439,234 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', handler);
   }, []);
 
+  // ── Timed fetch helper — every fetch gets an AbortController + timeout ────
+  const timedFetch = async (url: string, opts: RequestInit, timeoutMs: number): Promise<Response> => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...opts, signal: ac.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  };
+
+  // ── TTS — Deepgram Aura (primary) / Web Speech (fallback) ─────────────────
+  const speakText = useCallback(async (text: string) => {
+    setVS('speaking');
+    stopSpeaking();
+
+    const dgKey = deepgramKeyRef.current;
+    if (dgKey) {
+      try {
+        const res = await timedFetch('https://api.deepgram.com/v1/speak?model=aura-asteria-en', {
+          method: 'POST',
+          headers: { 'Authorization': `Token ${dgKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        }, 8000);
+        if (!res.ok) throw new Error(`Deepgram ${res.status}`);
+
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        audioBlobUrlRef.current = url;
+
+        const ctx = new AudioContext();
+        audioCtxSpkRef.current = ctx;
+        if (ctx.state === 'suspended') await ctx.resume();
+        const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+        const source  = ctx.createBufferSource();
+        source.buffer = decoded;
+
+        // Analyser for sphere visuals
+        const spkAnalyser = ctx.createAnalyser();
+        spkAnalyser.fftSize = 256;
+        spkAnalyser.smoothingTimeConstant = 0.75;
+        source.connect(spkAnalyser);
+        spkAnalyser.connect(ctx.destination);
+        const spkData = new Uint8Array(spkAnalyser.frequencyBinCount);
+        const spkTick = () => {
+          if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
+          spkAnalyser.getByteFrequencyData(spkData);
+          setVolume(spkData.reduce((s, v) => s + v, 0) / spkData.length / 255);
+          volAnimRef.current = requestAnimationFrame(spkTick);
+        };
+        spkTick();
+        source.start(0);
+
+        source.onended = () => {
+          cancelAnimationFrame(volAnimRef.current);
+          ctx.close().catch(() => {});
+          audioCtxSpkRef.current = null;
+          URL.revokeObjectURL(url);
+          audioBlobUrlRef.current = null;
+          if (closedRef.current) return;
+          setVS('idle');
+          setVolume(0);
+          // Auto-listen again after speaking
+          setTimeout(() => {
+            if (!closedRef.current && voiceStateRef.current === 'idle') startListeningRef.current();
+          }, 700);
+        };
+        return;
+      } catch (err) {
+        console.warn('[Voice] Deepgram TTS failed, using Web Speech:', err);
+        stopSpeaking();
+      }
+    }
+
+    // ── Web Speech fallback ───────────────────────────────────────────────
+    try {
+      const voice = pickFemaleVoice();
+      const utter = new SpeechSynthesisUtterance(text);
+      if (voice) utter.voice = voice;
+      utter.rate = 1.05;
+      utter.pitch = 1.1;
+
+      // Fake volume animation while speaking
+      const fakeTick = () => {
+        if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
+        setVolume(0.15 + Math.random() * 0.35);
+        volAnimRef.current = requestAnimationFrame(fakeTick);
+      };
+      fakeTick();
+
+      utter.onend = () => {
+        cancelAnimationFrame(volAnimRef.current);
+        if (closedRef.current) return;
+        setVS('idle');
+        setVolume(0);
+        setTimeout(() => {
+          if (!closedRef.current && voiceStateRef.current === 'idle') startListeningRef.current();
+        }, 700);
+      };
+      utter.onerror = () => {
+        cancelAnimationFrame(volAnimRef.current);
+        if (!closedRef.current) { setVS('idle'); setVolume(0); }
+      };
+      window.speechSynthesis.speak(utter);
+    } catch {
+      // All TTS failed — just go idle, transcript is visible
+      if (!closedRef.current) { setVS('idle'); setVolume(0); }
+    }
+  }, [stopSpeaking]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Get AI response ────────────────────────────────────────────────────────
+  const getAIResponse = useCallback(async (history: { role: string; content: string }[]) => {
+    if (closedRef.current) return;
+    setVS('processing');
+    setLiveText('');
+
+    const key = apiKeyRef.current;
+    const sp = systemPromptRef.current;
+    const sysPrompt = sp
+      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally.`
+      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: Respond in 2–4 sentences max. No markdown, no bullet points, no formatting. Speak naturally like a real person talking. Be warm and direct.`;
+
+    try {
+      console.log('[Voice] Requesting AI response...');
+      const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'system', content: sysPrompt }, ...history],
+          max_tokens: 280,
+          temperature: 0.75,
+        }),
+      }, 15000);
+      if (!res.ok) throw new Error(`AI HTTP ${res.status}`);
+      const d = await res.json();
+      const reply = d.choices?.[0]?.message?.content?.trim() ?? 'I had trouble with that — could you try again?';
+      console.log('[Voice] AI reply:', reply.slice(0, 100));
+
+      historyRef.current = [...history, { role: 'assistant', content: reply }];
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: reply }]);
+
+      if (!mutedRef.current) await speakText(reply);
+      else { setVS('idle'); setTimeout(() => { if (!closedRef.current && voiceStateRef.current === 'idle') startListeningRef.current(); }, 700); }
+    } catch (e) {
+      console.warn('[Voice] AI failed:', e);
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: 'Something went wrong — tap to try again.' }]);
+      setVS('idle');
+    }
+  }, [speakText]);
+
+  // ── Recording complete → Whisper STT → AI response ────────────────────────
+  const handleRecordingStop = useCallback(async () => {
+    if (closedRef.current) return;
+    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    console.log('[Voice] Recording stopped, blob size:', blob.size);
+    if (blob.size < 500) { console.log('[Voice] Blob too small'); setVS('idle'); return; }
+
+    let userText = '';
+    try {
+      const key = apiKeyRef.current;
+      const form = new FormData();
+      form.append('file', blob, 'recording.webm');
+      form.append('model', 'whisper-large-v3-turbo');
+      form.append('language', 'en');
+      console.log('[Voice] Sending to Whisper...');
+      const res = await timedFetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}` },
+        body: form,
+      }, 12000);
+      if (res.ok) {
+        const json = await res.json();
+        userText = (json.text ?? '').trim();
+        console.log('[Voice] Transcription:', userText);
+      } else {
+        const errText = await res.text().catch(() => '');
+        console.warn('[Voice] Whisper error:', res.status, errText);
+        // Try fallback model
+        if (res.status === 404 || res.status === 400) {
+          console.log('[Voice] Retrying with whisper-large-v3...');
+          const form2 = new FormData();
+          form2.append('file', blob, 'recording.webm');
+          form2.append('model', 'whisper-large-v3');
+          form2.append('language', 'en');
+          const res2 = await timedFetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${key}` },
+            body: form2,
+          }, 12000);
+          if (res2.ok) userText = ((await res2.json()).text ?? '').trim();
+        }
+      }
+    } catch (e) {
+      console.warn('[Voice] Whisper fetch failed:', e);
+    }
+
+    if (!userText) {
+      console.log('[Voice] No transcription — returning to idle');
+      setVS('idle');
+      return;
+    }
+
+    setLiveText(userText);
+    setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
+    historyRef.current = [...historyRef.current, { role: 'user', content: userText }];
+    await getAIResponse(historyRef.current);
+  }, [getAIResponse]);
+
+  // ── Ref-based callback for recorder.onstop (avoids stale closures) ────────
+  const handleRecordingStopRef = useRef(handleRecordingStop);
+  handleRecordingStopRef.current = handleRecordingStop;
+
   // ── Volume analyser loop ───────────────────────────────────────────────────
+  const stopListeningRef = useRef<() => void>(() => {});
+
   const startAnalyser = useCallback(() => {
     const analyser = analyserRef.current;
     if (!analyser) return;
     const bufLen = analyser.frequencyBinCount;
     const data   = new Uint8Array(bufLen);
-    const SILENCE_THRESHOLD = 18;  // raised — Electron mics often have baseline noise > 10
-    const SILENCE_FRAMES    = 40;  // ~1.5 s of silence after speech ends
-    const SPEECH_THRESHOLD  = 30;  // must hear actual speech before silence-detection kicks in
-    const MAX_LISTEN_FRAMES = 900; // ~15 s hard cap — stops even if silence never detected
+    const SILENCE_THRESHOLD = 18;
+    const SILENCE_FRAMES    = 40;   // ~1.5s silence after speech
+    const SPEECH_THRESHOLD  = 25;   // must hear speech first
+    const MAX_LISTEN_FRAMES = 900;  // ~15s hard cap
     let heardSpeech = false;
     let totalFrames = 0;
 
@@ -462,14 +678,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
       if (voiceStateRef.current === 'listening') {
         totalFrames++;
-        // Detect that the user actually started speaking
         if (!heardSpeech && avg >= SPEECH_THRESHOLD) heardSpeech = true;
-        // Hard cap — stop after max duration regardless
-        if (totalFrames >= MAX_LISTEN_FRAMES) { stopListening(); return; }
-        // Only check silence after user has spoken
+        if (totalFrames >= MAX_LISTEN_FRAMES) { stopListeningRef.current(); return; }
         if (heardSpeech) {
           if (avg < SILENCE_THRESHOLD) {
-            if (++silentRef.current >= SILENCE_FRAMES) stopListening();
+            if (++silentRef.current >= SILENCE_FRAMES) stopListeningRef.current();
           } else {
             silentRef.current = 0;
           }
@@ -477,27 +690,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       }
     };
     tick();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Volume loop driven by real audio analyser (Deepgram playback) ─────────
-  const startSpeakingAnalyser = useCallback((source: AudioNode, ctx: AudioContext) => {
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.75;
-    source.connect(analyser);
-    analyser.connect(ctx.destination);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      if (voiceStateRef.current !== 'speaking') { setVolume(0); return; }
-      analyser.getByteFrequencyData(data);
-      const avg = data.reduce((s, v) => s + v, 0) / data.length;
-      setVolume(avg / 255);
-      volAnimRef.current = requestAnimationFrame(tick);
-    };
-    tick();
   }, []);
-
-  // startFakeOscillation removed — text-only fallback is used when Deepgram unavailable
 
   // ── Start listening ────────────────────────────────────────────────────────
   const startListening = useCallback(async () => {
@@ -516,11 +709,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     }
     streamRef.current = stream;
 
-    const audioCtx  = new AudioContext();
+    const audioCtx = new AudioContext();
     audioCtxRef.current = audioCtx;
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    const source    = audioCtx.createMediaStreamSource(stream);
-    const analyser  = audioCtx.createAnalyser();
+    const source   = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.8;
     source.connect(analyser);
@@ -531,167 +724,34 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const recorder = new MediaRecorder(stream, { mimeType });
     chunksRef.current = [];
     recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    recorder.onstop = handleRecordingStop;
-    recorder.start(100);
+    recorder.onstop = () => handleRecordingStopRef.current();
+    recorder.start(250); // 250ms chunks for reliable data collection
     recorderRef.current = recorder;
 
     setVS('listening');
     startAnalyser();
-  }, [startAnalyser]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [startAnalyser]);
+
+  const startListeningRef = useRef(startListening);
+  startListeningRef.current = startListening;
 
   // ── Stop listening ─────────────────────────────────────────────────────────
   const stopListening = useCallback(() => {
     if (voiceStateRef.current !== 'listening') return;
+    console.log('[Voice] Stopping recording...');
     setVS('processing');
     recorderRef.current?.stop();
     streamRef.current?.getTracks().forEach(t => t.stop());
     cancelAnimationFrame(animRef.current);
     setVolume(0);
   }, []);
-
-  // ── Recording complete → Whisper STT ──────────────────────────────────────
-  const handleRecordingStop = useCallback(async () => {
-    if (closedRef.current) return;
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-    if (blob.size < 1000) { setVS('idle'); return; }
-
-    let userText = '';
-    try {
-      const form = new FormData();
-      form.append('file', blob, 'recording.webm');
-      form.append('model', 'whisper-large-v3');
-      form.append('language', 'en');
-      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        body: form,
-      });
-      if (res.ok) userText = ((await res.json()).text ?? '').trim();
-    } catch { /* fall through */ }
-
-    if (!userText) { setVS('idle'); return; }
-
-    setLiveText(userText);
-    setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
-    const updated = [...historyRef.current, { role: 'user', content: userText }];
-    historyRef.current = updated;
-    await getAIResponse(updated);
-  }, [apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Get AI response ────────────────────────────────────────────────────────
-  const getAIResponse = useCallback(async (history: { role: string; content: string }[]) => {
-    if (closedRef.current) return;
-    setVS('processing');
-    setLiveText('');
-
-    const sysPrompt = systemPrompt
-      ? `${systemPrompt}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally.`
-      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}`;
-
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'system', content: sysPrompt }, ...history],
-          max_tokens: 280,
-          temperature: 0.75,
-        }),
-      });
-      if (!res.ok) throw new Error('AI error');
-      const d = await res.json();
-      const reply = d.choices?.[0]?.message?.content?.trim()
-        ?? 'I had trouble with that — could you try again?';
-
-      historyRef.current = [...history, { role: 'assistant', content: reply }];
-      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: reply }]);
-
-      if (!mutedRef.current) speakText(reply);
-      else setVS('idle');
-    } catch {
-      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: 'Something went wrong. Try again.' }]);
-      setVS('idle');
-    }
-  }, [apiKey, systemPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── TTS — Deepgram Aura (primary) / Web Speech (fallback) ─────────────────
-  const speakText = useCallback(async (text: string) => {
-    setVS('speaking');
-    stopSpeaking(); // cancel any previous playback
-
-    // ── Deepgram Aura path ──────────────────────────────────────────────────
-    if (deepgramKey) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
-        const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-asteria-en', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Token ${deepgramKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ text }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!res.ok) throw new Error(`Deepgram TTS error ${res.status}`);
-
-        const blob    = await res.blob();
-        const url     = URL.createObjectURL(blob);
-        audioBlobUrlRef.current = url;
-
-        // Play via Web Audio so we can tap the analyser for sphere visuals
-        const ctx  = new AudioContext();
-        audioCtxSpkRef.current = ctx;
-        // Electron autoplay policy suspends AudioContext — must resume before decoding
-        if (ctx.state === 'suspended') await ctx.resume();
-        const arrayBuf = await blob.arrayBuffer();
-        const decoded  = await ctx.decodeAudioData(arrayBuf);
-        const source   = ctx.createBufferSource();
-        source.buffer  = decoded;
-        startSpeakingAnalyser(source, ctx);
-        source.start(0);
-
-        source.onended = () => {
-          cancelAnimationFrame(volAnimRef.current);
-          ctx.close().catch(() => {});
-          audioCtxSpkRef.current = null;
-          URL.revokeObjectURL(url);
-          audioBlobUrlRef.current = null;
-          if (closedRef.current) return;   // modal already closed — stop here
-          setVS('idle');
-          setVolume(0);
-          setTimeout(() => {
-            if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
-          }, 700);
-        };
-
-        return; // success — skip Web Speech fallback
-      } catch (err) {
-        console.warn('Deepgram TTS failed — text fallback:', err);
-        stopSpeaking();
-        // Fall through to text-only fallback below
-      }
-    }
-
-    // ── Text-only fallback — Deepgram unavailable or timed out ────────────
-    // Response is already visible in the transcript. Return to idle so
-    // the user can tap to speak again.
-    if (!closedRef.current) {
-      setVS('idle');
-      setVolume(0);
-      setTimeout(() => {
-        if (!closedRef.current && voiceStateRef.current === 'idle') startListening();
-      }, 700);
-    }
-  }, [deepgramKey, startListening, startSpeakingAnalyser, stopSpeaking]);
+  stopListeningRef.current = stopListening;
 
   // ── Orb click ─────────────────────────────────────────────────────────────
   const handleOrbClick = () => {
     if (voiceState === 'idle')           startListening();
     else if (voiceState === 'listening') stopListening();
+    else if (voiceState === 'processing') { /* tap during thinking = cancel */ setVS('idle'); setVolume(0); }
     else if (voiceState === 'speaking')  { stopSpeaking(); setVS('idle'); setVolume(0); }
   };
 
