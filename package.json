@@ -1,6 +1,6 @@
 {
   "name": "bleumr",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Bleumr - AI-powered desktop browser and agent platform",
   "main": "out/main/index.js",
   "scripts": {
