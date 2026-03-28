@@ -40,6 +40,9 @@ jobs:
         run: npm ci
 
       - name: Build app
+        env:
+          VITE_GROQ_API_KEY: ${{ secrets.VITE_GROQ_API_KEY }}
+          VITE_DEEPGRAM_API_KEY: ${{ secrets.VITE_DEEPGRAM_API_KEY }}
         run: npx electron-vite build
 
       - name: Package installer

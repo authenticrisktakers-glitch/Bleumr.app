@@ -199,90 +199,29 @@ export function PlatformSidebar({
       {/* Thread List */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">
 
-        {/* Quick-action cards — Open Browser on top, Scheduler below */}
-        <div className="flex flex-col mb-1" style={{ isolation: 'isolate' }}>
-          {/* Open Browser — front card, flush to top */}
-          <button
-            onClick={() => { onOpenBrowser(); onClose(); }}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-slate-400 hover:text-slate-200 transition-colors text-left w-full"
-            style={{
-              position: 'relative',
-              zIndex: 2,
-              background: 'rgba(22, 22, 32, 0.92)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderBottom: '1px solid rgba(255,255,255,0.10)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
-            }}
-          >
-            <Globe className="w-4 h-4 shrink-0 text-slate-500" />
-            Open Browser
-          </button>
-
-          {/* Scheduler */}
-          <button
-            onClick={() => { onOpenScheduler?.(); onClose(); }}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-blue-400 hover:text-blue-300 transition-colors text-left w-full"
-            style={{
-              position: 'relative',
-              zIndex: 1,
-              marginTop: -4,
-              background: 'rgba(255,255,255,0.03)',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-            }}
-          >
-            <LayoutGrid className="w-4 h-4 shrink-0 text-blue-500" />
-            Scheduler
-          </button>
-
-          {/* Workspace */}
-          <button
-            onClick={() => { onOpenWorkspace?.(); onClose(); }}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-violet-400 hover:text-violet-300 transition-colors text-left w-full"
-            style={{
-              position: 'relative',
-              zIndex: 0,
-              marginTop: -4,
-              background: 'rgba(99,102,241,0.04)',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-            }}
-          >
-            <Layers3 className="w-4 h-4 shrink-0 text-violet-500" />
-            Mission Team
-          </button>
-
-          {/* Coding */}
-          <button
-            onClick={() => { onOpenCoding?.(); onClose(); }}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-emerald-400 hover:text-emerald-300 transition-colors text-left w-full"
-            style={{
-              position: 'relative',
-              zIndex: 0,
-              marginTop: -4,
-              background: 'rgba(16,185,129,0.04)',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-            }}
-          >
-            <Code2 className="w-4 h-4 shrink-0 text-emerald-500" />
-            Code
-          </button>
-
-          {/* Trading */}
-          <button
-            onClick={() => { onOpenTrading?.(); onClose(); }}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-amber-400 hover:text-amber-300 transition-colors text-left w-full"
-            style={{
-              position: 'relative',
-              zIndex: 0,
-              marginTop: -4,
-              background: 'rgba(245,158,11,0.04)',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-            }}
-          >
-            <BarChart3 className="w-4 h-4 shrink-0 text-amber-500" />
-            Trading
-          </button>
-
+        {/* Quick-action tabs */}
+        <div className="flex flex-col gap-px px-2 py-2">
+          {([
+            { label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); } },
+            { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); } },
+            { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); } },
+            { label: 'Code',          icon: <Code2 className="w-4 h-4 shrink-0" />, color: 'text-emerald-400', hoverBg: 'rgba(52,211,153,0.12)',  action: () => { onOpenCoding?.(); onClose(); } },
+            { label: 'Trading',       icon: <BarChart3 className="w-4 h-4 shrink-0" />, color: 'text-amber-400',   hoverBg: 'rgba(245,158,11,0.12)',  action: () => { onOpenTrading?.(); onClose(); } },
+          ] as const).map(item => (
+            <button
+              key={item.label}
+              onClick={item.action}
+              className={`flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium ${item.color} rounded-lg text-left w-full`}
+              style={{ transition: 'background 80ms ease, transform 80ms ease' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = item.hoverBg; (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
+              onMouseDown={e => { (e.currentTarget as HTMLElement).style.transform = 'scale(0.98)'; }}
+              onMouseUp={e => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
         </div>
 
         {/* Chat History label */}

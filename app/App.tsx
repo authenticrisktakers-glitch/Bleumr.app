@@ -128,9 +128,12 @@ export default function App() {
     } catch {}
     return DEFAULT_CONFIG;
   });
-  const [secureApiKey, setSecureApiKey] = useState('');
+  // ── Bundled API keys — shipped with every build, never user-facing ────────
+  const BUNDLED_GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY as string || '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';
+  const BUNDLED_DEEPGRAM_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY as string || '9aabd4808ed803973d1d7fb3399040ef933019f9';
+  const [secureApiKey, setSecureApiKey] = useState(BUNDLED_GROQ_KEY);
   const [geminiKey, setGeminiKey] = useState('');
-  const [deepgramKey, setDeepgramKey] = useState('');
+  const [deepgramKey, setDeepgramKey] = useState(BUNDLED_DEEPGRAM_KEY);
   const perplexityKey = ''; // Perplexity removed
   const [chatThreads, setChatThreads] = useState<ChatThreadMeta[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
@@ -172,24 +175,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    SecureStorage.get('orbit_api_key').then(key => {
-      const resolvedKey = key || (import.meta.env.VITE_GROQ_API_KEY as string | undefined) || '';
-      if (resolvedKey) {
-        setSecureApiKey(resolvedKey);
-        if (!key) SecureStorage.set('orbit_api_key', resolvedKey);
-        // Auto-switch engine to cloud when an API key is available and user hasn't picked yet
-        setConfig(prev => {
-          if (prev.engine === 'local') {
-            const updated = { ...prev, engine: 'cloud' as const };
-            try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
-            return updated;
-          }
-          return prev;
-        });
+    // Keys are bundled — always available. Auto-switch to cloud engine on first launch.
+    setConfig(prev => {
+      if (prev.engine === 'local') {
+        const updated = { ...prev, engine: 'cloud' as const };
+        try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
+        return updated;
       }
+      return prev;
     });
+    // Persist bundled key to SecureStorage so Electron IPC can access it if needed
+    SecureStorage.set('orbit_api_key', BUNDLED_GROQ_KEY);
     SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
-    SecureStorage.get('orbit_deepgram_key').then(key => { if (key) setDeepgramKey(key); });
 
     // Initialize trading module (price feeds, alert engine, exchange connectors)
     initTrading();
@@ -262,7 +259,7 @@ export default function App() {
     try { localStorage.setItem('orbit_approve_all', String(approveAll)); } catch {}
   }, [approveAll]);
 
-  // Refresh Brain Energy + tier whenever settings opens (picks up localStorage changes)
+  // Refresh Solar Energy + tier whenever settings opens (picks up localStorage changes)
   // Also hide/restore the native WebContentsView — it sits above all renderer z-index
   // so modals would appear behind it without this.
   useEffect(() => {
@@ -730,15 +727,6 @@ export default function App() {
        }
     } catch (e) {
        console.warn("Harper check failed:", e);
-    }
-
-    if (config.engine === 'cloud' && !secureApiKey) {
-      setMessages(prev => [
-        ...prev,
-        { id: Date.now().toString(), role: 'user', content: processedInput },
-        { id: (Date.now() + 1).toString(), role: 'system', content: "Error: No API Key provided. Please enter your API Key in Settings to get started.", isBrowserFeedback: true }
-      ]);
-      return;
     }
 
     let currentMessages: Message[] = [];
@@ -2317,11 +2305,20 @@ export default function App() {
       {/* Scheduler full-page overlay */}
       <AnimatePresence>
         {showScheduler && (
-          <SchedulerPage
-            onClose={() => setShowScheduler(false)}
-            onAskJumari={(text) => { setShowScheduler(false); handleUserSubmit(text); }}
-            jumpToDate={schedulerJumpDate}
-          />
+          <motion.div
+            key="scheduler"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 10001 }}
+          >
+            <SchedulerPage
+              onClose={() => setShowScheduler(false)}
+              onAskJumari={(text) => { setShowScheduler(false); handleUserSubmit(text); }}
+              jumpToDate={schedulerJumpDate}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -2395,9 +2392,6 @@ export default function App() {
                   className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-md transition-colors"
                   title="Settings"
                 >
-                  {config.engine === 'cloud' && !secureApiKey && (
-                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                  )}
                   <Settings className="w-5 h-5" />
                 </button>
               </div>
@@ -2977,7 +2971,7 @@ export default function App() {
                       {tier === 'stellur' && <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500 text-black uppercase tracking-wide">STELLUR ✦</span>}
                     </div>
 
-                    {/* Free tier — Brain Energy usage bar (fills up as energy is consumed) */}
+                    {/* Free tier — Solar Energy usage bar (fills up as energy is consumed) */}
                     {tier === 'free' && (() => {
                       const limit = SubscriptionService.getFreeDailyLimit();
                       const pct = Math.min(100, Math.round((dailyUsage / limit) * 100));
@@ -2990,7 +2984,7 @@ export default function App() {
                         <div className="space-y-2">
                           <div className="flex justify-between items-baseline text-xs">
                             <span className="text-slate-400 flex items-center gap-1.5">
-                              <span>⚡</span> Brain Energy Used
+                              <span>⚡</span> Solar Energy Used
                             </span>
                             <span className={`font-semibold tabular-nums ${textColor}`}>
                               {isFull ? 'Depleted' : `${pct}%`}
@@ -3200,27 +3194,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Deepgram Voice Key */}
-                <div className="space-y-2 pt-4 border-t border-slate-800">
-                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                    <Volume2 className="w-4 h-4 text-violet-400" />
-                    Deepgram Voice Key
-                  </label>
-                  <p className="text-xs text-slate-500">Powers the natural female voice in Voice Chat. Get a free key at <span className="text-violet-400">deepgram.com</span> — no credit card needed.</p>
-                  <input
-                    type="password"
-                    value={deepgramKey}
-                    onChange={e => setDeepgramKey(e.target.value)}
-                    placeholder="paste Deepgram API key here"
-                    className="w-full bg-white/5 border border-white/10 rounded-sm px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-violet-400/50"
-                  />
-                  {deepgramKey && (
-                    <p className="text-[11px] text-violet-400/70 flex items-center gap-1">
-                      ✓ Voice Chat will use Deepgram Aura (aura-asteria-en)
-                    </p>
-                  )}
-                </div>
-
                 {/* Approve All Actions */}
                 <div className="space-y-3 pt-4 border-t border-slate-800">
                   <div className="flex items-start justify-between gap-3">
@@ -3301,15 +3274,6 @@ export default function App() {
                          </div>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer" onClick={() => setShowDOMEvents(!showDOMEvents)}>
-                         <div>
-                            <p className="text-sm font-medium text-white">Show Background DOM Scripts</p>
-                            <p className="text-xs text-slate-400">Display raw JS execution in chat</p>
-                         </div>
-                         <div className={`w-10 h-5 rounded-full relative transition-colors ${showDOMEvents ? 'bg-emerald-600' : 'bg-slate-700'}`}>
-                            <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 shadow transition-all ${showDOMEvents ? 'right-0.5' : 'left-0.5'}`}></div>
-                         </div>
-                      </div>
                     </div>
                     
                     <div className="pt-2">
@@ -3337,7 +3301,6 @@ export default function App() {
                 <button
                   onClick={() => {
                     SecureStorage.set('orbit_api_key', secureApiKey);
-                    SecureStorage.set('orbit_deepgram_key', deepgramKey);
                     setShowSettings(false);
                   }}
                   className="px-4 py-1.5 text-xs font-medium tracking-wide text-white/90 transition-all hover:text-white"
