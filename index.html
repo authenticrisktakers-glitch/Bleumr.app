@@ -17,32 +17,48 @@
     <div id="root" style="background:#020208;min-height:100vh;min-height:100dvh;"></div>
     <script type="module" src="/main.tsx"></script>
     <script>
+      // ── PWA Cache Nuclear Bust ──
+      // Bump this version to force ALL clients to wipe caches and reload
+      var APP_CACHE_VERSION = 'v1.3.0';
+      var CACHE_VER_KEY = 'bleumr_app_ver';
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').then((reg) => {
-            // Force check for updates immediately on every app open
-            reg.update().catch(() => {});
-            // Then check every 60 seconds
-            setInterval(() => reg.update().catch(() => {}), 60000);
-            // When a new SW is waiting, tell it to activate immediately
-            reg.addEventListener('updatefound', () => {
-              const newWorker = reg.installing;
-              if (!newWorker) return;
-              newWorker.addEventListener('statechange', () => {
-                if (newWorker.state === 'activated') {
-                  // New version is live — reload the page
-                  window.location.reload();
-                }
-              });
-            });
-          }).catch(() => {});
-          // Listen for SW_UPDATED message from the service worker
-          navigator.serviceWorker.addEventListener('message', (event) => {
-            if (event.data && event.data.type === 'SW_UPDATED') {
-              window.location.reload();
-            }
+        var storedVer = localStorage.getItem(CACHE_VER_KEY);
+        if (storedVer !== APP_CACHE_VERSION) {
+          // Version mismatch — nuke everything and reload clean
+          localStorage.setItem(CACHE_VER_KEY, APP_CACHE_VERSION);
+          caches.keys().then(function(names) {
+            return Promise.all(names.map(function(n) { return caches.delete(n); }));
+          }).then(function() {
+            return navigator.serviceWorker.getRegistrations();
+          }).then(function(regs) {
+            return Promise.all(regs.map(function(r) { return r.unregister(); }));
+          }).then(function() {
+            window.location.reload();
+          }).catch(function() {
+            window.location.reload();
           });
-        });
+        } else {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js').then(function(reg) {
+              reg.update().catch(function() {});
+              setInterval(function() { reg.update().catch(function() {}); }, 60000);
+              reg.addEventListener('updatefound', function() {
+                var newWorker = reg.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', function() {
+                  if (newWorker.state === 'activated') {
+                    window.location.reload();
+                  }
+                });
+              });
+            }).catch(function() {});
+            navigator.serviceWorker.addEventListener('message', function(event) {
+              if (event.data && event.data.type === 'SW_UPDATED') {
+                window.location.reload();
+              }
+            });
+          });
+        }
       }
     </script>
   </body>
