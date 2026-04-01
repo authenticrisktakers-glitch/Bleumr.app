@@ -1,6 +1,7 @@
-// Bleumr PWA Service Worker — auto-updating
+// Bleumr PWA Service Worker v3 — auto-updating
 // BUMP THIS on every deploy to bust the cache
 const CACHE_VERSION = '__BUILD_TIME__';
+// force-bust: 1.3.0
 const CACHE_NAME = `bleumr-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
