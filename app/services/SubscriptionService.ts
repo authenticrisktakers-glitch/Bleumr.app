@@ -2,8 +2,9 @@
  * SubscriptionService — manages free/pro/stellur tier state and daily usage limits.
  *
  * Architecture:
- *   • Free usage tracked in localStorage (daily counter, resets at midnight)
- *   • Paid tier validated against Supabase Edge Function (24h TTL cache)
+ *   • Limits fetched from server (tier_limits table) — admin-configurable
+ *   • Server-side enforcement via check-rate-limit edge function
+ *   • Local counters kept as optimistic cache, server is source of truth
  *   • License key → Supabase validates → returns tier + API keys
  *   • API keys stored in SecureStorage (never bundled in source)
  */
@@ -18,11 +19,13 @@ export interface ApiKeys {
   gemini: string;
 }
 
-const FREE_DAILY_LIMIT = 20;
-const PRO_DAILY_LIMIT = 200;   // hidden — never shown in UI, silently enforced
+// Fallback limits if server is unreachable — admin can override via tier_limits table
+let FREE_DAILY_LIMIT = 20;
+let PRO_DAILY_LIMIT = 200;
 const TIER_STORAGE_KEY = 'orbit_subscription_tier';
 const USAGE_STORAGE_KEY = 'orbit_daily_usage';
 const PRO_USAGE_STORAGE_KEY = 'orbit_pro_daily_usage';
+const LIMITS_CACHE_KEY = 'orbit_tier_limits';
 
 interface TierCache {
   tier: SubscriptionTier;
@@ -39,10 +42,65 @@ interface UsageRecord {
 const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
 const VALIDATE_URL = `${SUPABASE_URL}/functions/v1/validate-license`;
+const RATE_LIMIT_URL = `${SUPABASE_URL}/functions/v1/check-rate-limit`;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LIMITS_CACHE_TTL = 5 * 60 * 1000; // 5 min — limits don't change often
+
+// Fetch admin-configured limits from server on startup
+async function fetchTierLimits() {
+  try {
+    const cached = localStorage.getItem(LIMITS_CACHE_KEY);
+    if (cached) {
+      const { limits, ts } = JSON.parse(cached);
+      if (Date.now() - ts < LIMITS_CACHE_TTL) {
+        if (limits.free !== undefined) FREE_DAILY_LIMIT = limits.free;
+        if (limits.pro !== undefined) PRO_DAILY_LIMIT = limits.pro;
+        return;
+      }
+    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/tier_limits?select=tier,daily_limit`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    if (res.ok) {
+      const rows: { tier: string; daily_limit: number }[] = await res.json();
+      const limits: Record<string, number> = {};
+      for (const r of rows) limits[r.tier] = r.daily_limit;
+      if (limits.free !== undefined) FREE_DAILY_LIMIT = limits.free;
+      if (limits.pro !== undefined) PRO_DAILY_LIMIT = limits.pro;
+      localStorage.setItem(LIMITS_CACHE_KEY, JSON.stringify({ limits, ts: Date.now() }));
+    }
+  } catch {}
+}
+
+// Fire on load
+if (typeof window !== 'undefined') fetchTierLimits();
 
 class SubscriptionService {
+  // ── Server-side rate limit check ───────────────────────────────────────────
+
+  /** Check rate limit against the server (source of truth). Returns server response or falls back to local. */
+  async checkServerRateLimit(): Promise<{ allowed: boolean; remaining: number; limit: number; used: number } | null> {
+    try {
+      const sessionId = localStorage.getItem('orbit_session_id');
+      if (!sessionId) return null;
+      const tier = this.getTier();
+      const res = await fetch(`${RATE_LIMIT_URL}?session_id=${encodeURIComponent(sessionId)}&tier=${encodeURIComponent(tier)}`, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      });
+      if (res.ok || res.status === 429) {
+        return await res.json();
+      }
+    } catch {}
+    return null;
+  }
+
+  /** Re-fetch admin-configured limits from server */
+  async refreshLimits(): Promise<void> {
+    try { localStorage.removeItem(LIMITS_CACHE_KEY); } catch {}
+    await fetchTierLimits();
+  }
+
   // ── Tier ────────────────────────────────────────────────────────────────────
 
   getTier(): SubscriptionTier {

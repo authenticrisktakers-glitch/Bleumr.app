@@ -6,7 +6,7 @@ release
 *.dmg
 *.exe
 *.zip
-*.png
+Screen Shot*.png
 supabase/.temp
 imports
 .claude
