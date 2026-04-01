@@ -20,7 +20,9 @@
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then((reg) => {
-            // Check for updates every 60 seconds
+            // Force check for updates immediately on every app open
+            reg.update().catch(() => {});
+            // Then check every 60 seconds
             setInterval(() => reg.update().catch(() => {}), 60000);
             // When a new SW is waiting, tell it to activate immediately
             reg.addEventListener('updatefound', () => {
