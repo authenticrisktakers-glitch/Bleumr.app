@@ -1,11 +1,12 @@
 /**
  * check-rate-limit — Supabase Edge Function
  *
- * Server-side rate limit enforcement. Counts today's requests for a session+tier
- * against the admin-configured limit in tier_limits table.
+ * CENTRAL rate limit enforcement. Counts ALL requests across ALL users in a tier
+ * against the admin-configured daily limit. When a tier exceeds its limit, ALL
+ * users in that tier enter a cooldown period (admin-configurable, default 10 min).
  *
- * GET  ?session_id=XXX&tier=free  → { allowed, remaining, limit, used }
- * POST { session_id, tier }       → same
+ * GET  ?tier=free  → { allowed, remaining, limit, used, cooldown, cooldown_until }
+ * POST { tier }    → same
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -22,67 +23,113 @@ Deno.serve(async (req) => {
   }
 
   try {
-    let sessionId = ''
     let tier = 'free'
 
     const url = new URL(req.url)
-    sessionId = url.searchParams.get('session_id') || ''
     tier = url.searchParams.get('tier') || 'free'
 
-    if (!sessionId && req.method === 'POST') {
+    if (req.method === 'POST') {
       const body = await req.json().catch(() => ({}))
-      sessionId = body.session_id || ''
-      tier = body.tier || 'free'
-    }
-
-    if (!sessionId) {
-      return new Response(
-        JSON.stringify({ error: 'Missing session_id' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      tier = body.tier || tier
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, serviceKey)
 
-    // Get the limit for this tier
+    // Get the limit config for this tier
     const { data: limitRow } = await supabase
       .from('tier_limits')
-      .select('daily_limit')
+      .select('daily_limit, cooldown_minutes, cooldown_until, is_cooled_down')
       .eq('tier', tier)
       .single()
 
     const dailyLimit = limitRow?.daily_limit ?? 20
+    const cooldownMinutes = limitRow?.cooldown_minutes ?? 10
+    const cooldownUntil = limitRow?.cooldown_until ? new Date(limitRow.cooldown_until) : null
+    const isCooledDown = limitRow?.is_cooled_down ?? false
 
-    // 0 = unlimited
+    // 0 = unlimited — no rate limit
     if (dailyLimit === 0) {
       return new Response(
-        JSON.stringify({ allowed: true, remaining: -1, limit: 0, used: 0 }),
+        JSON.stringify({ allowed: true, remaining: -1, limit: 0, used: 0, cooldown: false }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Count today's requests for this session
+    // Check if tier is currently in cooldown
+    if (isCooledDown && cooldownUntil) {
+      const now = new Date()
+      if (now < cooldownUntil) {
+        // Still in cooldown
+        const remainingSec = Math.ceil((cooldownUntil.getTime() - now.getTime()) / 1000)
+        return new Response(
+          JSON.stringify({
+            allowed: false,
+            remaining: 0,
+            limit: dailyLimit,
+            used: dailyLimit,
+            cooldown: true,
+            cooldown_until: cooldownUntil.toISOString(),
+            cooldown_remaining_sec: remainingSec,
+            reason: `${tier} tier is in cooldown. Try again in ${Math.ceil(remainingSec / 60)} minute${remainingSec > 60 ? 's' : ''}.`,
+          }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } else {
+        // Cooldown expired — lift it
+        await supabase
+          .from('tier_limits')
+          .update({ is_cooled_down: false, cooldown_until: null, updated_at: new Date().toISOString() })
+          .eq('tier', tier)
+      }
+    }
+
+    // Count ALL requests for this tier today (central/global count)
     const todayStart = new Date()
     todayStart.setUTCHours(0, 0, 0, 0)
 
     const { count } = await supabase
       .from('api_requests')
       .select('*', { count: 'exact', head: true })
-      .eq('session_id', sessionId)
+      .eq('tier', tier)
       .gte('created_at', todayStart.toISOString())
 
     const used = count || 0
     const remaining = Math.max(0, dailyLimit - used)
-    const allowed = used < dailyLimit
+
+    // If over limit, trigger cooldown for the entire tier
+    if (used >= dailyLimit) {
+      const cooldownEnd = new Date(Date.now() + cooldownMinutes * 60 * 1000)
+
+      await supabase
+        .from('tier_limits')
+        .update({
+          is_cooled_down: true,
+          cooldown_until: cooldownEnd.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('tier', tier)
+
+      const remainingSec = cooldownMinutes * 60
+      return new Response(
+        JSON.stringify({
+          allowed: false,
+          remaining: 0,
+          limit: dailyLimit,
+          used,
+          cooldown: true,
+          cooldown_until: cooldownEnd.toISOString(),
+          cooldown_remaining_sec: remainingSec,
+          reason: `${tier} tier limit reached. All ${tier} users are in a ${cooldownMinutes}-minute cooldown.`,
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     return new Response(
-      JSON.stringify({ allowed, remaining, limit: dailyLimit, used }),
-      {
-        status: allowed ? 200 : 429,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ allowed: true, remaining, limit: dailyLimit, used, cooldown: false }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
     return new Response(

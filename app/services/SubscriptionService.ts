@@ -74,25 +74,97 @@ async function fetchTierLimits() {
 }
 
 // Fire on load
-if (typeof window !== 'undefined') fetchTierLimits();
+if (typeof window !== 'undefined') {
+  fetchTierLimits();
+  // Poll server every 30s to pick up cooldowns triggered by other users
+  setInterval(async () => {
+    try {
+      const tierRaw = localStorage.getItem(TIER_STORAGE_KEY);
+      const tier = tierRaw ? (JSON.parse(tierRaw) as { tier: string }).tier || 'free' : 'free';
+      const res = await fetch(`${RATE_LIMIT_URL}?tier=${encodeURIComponent(tier)}`, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      });
+      if (res.status === 429) {
+        const data = await res.json();
+        if (data.cooldown && data.cooldown_until) {
+          localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify({
+            tier, cooldown_until: data.cooldown_until, reason: data.reason || 'Cooldown active',
+          }));
+        }
+      } else if (res.ok) {
+        localStorage.removeItem(COOLDOWN_CACHE_KEY);
+      }
+    } catch {}
+  }, 30000);
+}
+
+// Cooldown state — cached locally so we don't spam the server
+const COOLDOWN_CACHE_KEY = 'orbit_cooldown_state';
+
+interface CooldownState {
+  tier: string;
+  cooldown_until: string; // ISO
+  reason: string;
+}
+
+function getCooldownState(): CooldownState | null {
+  try {
+    const raw = localStorage.getItem(COOLDOWN_CACHE_KEY);
+    if (!raw) return null;
+    const state: CooldownState = JSON.parse(raw);
+    if (new Date(state.cooldown_until) <= new Date()) {
+      localStorage.removeItem(COOLDOWN_CACHE_KEY);
+      return null;
+    }
+    return state;
+  } catch { return null; }
+}
 
 class SubscriptionService {
-  // ── Server-side rate limit check ───────────────────────────────────────────
+  // ── Central server-side rate limit check ───────────────────────────────────
 
-  /** Check rate limit against the server (source of truth). Returns server response or falls back to local. */
-  async checkServerRateLimit(): Promise<{ allowed: boolean; remaining: number; limit: number; used: number } | null> {
+  /** Check central rate limit against the server. Tier-wide limit — all users in a tier share the same pool. */
+  async checkServerRateLimit(): Promise<{
+    allowed: boolean; remaining: number; limit: number; used: number;
+    cooldown?: boolean; cooldown_until?: string; cooldown_remaining_sec?: number; reason?: string;
+  } | null> {
+    // If we're already in cached cooldown, don't even hit the server
+    const cached = getCooldownState();
+    if (cached && cached.tier === this.getTier()) {
+      const remainingSec = Math.ceil((new Date(cached.cooldown_until).getTime() - Date.now()) / 1000);
+      return {
+        allowed: false, remaining: 0, limit: 0, used: 0,
+        cooldown: true, cooldown_until: cached.cooldown_until,
+        cooldown_remaining_sec: remainingSec, reason: cached.reason,
+      };
+    }
+
     try {
-      const sessionId = localStorage.getItem('orbit_session_id');
-      if (!sessionId) return null;
       const tier = this.getTier();
-      const res = await fetch(`${RATE_LIMIT_URL}?session_id=${encodeURIComponent(sessionId)}&tier=${encodeURIComponent(tier)}`, {
+      const res = await fetch(`${RATE_LIMIT_URL}?tier=${encodeURIComponent(tier)}`, {
         headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
       });
       if (res.ok || res.status === 429) {
-        return await res.json();
+        const data = await res.json();
+        // Cache cooldown state locally
+        if (data.cooldown && data.cooldown_until) {
+          const state: CooldownState = { tier, cooldown_until: data.cooldown_until, reason: data.reason || 'Cooldown active' };
+          try { localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify(state)); } catch {}
+        } else {
+          try { localStorage.removeItem(COOLDOWN_CACHE_KEY); } catch {}
+        }
+        return data;
       }
     } catch {}
     return null;
+  }
+
+  /** Check if in cooldown (local cache — instant, no network) */
+  isInCooldown(): { active: boolean; reason?: string; remainingSec?: number } {
+    const state = getCooldownState();
+    if (!state || state.tier !== this.getTier()) return { active: false };
+    const remainingSec = Math.ceil((new Date(state.cooldown_until).getTime() - Date.now()) / 1000);
+    return { active: true, reason: state.reason, remainingSec };
   }
 
   /** Re-fetch admin-configured limits from server */
@@ -263,7 +335,20 @@ class SubscriptionService {
 
   // ── Gating ──────────────────────────────────────────────────────────────────
 
-  canSendMessage(): { allowed: boolean; limitReached?: boolean; remaining: number; reason?: string } {
+  canSendMessage(): { allowed: boolean; limitReached?: boolean; remaining: number; reason?: string; cooldown?: boolean } {
+    // ── Check central cooldown first (instant, no network) ──
+    const cd = this.isInCooldown();
+    if (cd.active) {
+      const mins = Math.ceil((cd.remainingSec || 0) / 60);
+      return {
+        allowed: false,
+        limitReached: true,
+        remaining: 0,
+        cooldown: true,
+        reason: `⚡ Absorbing solar energy — please try again in ${mins} minute${mins !== 1 ? 's' : ''}.`,
+      };
+    }
+
     const tier = this.getTier();
 
     if (tier === 'stellur') {
@@ -271,7 +356,6 @@ class SubscriptionService {
     }
 
     if (tier === 'pro') {
-      // Silently enforce limit — no counter shown to user
       const proUsage = this._getProDailyUsage();
       if (proUsage >= PRO_DAILY_LIMIT) {
         return {
@@ -281,7 +365,7 @@ class SubscriptionService {
           reason: `You've reached your daily limit. Upgrade to STELLUR for truly unlimited usage.`,
         };
       }
-      return { allowed: true, remaining: Infinity }; // remaining shown as infinite to Pro users
+      return { allowed: true, remaining: Infinity };
     }
 
     // Free tier
