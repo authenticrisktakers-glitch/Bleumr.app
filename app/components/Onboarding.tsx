@@ -43,10 +43,12 @@ function StarField() {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let W = 0, H = 0;
+    let W = 0, H = 0, maxH = 0;
     const resize = () => {
       W = canvas.width  = window.innerWidth;
-      H = canvas.height = window.innerHeight;
+      // Never shrink height — prevents keyboard from cropping starfield
+      maxH = Math.max(maxH, window.innerHeight, screen.height);
+      H = canvas.height = maxH;
     };
     resize();
     window.addEventListener('resize', resize);

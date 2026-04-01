@@ -133,8 +133,8 @@ function PWAInstallStarField() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
-    let W = 0, H = 0;
-    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; };
+    let W = 0, H = 0, maxH = 0;
+    const resize = () => { W = canvas.width = window.innerWidth; maxH = Math.max(maxH, window.innerHeight, screen.height); H = canvas.height = maxH; };
     resize();
     window.addEventListener('resize', resize);
     const stars = Array.from({ length: PWA_STAR_COUNT }, () => ({
@@ -2506,8 +2506,9 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <div className="flex flex-row-reverse h-screen w-full bg-[#0d0d0d] text-slate-200 overflow-hidden font-sans selection:bg-indigo-500/30">
-      
+      <div className="flex flex-row-reverse h-screen w-full bg-[#0d0d0d] text-slate-200 overflow-hidden font-sans selection:bg-indigo-500/30"
+        style={(!IS_ELECTRON || appMode !== 'browser') ? { display: 'none' } : undefined}>
+
       {/* Sidebar / Chat Panel */}
       <AnimatePresence initial={false}>
         {isSidebarOpen && (
