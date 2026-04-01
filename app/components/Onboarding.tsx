@@ -260,7 +260,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </motion.div>
         )}
 
-        {/* ── NEW OR EXISTING USER ── */}
+        {/* ── WELCOME — glass card with options ── */}
         {phase === 'usertype' && (
           <motion.div
             key="usertype"
@@ -268,48 +268,69 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="relative z-10 flex flex-col items-center justify-center h-full gap-8 px-6"
+            className="relative z-10 flex flex-col items-center justify-center h-full px-6"
           >
+            {/* Glass card */}
             <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
+              initial={{ scale: 0.92, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1, duration: 0.5 }}
+              transition={{ delay: 0.1, duration: 0.5, ease: 'easeOut' }}
+              className="flex flex-col items-center gap-5 px-8 py-10 rounded-3xl max-w-xs w-full"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)',
+              }}
             >
-              <InlineStarSphere size={120} />
-            </motion.div>
+              <InlineStarSphere size={80} />
 
-            <div className="text-center">
-              <h2 className="text-xl font-semibold text-white/90 tracking-tight mb-2">Welcome to JUMARI</h2>
-              <p className="text-sm text-white/30">Are you new here or coming back?</p>
-            </div>
+              <div className="text-center">
+                <h2 className="text-lg font-semibold text-white/90 tracking-tight">Welcome to Bleumr</h2>
+                <p className="text-[11px] text-white/25 mt-1 tracking-wide uppercase">Beta</p>
+              </div>
 
-            <div className="flex flex-col sm:flex-row gap-4 w-full max-w-sm">
+              {/* New User */}
               <motion.button
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2, duration: 0.4 }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25, duration: 0.35 }}
                 onClick={() => setPhase('form')}
-                className="flex-1 flex flex-col items-center gap-3 py-6 px-4 rounded-2xl transition-all duration-300 hover:scale-[1.02]"
-                style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)' }}
+                className="w-full flex items-center gap-3 py-3 px-4 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                }}
               >
-                <UserPlus className="w-6 h-6 text-indigo-400" />
-                <span className="text-sm font-medium text-white/80">New User</span>
-                <span className="text-[10px] text-white/25">Set up your profile</span>
+                <UserPlus className="w-4 h-4 text-indigo-400/70 shrink-0" />
+                <div className="text-left">
+                  <span className="text-[13px] font-medium text-white/70 block leading-tight">New User</span>
+                  <span className="text-[10px] text-white/20">Set up your profile</span>
+                </div>
+                <ArrowRight className="w-3 h-3 text-white/15 ml-auto" />
               </motion.button>
 
+              {/* Existing User */}
               <motion.button
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3, duration: 0.4 }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35, duration: 0.35 }}
                 onClick={() => setPhase('license')}
-                className="flex-1 flex flex-col items-center gap-3 py-6 px-4 rounded-2xl transition-all duration-300 hover:scale-[1.02]"
-                style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)' }}
+                className="w-full flex items-center gap-3 py-3 px-4 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                }}
               >
-                <Key className="w-6 h-6 text-emerald-400" />
-                <span className="text-sm font-medium text-white/80">Existing User</span>
-                <span className="text-[10px] text-white/25">Enter your license key</span>
+                <Key className="w-4 h-4 text-emerald-400/70 shrink-0" />
+                <div className="text-left">
+                  <span className="text-[13px] font-medium text-white/70 block leading-tight">Existing User</span>
+                  <span className="text-[10px] text-white/20">Enter your license key</span>
+                </div>
+                <ArrowRight className="w-3 h-3 text-white/15 ml-auto" />
               </motion.button>
-            </div>
+            </motion.div>
           </motion.div>
         )}
 
