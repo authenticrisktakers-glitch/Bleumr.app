@@ -12,6 +12,7 @@ import { GodAgent } from './GodAgent';
 import { trackApiRequest, trackError, trackSuccess, registerSession, incrementRequestCount, incrementErrorCount } from './Analytics';
 import { guardedGroqFetch, reportGroqError, reportGroqSuccess, getCachedResponse, setCachedResponse, incrementAgentLoop, resetAgentLoop } from './GroqGuard';
 import { detectKnowledgeGap, requestKnowledge } from './KnowledgeService';
+import { queryBrain, distillAndStore } from './BrainService';
 
 export interface WebSource {
   title: string;
@@ -788,6 +789,8 @@ export async function runChatAgent(
           });
         }
       } catch {} // never fail visibly
+      // Learn from Groq — distill Q&A into the brain for future use
+      try { distillAndStore(question, accumulatedResponse); } catch {}
     }
     options.onDone();
   };
@@ -815,6 +818,30 @@ export async function runChatAgent(
       onToken('', true);
       // Fall through to normal chat
     }
+  }
+
+  // ── Brain intercept — check JUMARI's learned knowledge before calling Groq ──
+  // Skip brain for image-attached messages (need vision) and very short messages
+  if (!imageBase64 && question.length > 10) {
+    try {
+      const brainHit = await queryBrain(question);
+      if (brainHit && brainHit.confidence >= 0.6) {
+        // Serve from brain — NO Groq call needed
+        trackSuccess('brain', 'cache_hit', 'brain_v1');
+        incrementRequestCount();
+        // Stream the answer with a slight typing feel
+        const answer = brainHit.answer;
+        const chunks = answer.match(/.{1,60}/gs) || [answer];
+        for (const chunk of chunks) {
+          onToken(chunk);
+          await new Promise(r => setTimeout(r, 15));
+        }
+        // Store the brain entry ID so UI can show feedback buttons
+        (options as any)._brainEntryId = brainHit.id;
+        await onDone();
+        return;
+      }
+    } catch {} // fail open — if brain errors, proceed to Groq
   }
 
   let contextBlock = '';
