@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Check, User, Calendar, Mail, Phone, MapPin, Sparkles } from 'lucide-react';
+import { ArrowRight, Check, User, Calendar, Mail, Phone, MapPin, Sparkles, Key, UserPlus } from 'lucide-react';
 import { UserProfile, saveProfile } from '../services/UserProfile';
 import { InlineStarSphere } from './InlineStarSphere';
 import { cpuCores } from '../services/CPUAccelerator';
+import SubscriptionService from '../services/SubscriptionService';
 
 interface OnboardingProps {
   onComplete: (profile: UserProfile) => void;
@@ -150,16 +151,40 @@ function StarField() {
 }
 
 export function Onboarding({ onComplete }: OnboardingProps) {
-  const [phase, setPhase]   = useState<'welcome' | 'form' | 'done'>('welcome');
+  const [phase, setPhase]   = useState<'welcome' | 'usertype' | 'license' | 'form' | 'done'>('welcome');
   const [stepIdx, setStepIdx] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({
     name: '', birthday: '', email: '', phone: '', address: '',
   });
+  const [licenseKey, setLicenseKey] = useState('');
+  const [licenseStatus, setLicenseStatus] = useState<'idle' | 'validating' | 'error'>('idle');
+  const [licenseError, setLicenseError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const licenseRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (phase === 'form') setTimeout(() => inputRef.current?.focus(), 200);
+    if (phase === 'license') setTimeout(() => licenseRef.current?.focus(), 200);
   }, [stepIdx, phase]);
+
+  const handleLicenseSubmit = async () => {
+    if (!licenseKey.trim()) return;
+    setLicenseStatus('validating');
+    setLicenseError('');
+    try {
+      const result = await SubscriptionService.activateLicenseKey(licenseKey.trim());
+      if (result.success) {
+        setLicenseStatus('idle');
+        setPhase('form');
+      } else {
+        setLicenseStatus('error');
+        setLicenseError(result.error || 'Invalid license key. Check and try again.');
+      }
+    } catch {
+      setLicenseStatus('error');
+      setLicenseError('Connection failed. Check your internet and try again.');
+    }
+  };
 
   const currentStep = STEPS[stepIdx];
   const progress    = (stepIdx / STEPS.length) * 100;
@@ -224,12 +249,128 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.55, duration: 0.6, ease: 'easeOut' }}
-              onClick={() => setPhase('form')}
+              onClick={() => setPhase('usertype')}
               className="group flex items-center gap-2.5 text-slate-500 hover:text-slate-300 transition-colors duration-300 text-sm tracking-widest uppercase font-light"
             >
               Get Started
               <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
             </motion.button>
+          </motion.div>
+        )}
+
+        {/* ── NEW OR EXISTING USER ── */}
+        {phase === 'usertype' && (
+          <motion.div
+            key="usertype"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="relative z-10 flex flex-col items-center justify-center h-full gap-8 px-6"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, duration: 0.5 }}
+            >
+              <InlineStarSphere size={120} />
+            </motion.div>
+
+            <div className="text-center">
+              <h2 className="text-xl font-semibold text-white/90 tracking-tight mb-2">Welcome to JUMARI</h2>
+              <p className="text-sm text-white/30">Are you new here or coming back?</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 w-full max-w-sm">
+              <motion.button
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2, duration: 0.4 }}
+                onClick={() => setPhase('form')}
+                className="flex-1 flex flex-col items-center gap-3 py-6 px-4 rounded-2xl transition-all duration-300 hover:scale-[1.02]"
+                style={{ background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)' }}
+              >
+                <UserPlus className="w-6 h-6 text-indigo-400" />
+                <span className="text-sm font-medium text-white/80">New User</span>
+                <span className="text-[10px] text-white/25">Set up your profile</span>
+              </motion.button>
+
+              <motion.button
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3, duration: 0.4 }}
+                onClick={() => setPhase('license')}
+                className="flex-1 flex flex-col items-center gap-3 py-6 px-4 rounded-2xl transition-all duration-300 hover:scale-[1.02]"
+                style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)' }}
+              >
+                <Key className="w-6 h-6 text-emerald-400" />
+                <span className="text-sm font-medium text-white/80">Existing User</span>
+                <span className="text-[10px] text-white/25">Enter your license key</span>
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── LICENSE KEY ENTRY ── */}
+        {phase === 'license' && (
+          <motion.div
+            key="license"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="relative z-10 flex flex-col items-center justify-center h-full gap-6 px-6"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, duration: 0.5 }}
+            >
+              <InlineStarSphere size={100} />
+            </motion.div>
+
+            <div className="text-center">
+              <h2 className="text-lg font-semibold text-white/90 tracking-tight mb-1.5">Welcome Back</h2>
+              <p className="text-xs text-white/30">Enter your license key to continue</p>
+            </div>
+
+            <div className="w-full max-w-sm space-y-3">
+              <input
+                ref={licenseRef}
+                value={licenseKey}
+                onChange={e => { setLicenseKey(e.target.value.toUpperCase()); setLicenseError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleLicenseSubmit()}
+                placeholder="BLM-XXXXX-XXXXX-XXXXX"
+                className="w-full px-4 py-3 rounded-xl text-center text-sm font-mono tracking-widest text-white/80 placeholder-white/15 outline-none transition-all focus:ring-1 focus:ring-emerald-500/30"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+              />
+
+              {licenseError && (
+                <motion.p
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-red-400 text-center"
+                >
+                  {licenseError}
+                </motion.p>
+              )}
+
+              <button
+                onClick={handleLicenseSubmit}
+                disabled={!licenseKey.trim() || licenseStatus === 'validating'}
+                className="w-full py-3 rounded-xl text-sm font-semibold tracking-wide transition-all disabled:opacity-30"
+                style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}
+              >
+                {licenseStatus === 'validating' ? 'Validating...' : 'Activate'}
+              </button>
+
+              <button
+                onClick={() => setPhase('usertype')}
+                className="w-full py-2 text-xs text-white/20 hover:text-white/40 transition-colors"
+              >
+                Go back
+              </button>
+            </div>
           </motion.div>
         )}
 

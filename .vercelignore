@@ -1,0 +1,12 @@
+node_modules
+electron
+out
+release
+.git
+*.dmg
+*.exe
+*.zip
+*.png
+supabase/.temp
+imports
+.claude

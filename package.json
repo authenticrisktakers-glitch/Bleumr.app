@@ -2,6 +2,10 @@
   "name": "bleumr",
   "version": "1.2.0",
   "description": "Bleumr - AI-powered desktop browser and agent platform",
+  "author": {
+    "name": "Bleumr",
+    "email": "hello@bleumr.app"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node ./node_modules/electron-vite/bin/electron-vite.js dev",
@@ -52,6 +56,7 @@
       ]
     },
     "linux": {
+      "category": "Utility",
       "target": [
         "AppImage",
         "deb"
@@ -100,6 +105,7 @@
     "@radix-ui/react-toggle": "^1.1.0",
     "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.0",
+    "@supabase/supabase-js": "^2.101.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/three": "^0.183.1",
     "class-variance-authority": "^0.7.0",

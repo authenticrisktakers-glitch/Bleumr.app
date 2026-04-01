@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { BLEUMR_VOICE_CONTEXT } from '../services/BleumrLore';
 import * as THREE from 'three';
+import { trackError } from '../services/Analytics';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -512,6 +513,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         return;
       } catch (err) {
         console.warn('[Voice] Deepgram TTS failed, using Web Speech:', err);
+        trackError('deepgram', 'tts', (err as any)?.message || 'Deepgram TTS failed');
         stopSpeaking();
       }
     }
@@ -561,8 +563,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const key = apiKeyRef.current;
     const sp = systemPromptRef.current;
     const sysPrompt = sp
-      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally.`
-      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: Respond in 2–4 sentences max. No markdown, no bullet points, no formatting. Speak naturally like a real person talking. Be warm and direct.`;
+      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally. Perfect spelling and grammar always.`
+      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: Respond in 2–4 sentences max. No markdown, no bullet points, no formatting. Speak naturally like a real person talking. Be warm and direct. Perfect spelling and grammar always — never misspell a word.`;
 
     try {
       console.log('[Voice] Requesting AI response...');
@@ -578,7 +580,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       }, 15000);
       if (!res.ok) throw new Error(`AI HTTP ${res.status}`);
       const d = await res.json();
-      const reply = d.choices?.[0]?.message?.content?.trim() ?? 'I had trouble with that — could you try again?';
+      const reply = d.choices?.[0]?.message?.content?.trim() ?? 'Hmm, I couldn\'t get that. Try again?';
       console.log('[Voice] AI reply:', reply.slice(0, 100));
 
       historyRef.current = [...history, { role: 'assistant', content: reply }];
@@ -588,7 +590,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       else { setVS('idle'); setTimeout(() => { if (!closedRef.current && voiceStateRef.current === 'idle') startListeningRef.current(); }, 700); }
     } catch (e) {
       console.warn('[Voice] AI failed:', e);
-      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: 'Something went wrong — tap to try again.' }]);
+      trackError('groq', 'voice_chat', (e as any)?.message || 'Voice AI failed');
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: 'I need a sec — try again shortly.' }]);
       setVS('idle');
     }
   }, [speakText]);
@@ -620,6 +623,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       } else {
         const errText = await res.text().catch(() => '');
         console.warn('[Voice] Whisper error:', res.status, errText);
+        trackError('groq', 'stt', `Whisper HTTP ${res.status}: ${errText.slice(0, 200)}`, res.status);
         // Try fallback model
         if (res.status === 404 || res.status === 400) {
           console.log('[Voice] Retrying with whisper-large-v3...');
@@ -637,6 +641,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       }
     } catch (e) {
       console.warn('[Voice] Whisper fetch failed:', e);
+      trackError('groq', 'stt', (e as any)?.message || 'Whisper fetch failed');
     }
 
     if (!userText) {
@@ -704,7 +709,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch {
-      alert('Microphone access is required for voice chat.');
+      trackError('system', 'microphone', 'Microphone access denied');
+      alert('Please allow microphone access to use voice chat.');
       return;
     }
     streamRef.current = stream;

@@ -723,7 +723,7 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       transition={{ duration: 0.22 }}
       className="fixed inset-0 z-[10001] flex flex-col font-sans select-none overflow-hidden"
-      style={{ background: 'rgba(3,4,12,0.55)', backdropFilter: glass.blur }}
+      style={{ background: 'rgba(3,4,12,0.55)', backdropFilter: glass.blur, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -733,7 +733,7 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
       </div>
 
       {/* ── Top header ── */}
-      <div className="relative flex items-center justify-between px-6 py-3.5 shrink-0 z-10"
+      <div className="relative flex items-center justify-between flex-wrap gap-2 px-4 sm:px-6 py-3.5 shrink-0 z-10"
         style={{
           background: glass.header,
           backdropFilter: glass.blurMd,
@@ -758,7 +758,7 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
         </div>
 
         {/* Center — nav */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 order-3 sm:order-none w-full sm:w-auto justify-center">
           <button onClick={prevPeriod}
             className="p-1.5 rounded-xl hover:bg-white/8 text-slate-500 hover:text-white transition-colors">
             <ChevronLeft className="w-4 h-4" />
@@ -776,7 +776,7 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
         </div>
 
         {/* Right — view toggle + actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           {/* View mode toggle */}
           <div className="flex items-center rounded-xl overflow-hidden"
             style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.025)' }}>
@@ -818,12 +818,13 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
       </div>
 
       {/* ── Body: sidebar + main grid ── */}
-      <div className="flex flex-1 min-h-0 relative z-10">
+      <div className="flex flex-col sm:flex-row flex-1 min-h-0 relative z-10">
 
         {/* ── LEFT SIDEBAR ── */}
-        <div className="w-64 shrink-0 flex flex-col overflow-hidden"
+        <div className="w-full sm:w-64 shrink-0 flex flex-col overflow-hidden max-h-[40vh] sm:max-h-none"
           style={{
             borderRight: '1px solid rgba(255,255,255,0.05)',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
             background: glass.sidebar,
             backdropFilter: glass.blurMd,
           }}>

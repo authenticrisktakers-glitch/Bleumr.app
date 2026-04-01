@@ -252,4 +252,4 @@ UI guide (for voice): If user asks how to find something — sidebar is the ≡ 
 `;
 
 /** Mission Team agent prefix — inject at the top of each agent's system prompt */
-export const BLEUMR_AGENT_PREFIX = BLEUMR_MISSION_TEAM + BLEUMR_UI_MAP;
+export const BLEUMR_AGENT_PREFIX = BLEUMR_MISSION_TEAM + BLEUMR_UI_MAP + `\n\n## Writing Quality\nPerfect spelling, grammar, capitalization, and punctuation in EVERY response. Proofread every sentence before outputting. Misspelling is unacceptable — if unsure of a spelling, use a simpler word you know is correct.\n`;

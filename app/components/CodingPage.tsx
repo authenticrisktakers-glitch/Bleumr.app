@@ -712,7 +712,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     const ctx=activeFile?.content?.trim()??'';
     const lang=activeFile?.language??'code';
     const fname=activeFile?.name??'untitled';
-    const sys=`You are JUMARI Code — a world-class coding assistant in Bleumr. File: "${fname}" (${lang}). Be direct. No preamble. Wrap code in \`\`\`${lang}\\n...\\n\`\`\`. Just do it.`;
+    const sys=`You are JUMARI Code — a world-class coding assistant in Bleumr. File: "${fname}" (${lang}). Be direct. No preamble. Wrap code in \`\`\`${lang}\\n...\\n\`\`\`. Just do it. Perfect spelling and grammar in all explanations — never misspell a word.`;
     const userContent=ctx?`${userMessage}\n\n\`\`\`${lang}\n${ctx}\n\`\`\``:userMessage;
     const msgs:ChatMessage[]=[...messages,{role:'user',content:userMessage}];
     setMessages(msgs);

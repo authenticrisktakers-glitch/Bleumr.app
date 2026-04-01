@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BLEUMR_AGENT_PREFIX } from '../services/BleumrLore';
 import { addScheduleEvent } from './CalendarPage';
+import { trackError } from '../services/Analytics';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Search as SearchIcon, Layers3, X, Zap, CheckCircle2, Bot, Orbit, Sparkles, Archive, Pencil, Download, Trash2, Plus, FolderOpen } from 'lucide-react';
+import { IS_ELECTRON } from '../services/Platform';
 import { InlineStarSphere } from './InlineStarSphere';
 
 // ─── Agent config ─────────────────────────────────────────────────────────────
@@ -1309,13 +1311,13 @@ pre code { background: none; color: #e2e8f0; padding: 0; font-size: .85rem; }
 
 function triggerDownload(content: string, filename: string, mime: string, isPdf = false) {
   if (isPdf) {
-    // Open HTML in a new window and trigger the browser's Save as PDF dialog
-    const pw = window.open('', '_blank', 'width=900,height=700');
-    if (pw) {
-      pw.document.write(content);
-      pw.document.close();
-      pw.onload = () => { pw.focus(); pw.print(); };
-    }
+    // Wrap content in a print-ready HTML page and download as HTML (user can print to PDF from there)
+    const htmlContent = content.startsWith('<') ? content : `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#1a1a1a}h1,h2,h3{margin-top:1.5em}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style></head><body>${content.replace(/\n/g,'<br>')}</body></html>`;
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
     return;
   }
   const blob = new Blob([content], { type: mime });
@@ -2231,7 +2233,7 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
   const [agentPhaseLabel, setAgentPhaseLabel] = useState<Record<AgentId, string>>({ planner: '', researcher: '', synth: '' });
   const [selected, setSelected] = useState<AgentId | null>(null);
   const [lastTask, setLastTask] = useState('');
-  const [viewMode, setViewMode] = useState<'side' | 'top'>('top');
+  const [viewMode, setViewMode] = useState<'side' | 'top'>(IS_ELECTRON ? 'side' : 'top');
   const [cabinetOpen, setCabinetOpen] = useState(false);
   const [wsFiles, setWsFiles] = useState<WSFile[]>(loadWSFiles);
   const abortRef = useRef<AbortController | null>(null);
@@ -2535,6 +2537,7 @@ Write the complete final deliverable following the template structure exactly:`,
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       console.error('[Workspace]', e.message);
+      trackError('groq', 'workspace', e?.message || 'Mission team orchestration failed');
       setPhase('idle');
       setStatuses({ planner: 'idle', researcher: 'idle', synth: 'idle' });
     }
@@ -2577,17 +2580,17 @@ Write the complete final deliverable following the template structure exactly:`,
   const isRunning = phase !== 'idle' && phase !== 'done';
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(135deg,#04060e 0%,#060a18 60%,#040810 100%)', fontFamily: 'inherit' }}>
+    <div className="flex flex-col h-full overflow-y-auto sm:overflow-hidden" style={{ background: 'linear-gradient(135deg,#04060e 0%,#060a18 60%,#040810 100%)', fontFamily: 'inherit' }}>
 
       {/* Minimal top bar — pl-[90px] clears macOS hiddenInset traffic lights */}
-      <div className="flex items-center justify-between pl-[90px] pr-4 py-2 shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div className="flex items-center justify-between pr-4 py-2 shrink-0 sticky top-0 z-[60]"
+        style={{ paddingLeft: IS_ELECTRON ? 90 : 16, paddingTop: IS_ELECTRON ? undefined : 'env(safe-area-inset-top)', borderBottom: '1px solid rgba(255,255,255,0.04)', background: 'rgba(4,6,14,0.95)', backdropFilter: 'blur(20px)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <div className="flex items-center gap-2">
           {phase !== 'idle' && <PhaseRail phase={phase} />}
         </div>
         <div className="flex items-center gap-2">
           {/* View toggle */}
-          <div className="flex items-center rounded-xl overflow-hidden"
+          {IS_ELECTRON && <div className="flex items-center rounded-xl overflow-hidden"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
             {(['side', 'top'] as const).map(mode => (
               <button key={mode} onClick={() => setViewMode(mode)}
@@ -2600,7 +2603,7 @@ Write the complete final deliverable following the template structure exactly:`,
                 {mode === 'side' ? '⬛ Side' : '⬆ Top'}
               </button>
             ))}
-          </div>
+          </div>}
           <button onClick={onClose}
             className="p-2 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors">
             <X className="h-4 w-4" />
@@ -2609,10 +2612,10 @@ Write the complete final deliverable following the template structure exactly:`,
       </div>
 
       {/* Body */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col sm:flex-row flex-1 min-h-0">
 
         {/* ── LEFT: Office ────────────────────────────────────────── */}
-        <div className="relative flex-1 overflow-hidden" style={{ borderRight: '1px solid rgba(255,255,255,0.04)' }}>
+        <div className="relative flex-1 overflow-hidden min-h-[280px] sm:min-h-0" style={{ borderRight: '1px solid rgba(255,255,255,0.04)' }}>
 
           {/* ── Top view ── */}
           <AnimatePresence>
@@ -2873,9 +2876,9 @@ Write the complete final deliverable following the template structure exactly:`,
           </AnimatePresence>
 
           {/* ── Agent stations ── */}
-          <div className="absolute left-0 right-0 flex items-end justify-around px-6" style={{ bottom: 42 }}>
+          <div className="absolute left-0 right-0 flex items-end justify-around px-1 sm:px-6" style={{ bottom: 42 }}>
             {AGENTS.map(agent => (
-              <div key={agent.id} className="relative flex-shrink-0" style={{ width: 210, height: 280 }}>
+              <div key={agent.id} className="relative flex-shrink-0" style={{ width: 'min(30vw, 210px)', height: 'min(42vw, 280px)' }}>
 
                 {/* Chair mat glow on floor */}
                 <motion.div className="absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none"
@@ -2885,7 +2888,7 @@ Write the complete final deliverable following the template structure exactly:`,
                 />
 
                 {/* Character — helmet peeks above standing monitor */}
-                <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 88, zIndex: 1 }}>
+                <div className="absolute left-1/2 -translate-x-1/2 origin-bottom scale-[0.55] sm:scale-100" style={{ bottom: 88, zIndex: 1 }}>
                   <AstronautCharacter
                     agent={agent}
                     status={statuses[agent.id]}
@@ -2897,7 +2900,7 @@ Write the complete final deliverable following the template structure exactly:`,
                 </div>
 
                 {/* Desk — in front of character, covering lower body / chair */}
-                <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 0, zIndex: 2 }}>
+                <div className="absolute left-1/2 -translate-x-1/2 origin-bottom scale-[0.55] sm:scale-100" style={{ bottom: 0, zIndex: 2 }}>
                   <Desk agent={agent} status={statuses[agent.id]} />
                 </div>
               </div>
@@ -2973,7 +2976,7 @@ Write the complete final deliverable following the template structure exactly:`,
         </div>
 
         {/* ── RIGHT: Glass panel ─────────────────────────────────────── */}
-        <div className="w-[340px] flex flex-col shrink-0 relative overflow-hidden"
+        <div className="w-full sm:w-[340px] flex flex-col shrink-0 relative overflow-hidden min-h-[50vh] sm:min-h-0"
           style={{ borderLeft: '1px solid rgba(255,255,255,0.045)', backdropFilter: 'blur(32px) saturate(140%)' }}>
 
           {/* Foggy aura background layers */}
@@ -3050,7 +3053,7 @@ Write the complete final deliverable following the template structure exactly:`,
                   {/* Inline content (short only) */}
                   {!isLarge && (
                     <p className="text-[11px] leading-relaxed whitespace-pre-wrap mb-2.5"
-                      style={{ color: isFinal ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)', display: '-webkit-box', WebkitLineClamp: isFinal ? 999 : 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      style={{ color: isFinal ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)', display: '-webkit-box', WebkitLineClamp: isFinal ? 8 : 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {o.text}
                     </p>
                   )}

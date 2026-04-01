@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from '
 import { shimmerDuration } from '../services/CPUAccelerator';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X } from 'lucide-react';
+import { IS_ELECTRON } from '../services/Platform';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { InlineStarSphere } from './InlineStarSphere';
@@ -9,6 +10,12 @@ import { PlatformSidebar } from './PlatformSidebar';
 import { StarSphereLoader } from './StarSphereLoader';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile } from '../services/UserProfile';
+
+interface WebSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
 
 interface Message {
   id: string;
@@ -19,6 +26,9 @@ interface Message {
   responseTimeMs?: number;
   imageBase64?: string;
   imagePreview?: string;
+  sources?: WebSource[];
+  followUps?: string[];
+  generatedImage?: string;
 }
 
 interface PlatformViewProps {
@@ -43,13 +53,14 @@ interface PlatformViewProps {
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
-  onOpenCoding?: () => void;
-  onOpenTrading?: () => void;
+  onOpenApps?: () => void;
   onSchedule?: (text: string) => void;
   agentStep?: number;
   agentTotalSteps?: number;
   agentCurrentAction?: string;
   onStopAgent?: () => void;
+  /** Open a URL inside Bleumr's browser tab instead of externally */
+  onNavigateInternal?: (url: string) => void;
 }
 
 // Memoised message row — only re-renders if its own content changes
@@ -58,11 +69,15 @@ const MessageRow = memo(function MessageRow({
   isLatestAssistant = false,
   isWorking = false,
   onRetry,
+  onFollowUp,
+  onNavigateInternal,
 }: {
   msg: Message;
   isLatestAssistant?: boolean;
   isWorking?: boolean;
   onRetry?: () => void;
+  onFollowUp?: (q: string) => void;
+  onNavigateInternal?: (url: string) => void;
 }) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = React.useState(false);
@@ -71,6 +86,8 @@ const MessageRow = memo(function MessageRow({
     navigator.clipboard.writeText(msg.content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
+    }).catch(() => {
+      // Clipboard write denied (PWA without user gesture) — silent fail
     });
   };
 
@@ -131,6 +148,52 @@ const MessageRow = memo(function MessageRow({
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
+                    // Render [1], [2] etc. as inline source badges
+                    p({ children }: any) {
+                      if (!msg.sources?.length) return <p>{children}</p>;
+                      const processChildren = (kids: any): any => {
+                        if (!Array.isArray(kids)) kids = [kids];
+                        return kids.map((child: any, i: number) => {
+                          if (typeof child !== 'string') return child;
+                          const parts = child.split(/(\[\d+\])/g);
+                          if (parts.length === 1) return child;
+                          return parts.map((part: string, j: number) => {
+                            const refMatch = part.match(/^\[(\d+)\]$/);
+                            if (!refMatch) return part;
+                            const idx = parseInt(refMatch[1]) - 1;
+                            const src = msg.sources?.[idx];
+                            if (!src) return part;
+                            const domain = (() => { try { return new URL(src.url).hostname.replace('www.', ''); } catch { return ''; } })();
+                            return (
+                              <a
+                                key={`${i}-${j}`}
+                                href={src.url}
+                                onClick={(e) => { if (onNavigateInternal) { e.preventDefault(); onNavigateInternal(src.url); } }}
+                                className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0 rounded-md bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] text-[10px] text-slate-400 hover:text-white transition-colors align-baseline no-underline cursor-pointer"
+                                title={src.title}
+                              >
+                                <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} alt="" className="w-3 h-3 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                {domain.split('.').slice(-2, -1)[0] || domain}
+                              </a>
+                            );
+                          });
+                        });
+                      };
+                      return <p>{processChildren(children)}</p>;
+                    },
+                    a({ href, children, ...props }: any) {
+                      return (
+                        <a
+                          href={href}
+                          onClick={(e) => { if (onNavigateInternal && href) { e.preventDefault(); onNavigateInternal(href); } }}
+                          className="text-sky-400 hover:text-sky-300 underline cursor-pointer"
+                          title={href}
+                          {...props}
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
                     code({ node, className, children, ...props }: any) {
                       const language = /language-(\w+)/.exec(className || '')?.[1] ?? '';
                       const isBlock = !props.inline;
@@ -166,6 +229,13 @@ const MessageRow = memo(function MessageRow({
                   }}
                 >{displayContent}</ReactMarkdown>
               </div>
+              {msg.generatedImage && (
+                <img
+                  src={msg.generatedImage}
+                  alt="Generated image"
+                  className="rounded-xl max-w-full max-h-[512px] object-contain border border-white/10 shadow-lg mt-2"
+                />
+              )}
               {msg.responseTimeMs != null && (
                 <div className="flex items-center gap-3 mt-0.5">
                   {/* Timer */}
@@ -209,6 +279,49 @@ const MessageRow = memo(function MessageRow({
                   )}
                 </div>
               )}
+
+              {/* Web Sources — icon only */}
+              {msg.sources && msg.sources.length > 0 && (
+                <div className="flex gap-1.5 mt-2">
+                  {msg.sources.map((src, i) => {
+                    const domain = (() => { try { return new URL(src.url).hostname.replace('www.', ''); } catch { return src.url; } })();
+                    return (
+                      <a
+                        key={i}
+                        href={src.url}
+                        onClick={(e) => { if (onNavigateInternal) { e.preventDefault(); onNavigateInternal(src.url); } }}
+                        title={src.title || domain}
+                        className="w-6 h-6 rounded-full bg-white/[0.06] hover:bg-white/[0.14] flex items-center justify-center transition-colors cursor-pointer"
+                      >
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                          alt={domain}
+                          className="w-3.5 h-3.5 rounded-sm"
+                          onError={(e) => { (e.target as HTMLImageElement).src = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23334155'/><text x='8' y='12' text-anchor='middle' font-size='10' fill='white'>${domain.charAt(0).toUpperCase()}</text></svg>`; }}
+                        />
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Follow-up Questions */}
+              {msg.followUps && msg.followUps.length > 0 && onFollowUp && (
+                <div className="flex flex-col gap-1.5 mt-3">
+                  {msg.followUps.map((q, i) => (
+                    <button
+                      key={i}
+                      onClick={() => onFollowUp(q)}
+                      className="flex items-center gap-2 text-left text-[12px] text-slate-400 hover:text-white px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.06] hover:border-white/[0.10] transition-all duration-150"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0 opacity-40">
+                        <path d="M4 8l2.5-2L4 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -239,13 +352,13 @@ export const PlatformView = memo(function PlatformView({
   onOpenScheduler,
   onOpenWorkspace,
   onOpenVoiceChat,
-  onOpenCoding,
-  onOpenTrading,
+  onOpenApps,
   onSchedule,
   agentStep = 0,
   agentTotalSteps = 50,
   agentCurrentAction = '',
   onStopAgent,
+  onNavigateInternal,
 }: PlatformViewProps) {
   // ── Local input state — typing never touches App.tsx ──
   const [input, setInput] = useState('');
@@ -257,14 +370,44 @@ export const PlatformView = memo(function PlatformView({
   const liveAgent = 'JUMARI 1.0';
   const comingSoonAgents = ['Juzae Pro v1', 'Khali Proactive'];
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  const userScrolledUpRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const hasStartedChat = messages.length > 0;
+
+  // ── Track mobile virtual keyboard via visualViewport API ──
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const kbHeight = window.innerHeight - vv.height;
+      setKeyboardOffset(kbHeight > 50 ? kbHeight : 0);
+      setViewportHeight(vv.height);
+      // Auto-scroll chat to bottom when keyboard opens
+      if (kbHeight > 50 && chatContainerRef.current && !userScrolledUpRef.current) {
+        requestAnimationFrame(() => {
+          chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
+        });
+      }
+    };
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
 
   // Refocus input as soon as JUMARI finishes responding
   useEffect(() => {
     if (!isAgentWorking) {
       inputRef.current?.focus();
+      // Reset scroll lock when response finishes so next message scrolls
+      userScrolledUpRef.current = false;
     }
   }, [isAgentWorking]);
 
@@ -276,9 +419,27 @@ export const PlatformView = memo(function PlatformView({
     }
   }, [voiceTranscript]);
 
-  // Auto-scroll on new messages
+  // Detect if user has scrolled up (don't fight their scroll position)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUpRef.current = distFromBottom > 150;
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll — uses RAF-throttled scrollTop instead of competing scrollIntoView animations
+  useEffect(() => {
+    if (userScrolledUpRef.current) return;
+    if (scrollRafRef.current) return; // already scheduled
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const el = chatContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }, [messages]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
@@ -289,7 +450,7 @@ export const PlatformView = memo(function PlatformView({
     const imgPreview = attachedImage?.preview;
     setInput('');
     setAttachedImage(null);
-    onSubmit(trimmed || '(analyze this image)', img, imgPreview);
+    onSubmit(trimmed, img, imgPreview);
   }, [input, attachedImage, isAgentWorking, onSubmit]);
 
   const handleImageAttach = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -354,7 +515,8 @@ export const PlatformView = memo(function PlatformView({
   }), [isFocused]);
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]">
+    <div className="fixed inset-x-0 top-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
+      style={{ height: keyboardOffset > 0 ? viewportHeight : '100%' }}>
 
       {/* Background stars — memoised, never re-renders */}
       <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-50' : 'opacity-100'}`}>
@@ -377,14 +539,13 @@ export const PlatformView = memo(function PlatformView({
         onOpenScheduler={onOpenScheduler}
         onOpenWorkspace={onOpenWorkspace}
         onOpenVoiceChat={onOpenVoiceChat}
-        onOpenCoding={onOpenCoding}
-        onOpenTrading={onOpenTrading}
+        onOpenApps={onOpenApps}
         onSchedule={(text) => { onSchedule?.(text); }}
       />
 
       <div className="flex-1 flex flex-col relative z-10 w-full h-full">
         {/* Top Header */}
-        <div className="h-16 flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: 80 }}>
+        <div className="flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: IS_ELECTRON ? 80 : 16, paddingTop: IS_ELECTRON ? 16 : 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingBottom: 8, minHeight: IS_ELECTRON ? 64 : undefined }}>
           <div className="flex items-center">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -395,7 +556,7 @@ export const PlatformView = memo(function PlatformView({
             </button>
           </div>
 
-          <div className="absolute left-1/2 -translate-x-1/2 top-4 z-50">
+          <div className="absolute left-1/2 -translate-x-1/2 z-50" style={{ top: IS_ELECTRON ? 16 : 'calc(env(safe-area-inset-top, 0px) + 8px)' }}>
             <div className="relative">
               <button
                 onClick={() => setIsAgentDropdownOpen(!isAgentDropdownOpen)}
@@ -470,10 +631,10 @@ export const PlatformView = memo(function PlatformView({
                   layoutId="main-sphere"
                   transition={{ duration: 0.8, type: 'spring', bounce: 0.2 }}
                   className="cursor-pointer pointer-events-auto hover:scale-[1.02] active:scale-[0.98] transition-transform duration-500 ease-out"
-                  onClick={onOpenBrowser}
-                  title="Open Browser Workspace"
+                  onClick={IS_ELECTRON ? onOpenBrowser : undefined}
+                  title={IS_ELECTRON ? "Open Browser Workspace" : "Bleumr AI"}
                 >
-                  <InlineStarSphere size={220} />
+                  <InlineStarSphere size={typeof window !== 'undefined' && window.innerWidth < 640 ? 140 : 220} />
                 </motion.div>
               </motion.div>
             )}
@@ -489,10 +650,14 @@ export const PlatformView = memo(function PlatformView({
 
           {/* Chat Messages */}
           <div
-            className={`flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 lg:px-32 scrollbar-hide pb-32 transition-opacity duration-500 ${hasStartedChat ? 'opacity-100' : 'opacity-0'}`}
+            ref={chatContainerRef}
+            className={`flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 lg:px-32 scrollbar-hide transition-opacity duration-500 ${hasStartedChat ? 'opacity-100' : 'opacity-0'}`}
             style={{
-              WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 200px), transparent calc(100% - 110px))',
-              maskImage: 'linear-gradient(to bottom, black calc(100% - 200px), transparent calc(100% - 110px))',
+              paddingBottom: keyboardOffset > 0 ? 80 : 128,
+              ...(keyboardOffset > 0 ? {} : {
+                WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 200px), transparent calc(100% - 110px))',
+                maskImage: 'linear-gradient(to bottom, black calc(100% - 200px), transparent calc(100% - 110px))',
+              }),
             }}
           >
             <div className="max-w-3xl mx-auto w-full pt-8 flex flex-col gap-6">
@@ -512,6 +677,8 @@ export const PlatformView = memo(function PlatformView({
                       onRetry={msg.role === 'assistant' && msg.responseTimeMs != null && prevUserMsg && !isAgentWorking
                         ? () => onSubmit(prevUserMsg.content, prevUserMsg.imageBase64, prevUserMsg.imagePreview)
                         : undefined}
+                      onFollowUp={msg.role === 'assistant' && !isAgentWorking ? (q) => onSubmit(q) : undefined}
+                      onNavigateInternal={onNavigateInternal}
                     />
                   );
                 });
@@ -525,10 +692,22 @@ export const PlatformView = memo(function PlatformView({
                 return isAgentWorking && !responseStarted ? (
                   <div className="flex justify-start">
                     <div className="flex gap-4 items-center">
-                      <div className="w-8 h-8 rounded-full bg-blue-900/50 flex items-center justify-center shrink-0 border border-blue-500/20">
-                        <InlineStarSphere size={32} />
+                      <div className="w-8 h-8 rounded-full bg-blue-900/50 flex items-center justify-center shrink-0 border border-blue-500/20"
+                        style={{ animation: 'spin 3s linear infinite' }}>
+                        <InlineStarSphere size={32} active />
                       </div>
-                      <div className="text-slate-500 text-sm animate-pulse">Thinking...</div>
+                      <div className="flex items-center gap-[3px] h-5">
+                        {[0, 1, 2].map(i => (
+                          <span
+                            key={i}
+                            className="inline-block w-[5px] h-[5px] rounded-full bg-slate-400"
+                            style={{
+                              animation: 'thinkingDot 1.4s ease-in-out infinite',
+                              animationDelay: `${i * 0.2}s`,
+                            }}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : null;
@@ -590,10 +769,15 @@ export const PlatformView = memo(function PlatformView({
         </AnimatePresence>
 
         {/* ── Liquid Glass Input Area ── */}
-        <div className="absolute bottom-0 w-full pb-6 pt-16 px-4" style={{
-          background: 'linear-gradient(to top, rgba(10,10,10,0.72) 0%, rgba(10,10,10,0.35) 40%, transparent 100%)',
+        <div className="absolute left-0 right-0 w-full px-4 z-30 transition-[bottom,padding] duration-200 ease-out" style={{
+          bottom: 0,
+          paddingTop: keyboardOffset > 0 ? 8 : 16,
+          paddingBottom: keyboardOffset > 0 ? 8 : 'calc(1.5rem + env(safe-area-inset-bottom))',
+          background: keyboardOffset > 0
+            ? 'rgba(10,10,10,0.98)'
+            : 'linear-gradient(to top, rgba(10,10,10,0.72) 0%, rgba(10,10,10,0.35) 40%, transparent 100%)',
         }}>
-          <div className="max-w-xl mx-auto w-full">
+          <div className="max-w-xl mx-auto w-full px-2 sm:px-0">
 
             {/* Outer ambient glow halo */}
             <div
@@ -694,9 +878,11 @@ export const PlatformView = memo(function PlatformView({
               </div>
             </div>
 
-            <div className="text-center mt-4 text-[9px] text-white/25 tracking-wide">
-              JUMARI 1.0 can make mistakes. Verify important information.
-            </div>
+            {keyboardOffset === 0 && (
+              <div className="text-center mt-4 text-[9px] text-white/25 tracking-wide">
+                JUMARI 1.0 can make mistakes. Verify important information.
+              </div>
+            )}
           </div>
         </div>
 

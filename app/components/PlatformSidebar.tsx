@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Code2, BarChart3 } from 'lucide-react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle } from 'lucide-react';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
+import { IS_ELECTRON } from '../services/Platform';
 
 interface PlatformSidebarProps {
   isOpen: boolean;
@@ -19,8 +20,7 @@ interface PlatformSidebarProps {
   onOpenScheduler?: () => void;
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
-  onOpenCoding?: () => void;
-  onOpenTrading?: () => void;
+  onOpenApps?: () => void;
   onSchedule?: (dateStr: string) => void;
 }
 
@@ -60,8 +60,7 @@ export function PlatformSidebar({
   onOpenScheduler,
   onOpenWorkspace,
   onOpenVoiceChat,
-  onOpenCoding,
-  onOpenTrading,
+  onOpenApps,
   onSchedule,
 }: PlatformSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -164,7 +163,7 @@ export function PlatformSidebar({
 
       <div
         className="fixed top-0 left-0 h-full w-[260px] z-40 flex flex-col text-slate-300 font-sans animate-in slide-in-from-left-8 duration-300 ease-out"
-        style={sidebarStyle}
+        style={{ ...sidebarStyle, paddingTop: 'env(safe-area-inset-top)' }}
       >
 
       {/* Header: Search + New Chat + Close */}
@@ -202,11 +201,10 @@ export function PlatformSidebar({
         {/* Quick-action tabs */}
         <div className="flex flex-col gap-px px-2 py-2">
           {([
-            { label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); } },
+            ...(IS_ELECTRON ? [{ label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); } }] : []),
             { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); } },
             { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); } },
-            { label: 'Code',          icon: <Code2 className="w-4 h-4 shrink-0" />, color: 'text-emerald-400', hoverBg: 'rgba(52,211,153,0.12)',  action: () => { onOpenCoding?.(); onClose(); } },
-            { label: 'Trading',       icon: <BarChart3 className="w-4 h-4 shrink-0" />, color: 'text-amber-400',   hoverBg: 'rgba(245,158,11,0.12)',  action: () => { onOpenTrading?.(); onClose(); } },
+            ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); } }] : []),
           ] as const).map(item => (
             <button
               key={item.label}
@@ -306,6 +304,7 @@ export function PlatformSidebar({
         <button
           onClick={() => setShowProfileMenu(v => !v)}
           className="w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-colors"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
             {initials}

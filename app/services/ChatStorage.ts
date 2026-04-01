@@ -16,6 +16,10 @@ export interface StoredMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   isBrowserFeedback?: boolean;
+  sources?: { title: string; url: string; snippet: string }[];
+  responseTimeMs?: number;
+  followUps?: string[];
+  generatedImage?: string;
 }
 
 const THREADS_KEY = 'orbit_chat_threads';

@@ -1,13 +1,22 @@
 /**
  * SubscriptionService — manages free/pro/stellur tier state and daily usage limits.
  *
- * Architecture (MVP):
+ * Architecture:
  *   • Free usage tracked in localStorage (daily counter, resets at midnight)
- *   • Paid tier stored in SecureStorage (validated against Supabase, 24h TTL)
- *   • License key entered by user → validated → tier unlocked
+ *   • Paid tier validated against Supabase Edge Function (24h TTL cache)
+ *   • License key → Supabase validates → returns tier + API keys
+ *   • API keys stored in SecureStorage (never bundled in source)
  */
 
+import { SecureStorage } from './SecureStorage';
+
 export type SubscriptionTier = 'free' | 'pro' | 'stellur';
+
+export interface ApiKeys {
+  groq: string;
+  deepgram: string;
+  gemini: string;
+}
 
 const FREE_DAILY_LIMIT = 20;
 const PRO_DAILY_LIMIT = 200;   // hidden — never shown in UI, silently enforced
@@ -26,10 +35,10 @@ interface UsageRecord {
   count: number;
 }
 
-// ─── Supabase validation endpoint ─────────────────────────────────────────────
-// Replace with your actual Supabase project URL after setup.
-const SUPABASE_VALIDATE_URL =
-  'https://REPLACE_WITH_YOUR_PROJECT.supabase.co/functions/v1/validate-license';
+// ─── Supabase config ─────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
+const VALIDATE_URL = `${SUPABASE_URL}/functions/v1/validate-license`;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -44,8 +53,8 @@ class SubscriptionService {
       if (Date.now() - data.cachedAt > CACHE_TTL_MS) {
         // Cache expired — re-validate in background, return cached value for now
         if (data.licenseKey) {
-          this.validateLicenseKey(data.licenseKey).then(tier => {
-            if (tier) this._saveTierCache(tier, data.licenseKey);
+          this.validateLicenseKey(data.licenseKey).then(result => {
+            if (result) this._saveTierCache(result.tier, data.licenseKey);
             else this.clearTier();
           });
         }
@@ -83,29 +92,25 @@ class SubscriptionService {
 
   // ── License key validation ──────────────────────────────────────────────────
 
-  async validateLicenseKey(key: string): Promise<SubscriptionTier | null> {
+  async validateLicenseKey(key: string): Promise<{ tier: SubscriptionTier; apiKeys?: ApiKeys } | null> {
     const trimmed = key.trim().toUpperCase();
-
-    // Admin override keys — bypass Supabase, grant stellur locally
-    const ADMIN_STELLUR_KEYS = new Set([
-      'BLM-WFA4-S5KL-N957', // founder admin key
-    ]);
-    if (ADMIN_STELLUR_KEYS.has(trimmed)) return 'stellur';
-
-    if (SUPABASE_VALIDATE_URL.includes('REPLACE_WITH_YOUR_PROJECT')) {
-      // License server not configured — all other keys rejected until Supabase is live
-      return null;
-    }
+    if (!trimmed) return null;
 
     try {
-      const res = await fetch(`${SUPABASE_VALIDATE_URL}?key=${encodeURIComponent(key.trim())}`, {
+      const res = await fetch(`${VALIDATE_URL}?key=${encodeURIComponent(trimmed)}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
       });
       if (!res.ok) return null;
       const data = await res.json();
       const tier = data?.tier as SubscriptionTier;
-      if (tier === 'pro' || tier === 'stellur') return tier;
+      if (tier === 'pro' || tier === 'stellur') {
+        return { tier, apiKeys: data.apiKeys as ApiKeys };
+      }
       return null;
     } catch {
       return null;
@@ -116,11 +121,34 @@ class SubscriptionService {
     const trimmed = key.trim();
     if (!trimmed) return { success: false, error: 'Please enter a license key.' };
 
-    const tier = await this.validateLicenseKey(trimmed);
-    if (!tier) return { success: false, error: 'Invalid or expired license key. Check your email and try again.' };
+    const result = await this.validateLicenseKey(trimmed);
+    if (!result) return { success: false, error: 'Invalid or expired license key. Check your email and try again.' };
 
-    this._saveTierCache(tier, trimmed);
-    return { success: true, tier };
+    // Save tier
+    this._saveTierCache(result.tier, trimmed);
+
+    // Store API keys securely (encrypted in Electron, localStorage in dev)
+    if (result.apiKeys) {
+      if (result.apiKeys.groq) await SecureStorage.set('orbit_api_key', result.apiKeys.groq);
+      if (result.apiKeys.deepgram) await SecureStorage.set('orbit_deepgram_key', result.apiKeys.deepgram);
+      if (result.apiKeys.gemini) await SecureStorage.set('orbit_gemini_key', result.apiKeys.gemini);
+    }
+
+    return { success: true, tier: result.tier };
+  }
+
+  /** Load API keys from SecureStorage (previously fetched from Supabase) */
+  async getStoredApiKeys(): Promise<Partial<ApiKeys>> {
+    const [groq, deepgram, gemini] = await Promise.all([
+      SecureStorage.get('orbit_api_key'),
+      SecureStorage.get('orbit_deepgram_key'),
+      SecureStorage.get('orbit_gemini_key'),
+    ]);
+    return {
+      groq: groq || '',
+      deepgram: deepgram || '',
+      gemini: gemini || '',
+    };
   }
 
   // ── Daily usage ─────────────────────────────────────────────────────────────

@@ -188,6 +188,10 @@ contextBridge.exposeInMainWorld('orbit', {
     install: () => ipcRenderer.invoke('bleumr:update:install'),
   },
 
+  // ── CORS-free fetch (routes through main process, no CORS restrictions) ───
+  proxyFetch: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+    ipcRenderer.invoke('orbit:proxyFetch', url, options),
+
   // ── Model invocation stubs ────────────────────────────────────────────────
   // These return empty values until a provider key is configured.
   // Add real implementations via the connector system.

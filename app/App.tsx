@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, ShieldAlert, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home, Volume2, Search } from 'lucide-react';
+import { Settings, Send, Globe, ChevronLeft, ChevronRight, ChevronDown, X, Terminal, Zap, Lock, RefreshCw, MousePointer2, FileText, ArrowDown, CheckCircle2, CircleDashed, Plus, Bookmark, Mic, MicOff, ShieldCheck, Database, Briefcase, Home, Volume2, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Resizable } from 're-resizable';
 import orbitLogo from 'figma:asset/54880fbad4bd9a1a3b62b3ccc000931000c0afc2.png';
@@ -25,8 +25,11 @@ import { callLocalBrain } from './engine/LocalBrain';
 import { BrowserService } from './services/BrowserService';
 import { SecureStorage } from './services/SecureStorage';
 import SubscriptionService, { SubscriptionTier } from './services/SubscriptionService';
-import { runChatAgent } from './services/ChatAgent';
+import { runChatAgent, generateFollowUps } from './services/ChatAgent';
 import { CodePlayground } from './components/CodePlayground';
+import { AppsPage } from './components/AppsPage';
+import { WebDesignerPage } from './components/WebDesignerPage';
+import { SettingsModal } from './components/SettingsModal';
 import { FormulaModule, detectFormulas } from './components/FormulaModule';
 import { memoryService } from './services/MemoryService';
 import {
@@ -68,6 +71,7 @@ import localforage from 'localforage';
 import { MiniStarSphereButton } from './components/MiniStarSphereButton';
 import { InlineStarSphere } from './components/InlineStarSphere';
 import { OrbitHome } from './components/OrbitHome';
+import { cpuCores } from './services/CPUAccelerator';
 
 // --- Types ---
 type Role = 'user' | 'assistant' | 'system';
@@ -83,10 +87,15 @@ interface Message {
   responseTimeMs?: number;
   imageBase64?: string;
   imagePreview?: string;
+  sources?: import('./services/ChatAgent').WebSource[];
+  followUps?: string[];
+  generatedImage?: string;
+  /** Which agent pipeline created this message */
+  agent?: 'chat' | 'browser';
 }
 
 interface OrbitConfig {
-  engine: 'local' | 'cloud' | 'local_llm_max' | 'max' | 'gemini';
+  engine: 'local' | 'cloud' | 'local_llm_max' | 'max';
   endpoint: string;
   model: string;
   maxMemoryMode: boolean;
@@ -101,6 +110,7 @@ const DEFAULT_CONFIG: OrbitConfig = {
 };
 
 import { PlatformView } from './components/PlatformView';
+import { IS_ELECTRON, IS_PWA, getPWAKeys } from './services/Platform';
 import { JumariApprovalModal } from './components/JumariApprovalModal';
 import { Onboarding } from './components/Onboarding';
 import { SchedulerPage, SchedulingToast, addScheduleEvent } from './components/CalendarPage';
@@ -112,11 +122,69 @@ import { TradingDashboard } from './components/TradingDashboard';
 import { initTrading } from './services/trading';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
+// Detect if running as installed PWA (standalone) vs regular browser tab
+// Lightweight starfield for PWA install gate (no sphere barrier, no cursor lines — just drifting stars)
+const PWA_STAR_COUNT = cpuCores >= 8 ? 300 : cpuCores >= 4 ? 180 : 100;
+
+function PWAInstallStarField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+    let W = 0, H = 0;
+    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; };
+    resize();
+    window.addEventListener('resize', resize);
+    const stars = Array.from({ length: PWA_STAR_COUNT }, () => ({
+      x: Math.random(), y: Math.random(),
+      r: Math.random() * 1.3 + 0.2,
+      baseAlpha: Math.random() * 0.5 + 0.08,
+      twinkleSpd: Math.random() * 0.0008 + 0.0003,
+      twinklePhase: Math.random() * Math.PI * 2,
+      driftSpd: Math.random() * 0.012 + 0.003,
+    }));
+    let startTs: number | null = null;
+    let raf: number;
+    const draw = (ts: number) => {
+      if (startTs === null) startTs = ts;
+      const t = ts - startTs;
+      ctx.fillStyle = '#020208';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < PWA_STAR_COUNT; i++) {
+        const s = stars[i];
+        const tw = Math.sin(t * s.twinkleSpd + s.twinklePhase) * 0.5 + 0.5;
+        const sx = ((s.x * W) + t * s.driftSpd) % W;
+        const sy = s.y * H;
+        ctx.globalAlpha = s.baseAlpha * (0.4 + 0.6 * tw);
+        ctx.fillRect(sx, sy, s.r, s.r);
+      }
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
+  }, []);
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
+}
+
+function isStandaloneMode(): boolean {
+  if (IS_ELECTRON) return true; // Electron is always "installed"
+  // iOS standalone
+  if ((navigator as any).standalone === true) return true;
+  // Android / desktop PWA
+  if (window.matchMedia('(display-mode: standalone)').matches) return true;
+  if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
+  return false;
+}
+
 export default function App() {
+  const [isInstalled, setIsInstalled] = useState(() => isStandaloneMode());
   const [appMode, setAppMode] = useState<'platform' | 'browser'>('platform');
   const [agentMode, setAgentMode] = useState<'chat' | 'browser' | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [devErrors, setDevErrors] = useState<string[]>([]);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [browserInput, setBrowserInput] = useState('');
   const [isAgentWorking, setIsAgentWorking] = useState(false);
@@ -128,13 +196,9 @@ export default function App() {
     } catch {}
     return DEFAULT_CONFIG;
   });
-  // ── Bundled API keys — shipped with every build, never user-facing ────────
-  const BUNDLED_GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY as string || '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';
-  const BUNDLED_DEEPGRAM_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY as string || '9aabd4808ed803973d1d7fb3399040ef933019f9';
-  const [secureApiKey, setSecureApiKey] = useState(BUNDLED_GROQ_KEY);
-  const [geminiKey, setGeminiKey] = useState('');
-  const [deepgramKey, setDeepgramKey] = useState(BUNDLED_DEEPGRAM_KEY);
-  const perplexityKey = ''; // Perplexity removed
+  // ── API keys — loaded from SecureStorage (fetched from Supabase on license activation) ──
+  const [secureApiKey, setSecureApiKey] = useState('');
+  const [deepgramKey, setDeepgramKey] = useState('');
   const [chatThreads, setChatThreads] = useState<ChatThreadMeta[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const currentThreadIdRef = useRef<string | null>(null);
@@ -175,18 +239,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Keys are bundled — always available. Auto-switch to cloud engine on first launch.
-    setConfig(prev => {
-      if (prev.engine === 'local') {
-        const updated = { ...prev, engine: 'cloud' as const };
-        try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
-        return updated;
+    // Load API keys from SecureStorage (previously fetched from Supabase on license activation)
+    SubscriptionService.getStoredApiKeys().then(keys => {
+      if (keys.groq) setSecureApiKey(keys.groq);
+      if (keys.deepgram) setDeepgramKey(keys.deepgram);
+      // Auto-switch to cloud engine if we have a key
+      if (keys.groq) {
+        setConfig(prev => {
+          if (prev.engine === 'local') {
+            const updated = { ...prev, engine: 'cloud' as const };
+            try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
+            return updated;
+          }
+          return prev;
+        });
       }
-      return prev;
+      // PWA: If no keys from SecureStorage, auto-provision from Supabase
+      if (IS_PWA && !keys.groq) {
+        getPWAKeys().then(pwaKeys => {
+          if (pwaKeys.groq) setSecureApiKey(pwaKeys.groq);
+          if (pwaKeys.deepgram) setDeepgramKey(pwaKeys.deepgram);
+          if (pwaKeys.groq) {
+            setConfig(prev => {
+              if (prev.engine === 'local') {
+                const updated = { ...prev, engine: 'cloud' as const };
+                try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
+                return updated;
+              }
+              return prev;
+            });
+          }
+        });
+      }
     });
-    // Persist bundled key to SecureStorage so Electron IPC can access it if needed
-    SecureStorage.set('orbit_api_key', BUNDLED_GROQ_KEY);
-    SecureStorage.get('orbit_gemini_key').then(key => { if (key) setGeminiKey(key); });
 
     // Initialize trading module (price feeds, alert engine, exchange connectors)
     initTrading();
@@ -223,6 +308,8 @@ export default function App() {
   const [showVoiceChat, setShowVoiceChat] = useState(false);
   const [showCoding, setShowCoding] = useState(false);
   const [showTrading, setShowTrading] = useState(false);
+  const [showWebDesigner, setShowWebDesigner] = useState(false);
+  const [showApps, setShowApps] = useState(false);
   const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
@@ -284,7 +371,7 @@ export default function App() {
   }, [showSettings]);
 
   const [showDOMEvents, setShowDOMEvents] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'engine' | 'mdm' | 'plan'>('engine');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'engine' | 'mdm' | 'plan'>('engine');
 
   // ── Subscription / tier state ──────────────────────────────────────────────
   const [tier, setTier] = useState<SubscriptionTier>(() => SubscriptionService.getTier());
@@ -292,16 +379,13 @@ export default function App() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<'limit' | 'browser_agent'>('limit');
   const [updateReady, setUpdateReady] = useState(false);
-  const [licenseKeyInput, setLicenseKeyInput] = useState('');
-  const [licenseKeyStatus, setLicenseKeyStatus] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
-  const [licenseKeyError, setLicenseKeyError] = useState('');
 
   // Hide WebContentsView when ANY full-screen overlay is open.
   // The native WebContentsView sits above all renderer z-index so modals/settings
   // render behind it unless we explicitly push it off-screen first.
   useEffect(() => {
     const orbitBrowser = (window as any).orbit?.browser;
-    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showVoiceChat || showUpgradeModal;
+    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showWebDesigner || showVoiceChat || showUpgradeModal;
     if (anyOverlayOpen) {
       orbitBrowser?.hideAll?.();
     } else if (appMode === 'browser' && activeTabId) {
@@ -311,7 +395,7 @@ export default function App() {
       }, 180);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScheduler, showWorkspace, showCoding, showTrading, showVoiceChat, showUpgradeModal]);
+  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showWebDesigner, showVoiceChat, showUpgradeModal]);
 
   // Code Editor Panel
   const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
@@ -372,14 +456,9 @@ export default function App() {
   }, [config.engine]);
 
   useEffect(() => {
-    const handleErr = (e: ErrorEvent) => {
-      const msg = e.message || 'Unknown runtime error';
-      setDevErrors(prev => prev.includes(msg) ? prev : [...prev, msg]);
-    };
-    const handleRejection = (e: PromiseRejectionEvent) => {
-      const msg = e.reason?.message || String(e.reason) || 'Unhandled promise rejection';
-      setDevErrors(prev => prev.includes(msg) ? prev : [...prev, msg]);
-    };
+    // Silently swallow runtime errors in production — no user-facing display
+    const handleErr = (e: ErrorEvent) => { console.warn('[App] runtime error:', e.message); };
+    const handleRejection = (e: PromiseRejectionEvent) => { console.warn('[App] unhandled rejection:', e.reason); };
     window.addEventListener('error', handleErr);
     window.addEventListener('unhandledrejection', handleRejection);
 
@@ -388,6 +467,26 @@ export default function App() {
       window.removeEventListener('unhandledrejection', handleRejection);
     };
   }, []);
+
+  // Global link interceptor — open all external links inside Bleumr browser tab
+  useEffect(() => {
+    const handleLinkClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      // Only intercept http/https links (skip anchors, javascript:, mailto:, etc.)
+      if (!/^https?:\/\//i.test(href)) return;
+      // Skip links that are already handled by onClick (source citations etc.)
+      if (anchor.dataset.internal) return;
+      e.preventDefault();
+      e.stopPropagation();
+      createTab(href);
+      setAppMode('browser');
+    };
+    document.addEventListener('click', handleLinkClick, true);
+    return () => document.removeEventListener('click', handleLinkClick, true);
+  }, [createTab]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -743,7 +842,7 @@ export default function App() {
     // True when the user has a real page loaded (not Bleumr home screen)
     const isOnRealPage = !!currentUrl && currentUrl !== 'orbit://home' && !currentUrl.startsWith('orbit://');
     // Cloud-capable engines can handle conversational + page-aware queries
-    const isCloudEngine = config.engine === 'cloud' || config.engine === 'max' || config.engine === 'gemini';
+    const isCloudEngine = config.engine === 'cloud' || config.engine === 'max';
     // Route to browser agent for all messages when on a real page with a cloud engine
     const routeToBrowserAgent = isOnRealPage && isCloudEngine;
 
@@ -778,7 +877,7 @@ export default function App() {
        // Add user message; assistant message is created lazily on first token (avoids React timing bug)
        setMessages(prev => [
          ...prev,
-         { id: messageId + '-u', role: 'user', content: processedInput, ...(imageBase64 ? { imageBase64, imagePreview } : {}) },
+         { id: messageId + '-u', role: 'user', content: processedInput, agent: 'chat', ...(imageBase64 ? { imageBase64, imagePreview } : {}) },
        ]);
 
        // Build full conversation history (last 20 exchanges for context)
@@ -811,6 +910,9 @@ export default function App() {
       // rawContent accumulates the FULL unstripped response so onDone can parse
       // <schedule> and <open> tags even though they're hidden from display.
       let rawContent = '';
+      // Sources collected from web search — attached to the message in onDone
+      let pendingSources: import('./services/ChatAgent').WebSource[] = [];
+      let pendingImage: string | undefined;
 
       // Strip hidden XML tags and raw HTML dumps from streaming content.
       // Handles complete tags, partial mid-stream tags, and raw HTML responses.
@@ -824,9 +926,15 @@ export default function App() {
         let s = content
           .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
           .replace(/<open>[\s\S]*?<\/open>/gi, '')
-          .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '');
+          .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
+          .replace(/<followups>[\s\S]*?<\/followups>/gi, '')
+          // Catch orphaned closing tags (model sometimes forgets opening tag)
+          .replace(/<\/followups>/gi, '')
+          .replace(/<\/schedule>/gi, '')
+          .replace(/<\/open>/gi, '')
+          .replace(/<\/workspace>/gi, '');
         // Hide partial opening tags still mid-stream
-        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '');
+        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '');
         return s.trimEnd();
       };
 
@@ -841,7 +949,7 @@ export default function App() {
              rawContent = replace ? token : rawContent + token;
              const exists = next.some((m: any) => m.id === messageId);
              if (!exists) {
-               next = [...next, { id: messageId, role: 'assistant' as const, content: stripStreamingTags(rawContent) }];
+               next = [...next, { id: messageId, role: 'assistant' as const, content: stripStreamingTags(rawContent), agent: 'chat' as const }];
              } else {
                next = next.map((m: any) =>
                  m.id === messageId
@@ -868,9 +976,7 @@ export default function App() {
 
        runChatAgent(processedInput, history, {
          apiKey: secureApiKey,
-         geminiKey: geminiKey || undefined,
          useMax: config.engine === 'max',
-         useGemini: config.engine === 'gemini',
          signal: chatAbort.signal,
          userProfile: userProfile ? {
            name: userProfile.name,
@@ -880,6 +986,8 @@ export default function App() {
            address: userProfile.address,
          } : null,
          onSearching: () => upsertAssistant(`Orbiting....`, true),
+         onSources: (sources) => { console.log('[App] Got sources:', sources.length, sources.map(s => s.url)); pendingSources = sources; },
+         onImage: (dataUrl) => { pendingImage = dataUrl; },
          onToken: (token, replace) => upsertAssistant(token, replace ?? false),
          onDone: () => {
            const responseTimeMs = Date.now() - createdAt;
@@ -1029,6 +1137,28 @@ export default function App() {
            const isRawHtmlDump = rawContent.trim().match(/^<!DOCTYPE\s+html/i) || rawContent.trim().match(/^<html[\s>]/i);
            const cleanHtmlMsg = "Opening your page in the browser now ✓";
 
+           // Parse follow-up questions from <followups> tag
+           const followUpsMatch = rawContent.match(/<followups>([\s\S]*?)<\/followups>/i);
+           let followUps: string[] = followUpsMatch
+             ? followUpsMatch[1].split('\n').map(l => l.trim()).filter(l => l.length > 0 && l.length < 80).slice(0, 3)
+             : [];
+
+           // Build extras to attach to the assistant message
+           const msgExtras: Record<string, any> = { responseTimeMs };
+           if (pendingSources.length > 0) msgExtras.sources = pendingSources;
+           if (followUps.length > 0) msgExtras.followUps = followUps;
+           if (pendingImage) msgExtras.generatedImage = pendingImage;
+           if (isRawHtmlDump) msgExtras.content = cleanHtmlMsg;
+
+           // If no follow-ups from model, generate them async (non-blocking)
+           if (followUps.length === 0 && rawContent.length > 30 && secureApiKey) {
+             generateFollowUps(processedInput, rawContent.slice(0, 500), secureApiKey).then(fups => {
+               if (fups.length > 0) {
+                 setMessages(prev => prev.map(m => m.id === messageId ? { ...m, followUps: fups } : m));
+               }
+             });
+           }
+
            // Persist thread after response is complete (pure state update only)
            setMessages(prev => {
              let base = prev;
@@ -1049,9 +1179,9 @@ export default function App() {
 
              const next: any[] = hasResponse
                ? base.map((m: any) => m.id === messageId
-                   ? { ...m, responseTimeMs, ...(isRawHtmlDump ? { content: cleanHtmlMsg } : {}) }
+                   ? { ...m, ...msgExtras }
                    : m)
-               : [...base, { id: messageId, role: 'assistant' as const, content: "I didn't receive a response. Please try again.", responseTimeMs }];
+               : [...base, { id: messageId, role: 'assistant' as const, content: "I didn't receive a response. Please try again.", ...msgExtras }];
 
              const chatMsgs = next.filter(
                (m: any) => (m.role === 'user' || m.role === 'assistant') && !m.isBrowserFeedback && m.content?.trim()
@@ -1156,16 +1286,16 @@ export default function App() {
 
        setMessages(prev => [
           ...prev,
-          { id: Date.now().toString(), role: 'user', content: processedInput }
+          { id: Date.now().toString(), role: 'user', content: processedInput, agent: 'browser' }
        ]);
-       currentMessages = [...messages, 
-         { id: Date.now().toString(), role: 'user', content: processedInput }
+       currentMessages = [...messages,
+         { id: Date.now().toString(), role: 'user', content: processedInput, agent: 'browser' }
        ] as Message[];
     } else {
        // Cloud / Max engines — Comet-style unified agent
        // Handles both browser automation and conversational page questions
        setAgentMode('browser');
-       currentMessages = [...messages, { id: Date.now().toString(), role: 'user', content: processedInput } as Message];
+       currentMessages = [...messages, { id: Date.now().toString(), role: 'user', content: processedInput, agent: 'browser' } as Message];
        setMessages([...currentMessages]);
     }
 
@@ -1364,11 +1494,12 @@ export default function App() {
            }
         }
         
-        const assistantMsg: Message = { 
-          id: Date.now().toString() + '-ai', 
-          role: 'assistant', 
-          content: aiResponseText, 
-          action 
+        const assistantMsg: Message = {
+          id: Date.now().toString() + '-ai',
+          role: 'assistant',
+          content: aiResponseText,
+          action,
+          agent: 'browser',
         };
         currentMessages = [...currentMessages, assistantMsg];
         setMessages([...currentMessages]);
@@ -1621,12 +1752,12 @@ export default function App() {
                     })();
                   `) || '';
                 } catch {}
-                const isFinalAction = /\b(send|submit|post|publish|save|confirm|done|sign in|log in|sign up|place order|checkout|pay now|complete|tweet|reply|compose|forward|discard|delete|archive|mark as read|apply|update|upload|create|add to cart|buy now|subscribe|unsubscribe|accept|decline|allow|block|report|next|finish|close)\b/i.test(clickedDesc.trim());
+                const isFinalAction = /\b(send|submit|post|publish|save|confirm|done|sign in|log in|sign up|place order|checkout|pay now|tweet|reply|forward|discard|delete|archive|mark as read|apply|update|upload|add to cart|buy now|subscribe|unsubscribe|accept|decline|allow|block|report|finish)\b/i.test(clickedDesc.trim());
                 systemResult = `Successfully clicked [${action.element_id}]${clickedDesc ? ': "' + clickedDesc + '"' : ''}.`;
                 if (isFinalAction) {
                   // HARD BREAK — completion button was clicked, task is done
                   const confirmMsg = `Done — clicked "${clickedDesc.trim()}".`;
-                  setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: confirmMsg }]);
+                  setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: confirmMsg, agent: 'browser' }]);
                   completionForceBreak = true;
                 }
                 await abortableWait(2000); // Wait for click effects to register naturally
@@ -2136,7 +2267,7 @@ export default function App() {
         // Safety cap: if the agent has performed 12+ actions without ever issuing a reply,
         // it's almost certainly stuck in a loop. Force stop.
         if (totalActionsWithoutReply >= 12) {
-          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Task appears complete — stopping after multiple steps.' }]);
+          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Task appears complete — stopping after multiple steps.', agent: 'browser' }]);
           break;
         }
 
@@ -2148,7 +2279,7 @@ export default function App() {
           const last3 = actionHistory.slice(-3);
           // Same exact action 3 times in a row
           if (last3[0] === last3[1] && last3[1] === last3[2]) {
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'I seem to be stuck repeating the same action. Stopping.' }]);
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'I seem to be stuck repeating the same action. Stopping.', agent: 'browser' }]);
             break;
           }
         }
@@ -2156,7 +2287,7 @@ export default function App() {
         if (actionHistory.length >= 4) {
           const last4 = actionHistory.slice(-4);
           if (last4[0] === last4[2] && last4[1] === last4[3] && last4[0] !== last4[1]) {
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Detected a repeating cycle. Stopping to avoid infinite loop.' }]);
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'Detected a repeating cycle. Stopping to avoid infinite loop.', agent: 'browser' }]);
             break;
           }
         }
@@ -2238,27 +2369,70 @@ export default function App() {
     }
   };
 
-  return (
-    <AgentErrorBoundary>
-      {devErrors.length > 0 && (
-        <div className="fixed bottom-0 right-0 m-4 w-96 max-h-64 overflow-y-auto bg-black/90 border border-red-500/50 rounded-lg p-4 z-[99999] shadow-2xl backdrop-blur-md">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-red-400 font-mono text-xs font-bold flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4" /> DEV ERRORS
-            </span>
-            <button onClick={() => setDevErrors([])} className="text-slate-400 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="space-y-2">
-            {devErrors.map((err, i) => (
-              <div key={i} className="text-red-300 font-mono text-[10px] break-words border-l-2 border-red-500/30 pl-2">
-                {err}
+  // ── PWA Install Gate — block usage unless added to home screen ──
+  if (IS_PWA && !isInstalled) {
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+    return (
+      <div className="fixed inset-0 z-[99999] overflow-hidden text-white font-sans"
+        style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', background: '#020208' }}>
+        {/* Starfield canvas */}
+        <PWAInstallStarField />
+        {/* Content overlay */}
+        <div className="relative z-10 flex flex-col items-center justify-center h-full px-6">
+          <div className="flex flex-col items-center gap-5 max-w-sm text-center">
+            {/* Animated sphere */}
+            <div className="mb-2">
+              <InlineStarSphere size={120} />
+            </div>
+
+            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-300 via-indigo-300 to-cyan-300 bg-clip-text text-transparent">
+              Install Bleumr
+            </h1>
+            <p className="text-sm text-slate-400/80 leading-relaxed max-w-xs">
+              Add to your home screen for the full experience — offline access, faster loads, and a native feel.
+            </p>
+
+            {isIOS ? (
+              <div className="flex flex-col gap-3 w-full mt-2">
+                {[
+                  { n: '1', text: <>Tap the <span className="inline-flex items-center mx-1 px-1.5 py-0.5 bg-white/10 rounded text-white text-xs font-semibold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></span> Share button</> },
+                  { n: '2', text: <>Scroll and tap <span className="font-semibold text-white">"Add to Home Screen"</span></> },
+                  { n: '3', text: <>Tap <span className="font-semibold text-white">"Add"</span> to install</> },
+                ].map((step) => (
+                  <div key={step.n} className="flex items-center gap-3 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-2xl px-4 py-3 text-left">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-indigo-500/30 border border-violet-400/20 flex items-center justify-center shrink-0">
+                      <span className="text-violet-300 text-sm font-bold">{step.n}</span>
+                    </div>
+                    <p className="text-[13px] text-slate-300">{step.text}</p>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <div className="flex flex-col gap-3 w-full mt-2">
+                {[
+                  { n: '1', text: <>Tap the <span className="font-semibold text-white">menu</span> (three dots) in your browser</> },
+                  { n: '2', text: <>Tap <span className="font-semibold text-white">"Add to Home Screen"</span> or <span className="font-semibold text-white">"Install App"</span></> },
+                ].map((step) => (
+                  <div key={step.n} className="flex items-center gap-3 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-2xl px-4 py-3 text-left">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-indigo-500/30 border border-violet-400/20 flex items-center justify-center shrink-0">
+                      <span className="text-violet-300 text-sm font-bold">{step.n}</span>
+                    </div>
+                    <p className="text-[13px] text-slate-300">{step.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[10px] text-slate-500/60 mt-3">Open Bleumr from your home screen to get started.</p>
+            <p className="text-[9px] text-slate-600/40 mt-1">Created by Jumar Washington</p>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <AgentErrorBoundary>
       {/* Onboarding — shown on first launch or when "Add New Profile" is requested */}
       {showOnboarding && (
         <Onboarding onComplete={handleOnboardingComplete} />
@@ -2288,8 +2462,7 @@ export default function App() {
             onOpenScheduler={() => setShowScheduler(true)}
             onOpenWorkspace={() => setShowWorkspace(true)}
             onOpenVoiceChat={() => setShowVoiceChat(true)}
-            onOpenCoding={() => setShowCoding(true)}
-            onOpenTrading={() => setShowTrading(true)}
+            onOpenApps={() => setShowApps(true)}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
             agentTotalSteps={agentTotalSteps}
@@ -2298,6 +2471,7 @@ export default function App() {
               agentAbortRef.current = true;
               chatAbortRef.current?.abort();
             }}
+            onNavigateInternal={(url) => { createTab(url); setAppMode('browser'); }}
           />
         )}
       </AnimatePresence>
@@ -2482,26 +2656,13 @@ export default function App() {
             {/* Chat History — scroll locked while agent is working */}
             <div className={`flex-1 p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 relative ${isAgentWorking ? 'overflow-hidden' : 'overflow-y-auto'}`}>
               <div>
-                {messages.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-80 mt-10">
-                    <div className="flex items-center justify-center mb-6 text-slate-500">
-                       <img src={orbitLogo} alt="Start Task" className="w-20 h-20 opacity-60 invert" />
-                    </div>
-                    <p className="font-medium text-slate-300 text-sm mb-4">Start Task</p>
-                    <div className="w-full max-w-sm border border-slate-800/50 rounded-lg p-4 bg-slate-800/20 shadow-inner">
-                       <p className="text-xs text-indigo-400 font-semibold mb-2">TRY LOCAL EXAMPLES:</p>
-                       <ul className="text-xs text-slate-400 space-y-2 font-mono">
-                         <li><span className="text-slate-500 mr-2">»</span>search google for iphone</li>
-                         <li><span className="text-slate-500 mr-2">»</span>go to amazon and find deals</li>
-                         <li><span className="text-slate-500 mr-2">»</span>scrape emails from this page</li>
-                         <li><span className="text-slate-500 mr-2">»</span>manage instagram</li>
-                         <li><span className="text-slate-500 mr-2">»</span>what do you see on screen?</li>
-                         <li><span className="text-slate-500 mr-2">»</span>export data to csv</li>
-                       </ul>
-                    </div>
+                {messages.filter(m => !m.agent || m.agent === 'browser').length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60 mt-16">
+                    <InlineStarSphere size={48} active={false} />
+                    <p className="font-medium text-slate-500 text-xs mt-4 tracking-wide">Ask JUMARI to browse or automate</p>
                   </div>
                 )}
-                {messages.map((msg, index) => {
+                {messages.filter(m => !m.agent || m.agent === 'browser').map((msg, index) => {
                 // Formatting User Messages
                 if (msg.role === 'user') {
                   return (
@@ -2906,416 +3067,35 @@ export default function App() {
       {/* Settings Modal */}
       <AnimatePresence>
         {showSettings && (
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(24px)' }}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.97, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.97, y: 12 }}
-              transition={{ duration: 0.18, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className="w-full max-w-md overflow-hidden"
-              style={{
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0.06) 100%)',
-                backdropFilter: 'blur(40px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderTop: '1px solid rgba(255,255,255,0.2)',
-                borderLeft: '1px solid rgba(255,255,255,0.15)',
-                boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(255,255,255,0.05) inset, 0 1px 0 rgba(255,255,255,0.15) inset',
-                borderRadius: '4px',
-              }}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                <h2 className="text-sm font-semibold tracking-widest uppercase text-white/60 flex items-center gap-2.5">
-                  <Settings className="w-3.5 h-3.5 text-white/40" />
-                  Configuration
-                </h2>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="w-6 h-6 flex items-center justify-center text-white/30 hover:text-white/80 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Tabs */}
-              <div className="flex" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                <button
-                  onClick={() => setActiveSettingsTab('engine')}
-                  className={`flex-1 py-2.5 text-xs font-medium tracking-wide transition-all ${activeSettingsTab === 'engine' ? 'text-white border-b border-white/50' : 'text-white/30 hover:text-white/60 border-b border-transparent'}`}
-                >
-                  AI Engine
-                </button>
-                <button
-                  onClick={() => setActiveSettingsTab('plan')}
-                  className={`flex-1 py-2.5 text-xs font-medium tracking-wide transition-all ${activeSettingsTab === 'plan' ? 'text-amber-300 border-b border-amber-400/60' : 'text-white/30 hover:text-white/60 border-b border-transparent'}`}
-                >
-                  Plan
-                </button>
-                <button
-                  onClick={() => setActiveSettingsTab('mdm')}
-                  className={`flex-1 py-2.5 text-xs font-medium tracking-wide transition-all ${activeSettingsTab === 'mdm' ? 'text-emerald-300 border-b border-emerald-400/60' : 'text-white/30 hover:text-white/60 border-b border-transparent'}`}
-                >
-                  MDM
-                </button>
-              </div>
-
-              <div className="p-6 overflow-y-auto max-h-[60vh] scrollbar-thin scrollbar-thumb-white/10">
-                {activeSettingsTab === 'plan' ? (
-                  <div className="space-y-5">
-                    {/* Current tier badge */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-300">Current Plan</span>
-                      {tier === 'free' && <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-700 text-slate-300 uppercase tracking-wide">Free</span>}
-                      {tier === 'pro' && <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-600 text-white uppercase tracking-wide">Pro</span>}
-                      {tier === 'stellur' && <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500 text-black uppercase tracking-wide">STELLUR ✦</span>}
-                    </div>
-
-                    {/* Free tier — Solar Energy usage bar (fills up as energy is consumed) */}
-                    {tier === 'free' && (() => {
-                      const limit = SubscriptionService.getFreeDailyLimit();
-                      const pct = Math.min(100, Math.round((dailyUsage / limit) * 100));
-                      const isFull = pct >= 100;
-                      const isHigh = pct >= 80;
-                      const isMid = pct >= 50;
-                      const barColor = isFull ? 'bg-red-500' : isHigh ? 'bg-amber-500' : isMid ? 'bg-amber-400' : 'bg-indigo-500';
-                      const textColor = isFull ? 'text-red-400' : isHigh ? 'text-amber-400' : 'text-indigo-300';
-                      return (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-baseline text-xs">
-                            <span className="text-slate-400 flex items-center gap-1.5">
-                              <span>⚡</span> Solar Energy Used
-                            </span>
-                            <span className={`font-semibold tabular-nums ${textColor}`}>
-                              {isFull ? 'Depleted' : `${pct}%`}
-                            </span>
-                          </div>
-                          <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          {isFull && (
-                            <p className="text-xs text-red-400/80">Energy depleted — recharges at midnight. Upgrade for unlimited.</p>
-                          )}
-                          {isHigh && !isFull && (
-                            <p className="text-xs text-amber-400/80">Running high — upgrade for uninterrupted flow.</p>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* License key activation */}
-                    {tier === 'free' && (
-                      <div className="space-y-2 pt-2 border-t border-slate-800">
-                        <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Have a license key?</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={licenseKeyInput}
-                            onChange={e => { setLicenseKeyInput(e.target.value); setLicenseKeyStatus('idle'); setLicenseKeyError(''); }}
-                            placeholder="PRO-XXXX-XXXX or STELLUR-XXXX"
-                            className="flex-1 bg-white/5 border border-white/10 rounded-sm px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/30"
-                          />
-                          <button
-                            disabled={licenseKeyStatus === 'validating' || !licenseKeyInput.trim()}
-                            onClick={async () => {
-                              setLicenseKeyStatus('validating');
-                              setLicenseKeyError('');
-                              const result = await SubscriptionService.activateLicenseKey(licenseKeyInput);
-                              if (result.success && result.tier) {
-                                setTier(result.tier);
-                                setDailyUsage(SubscriptionService.getDailyUsage());
-                                setLicenseKeyStatus('success');
-                                setLicenseKeyInput('');
-                              } else {
-                                setLicenseKeyStatus('error');
-                                setLicenseKeyError(result.error || 'Invalid key.');
-                              }
-                            }}
-                            className="px-3 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg transition-colors whitespace-nowrap"
-                          >
-                            {licenseKeyStatus === 'validating' ? '...' : 'Activate'}
-                          </button>
-                        </div>
-                        {licenseKeyStatus === 'success' && <p className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> License activated!</p>}
-                        {licenseKeyStatus === 'error' && <p className="text-xs text-red-400">{licenseKeyError}</p>}
-                      </div>
-                    )}
-
-                    {/* Upgrade cards */}
-                    {tier === 'free' && (
-                      <div className="space-y-3 pt-2 border-t border-slate-800">
-                        <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Upgrade</label>
-
-                        {/* Pro card */}
-                        <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold text-white">Bleumr Pro</p>
-                              <p className="text-xs text-slate-400">Unlimited chat, no daily cap</p>
-                            </div>
-                            <span className="text-xl font-bold text-indigo-300">$15<span className="text-xs font-normal text-slate-400">/mo</span></span>
-                          </div>
-                          <ul className="text-xs text-slate-300 space-y-1">
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-indigo-400 shrink-0" />Unlimited JUMARI messages</li>
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-indigo-400 shrink-0" />Calendar & scheduler</li>
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-indigo-400 shrink-0" />All future AI engine updates</li>
-                          </ul>
-                          <button
-                            onClick={() => { setShowSettings(false); createTab('https://buy.stripe.com/REPLACE_PRO_LINK'); setAppMode('browser'); }}
-                            className="w-full py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
-                          >
-                            Get Pro →
-                          </button>
-                        </div>
-
-                        {/* STELLUR card */}
-                        <div className="p-4 bg-amber-500/10 border border-amber-500/40 rounded-xl space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold text-white flex items-center gap-1.5">STELLUR <span className="text-amber-400">✦</span></p>
-                              <p className="text-xs text-slate-400">Everything + Browser Agent</p>
-                            </div>
-                            <span className="text-xl font-bold text-amber-300">$35<span className="text-xs font-normal text-slate-400">/mo</span></span>
-                          </div>
-                          <ul className="text-xs text-slate-300 space-y-1">
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />Everything in Pro</li>
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />Full browser automation agent</li>
-                            <li className="flex items-center gap-2"><CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />Priority support</li>
-                          </ul>
-                          <button
-                            onClick={() => { setShowSettings(false); createTab('https://buy.stripe.com/REPLACE_STELLUR_LINK'); setAppMode('browser'); }}
-                            className="w-full py-2 text-sm font-semibold text-black bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors"
-                          >
-                            Get STELLUR →
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Paid tier — active subscription */}
-                    {tier !== 'free' && (
-                      <div className="space-y-3 pt-2 border-t border-slate-800">
-                        <div className={`p-4 rounded-xl border space-y-2 ${tier === 'stellur' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-indigo-500/10 border-indigo-500/30'}`}>
-                          <p className="text-sm font-semibold text-white">
-                            {tier === 'stellur' ? 'STELLUR ✦ — Active' : 'Pro — Active'}
-                          </p>
-                          <p className="text-xs text-slate-400">Your license is active. All features unlocked.</p>
-                          {tier === 'pro' && (
-                            <p className="text-xs text-slate-500 mt-2">Want browser automation? Upgrade to STELLUR.</p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => { setTier('free'); SubscriptionService.clearTier(); }}
-                          className="text-xs text-slate-500 hover:text-slate-400 transition-colors"
-                        >
-                          Remove license key
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : activeSettingsTab === 'engine' ? (
-                  <div className="space-y-6">
-
-                    {/* 3-dot engine slider */}
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold uppercase tracking-widest text-white/40">AI Engine</label>
-                      {(() => {
-                        const engines = [
-                          { key: 'local', label: 'Eco', sub: 'Local Brain', color: 'text-emerald-400' },
-                          { key: 'cloud', label: 'Lightspeed', sub: 'JUMARI Cloud', color: 'text-sky-400' },
-                          { key: 'max', label: 'Max', sub: 'JUMARI Max', color: 'text-amber-400' },
-                          { key: 'gemini', label: 'Gemini', sub: 'Google AI', color: 'text-violet-400' },
-                        ] as const;
-                        const activeIdx = engines.findIndex(e => e.key === config.engine);
-                        const safeIdx = activeIdx === -1 ? 0 : activeIdx;
-                        const active = engines[safeIdx];
-                        return (
-                          <div className="space-y-3">
-                            {/* Slider track */}
-                            <div className="relative flex items-center px-4 py-5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4 }}>
-                              {/* Track line */}
-                              <div className="absolute left-[calc(2rem)] right-[calc(2rem)] h-px bg-white/10" />
-                              {/* Dots */}
-                              <div className="relative flex justify-between w-full">
-                                {engines.map((e, i) => (
-                                  <button
-                                    key={e.key}
-                                    onClick={() => setConfig({ ...config, engine: e.key })}
-                                    className="flex flex-col items-center gap-2 group"
-                                  >
-                                    <div className={`w-3 h-3 rounded-full border-2 transition-all duration-200 ${safeIdx === i ? `border-current bg-current scale-125 ${e.color}` : 'border-white/20 bg-transparent hover:border-white/40'}`} />
-                                    <span className={`text-[10px] font-semibold tracking-wide transition-colors ${safeIdx === i ? e.color : 'text-white/30 group-hover:text-white/50'}`}>{e.label}</span>
-                                    <span className="text-[9px] text-white/20">{e.sub}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            {/* Active description */}
-                            <p className="text-[11px] text-white/40 text-center">
-                              {safeIdx === 0 && 'Fastest mode. Works fully offline with no internet required.'}
-                              {safeIdx === 1 && 'Standard mode. Powered by JUMARI cloud intelligence.'}
-                              {safeIdx === 2 && 'Max mode. Full power — best responses, deeper thinking.'}
-                              {safeIdx === 3 && 'Google Gemini brain. Fast, creative, and highly capable.'}
-                            </p>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-
-                    {/* Microphone Permission */}
-                <div className="space-y-2 pt-4 border-t border-slate-800">
-                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                    <Mic className="w-4 h-4 text-sky-400" />
-                    Microphone Access
-                  </label>
-                  <p className="text-xs text-slate-500">Bleumr runs inside Electron and needs explicit browser permission for voice input.</p>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        stream.getTracks().forEach(t => t.stop());
-                        setDevErrors(prev => prev.filter(e => !e.toLowerCase().includes('mic')));
-                        // Show success inline
-                        const btn = document.getElementById('mic-perm-btn');
-                        if (btn) { btn.textContent = '✓ Microphone Access Granted'; btn.style.borderColor = '#22c55e'; btn.style.color = '#22c55e'; }
-                      } catch {
-                        const btn = document.getElementById('mic-perm-btn');
-                        if (btn) { btn.textContent = '✗ Permission Denied — Check System Preferences'; btn.style.borderColor = '#ef4444'; btn.style.color = '#ef4444'; }
-                      }
-                    }}
-                    id="mic-perm-btn"
-                    className="w-full py-2 px-4 rounded-lg border border-slate-600 text-sm text-slate-300 hover:border-sky-500 hover:text-sky-300 transition-colors text-left"
-                  >
-                    Request Microphone Permission
-                  </button>
-                </div>
-
-                {/* Approve All Actions */}
-                <div className="space-y-3 pt-4 border-t border-slate-800">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <label className="text-sm font-medium text-white flex items-center gap-2">
-                        <ShieldAlert className="w-4 h-4 text-red-400" />
-                        Approve All Actions
-                      </label>
-                      <p className="text-xs text-slate-500 mt-0.5">Skip approval prompts for every agent action</p>
-                    </div>
-                    <button
-                      onClick={() => setApproveAll(v => !v)}
-                      className={`w-10 h-5 rounded-full relative transition-colors shrink-0 mt-0.5 ${approveAll ? 'bg-red-600' : 'bg-slate-700'}`}
-                    >
-                      <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 shadow transition-all ${approveAll ? 'right-0.5' : 'left-0.5'}`} />
-                    </button>
-                  </div>
-                  {approveAll && (
-                    <div className="flex items-start gap-2.5 p-3 rounded-xl border border-red-500/40 bg-red-500/8">
-                      <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-semibold text-red-300">⚠️ SENSITIVE — Safety disabled</p>
-                        <p className="text-[11px] text-red-400/80 mt-0.5 leading-relaxed">
-                          JUMARI will execute purchases, send emails, post content, and delete data without asking you first. Only enable if you fully trust every task you give it.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {scheduledJobs.length > 0 && (
-                   <div className="space-y-1.5 pt-4 border-t border-slate-800">
-                     <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-indigo-400" />
-                        Background Tasks (croner)
-                     </label>
-                     <div className="flex flex-col gap-2">
-                        {scheduledJobs.map(job => (
-                           <div key={job.id} className="bg-slate-900 border border-slate-800 p-3 rounded-lg flex flex-col gap-1">
-                              <div className="flex justify-between items-start">
-                                 <span className="text-sm text-white font-medium truncate">{job.name}</span>
-                                 <span className="text-xs text-indigo-400 shrink-0 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded">{job.pattern}</span>
-                              </div>
-                              <span className="text-xs text-slate-500">Next run: {job.nextRun}</span>
-                           </div>
-                        ))}
-                     </div>
-                   </div>
-                )}
-                </div>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="p-4 rounded-sm flex gap-3 text-sm text-white/50" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.12)' }}>
-                      <ShieldCheck className="w-5 h-5 opacity-80 shrink-0 mt-0.5" />
-                      <p>
-                        Bleumr supports MDM (Mobile Device Management) policies, granular agent permissions, and local Chromium security rules without needing cloud APIs.
-                      </p>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 rounded-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                         <div>
-                            <p className="text-sm font-medium text-white">Local File Access</p>
-                            <p className="text-xs text-slate-400">Prevent agent from reading system files</p>
-                         </div>
-                         <div className="w-10 h-5 bg-emerald-600 rounded-full relative cursor-not-allowed opacity-80">
-                            <div className="w-4 h-4 bg-white rounded-full absolute right-0.5 top-0.5 shadow"></div>
-                         </div>
-                      </div>
-
-                      <div className="flex items-center justify-between p-3 rounded-sm" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                         <div>
-                            <p className="text-sm font-medium text-white">MCP Integrations</p>
-                            <p className="text-xs text-slate-400">Allow offline connector plugins (Gmail, Slack)</p>
-                         </div>
-                         <div className="w-10 h-5 bg-emerald-600 rounded-full relative cursor-not-allowed opacity-80">
-                            <div className="w-4 h-4 bg-white rounded-full absolute right-0.5 top-0.5 shadow"></div>
-                         </div>
-                      </div>
-
-                    </div>
-                    
-                    <div className="pt-2">
-                       <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">Active MCP Services (Offline)</label>
-                       <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden text-sm divide-y divide-slate-800/60">
-                          <div className="p-3 flex justify-between items-center">
-                             <div className="flex items-center gap-2 text-slate-300">
-                                <Database className="w-4 h-4 text-blue-400" /> Default Local DB
-                             </div>
-                             <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">Connected</span>
-                          </div>
-                          <div className="p-3 flex justify-between items-center">
-                             <div className="flex items-center gap-2 text-slate-300">
-                                <Globe className="w-4 h-4 text-orange-400" /> Outlook/Gmail Dispatcher
-                             </div>
-                             <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">Connected</span>
-                          </div>
-                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="px-5 py-3.5 flex justify-end gap-3" style={{ borderTop: '1px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.15)' }}>
-                <button
-                  onClick={() => {
-                    SecureStorage.set('orbit_api_key', secureApiKey);
-                    setShowSettings(false);
-                  }}
-                  className="px-4 py-1.5 text-xs font-medium tracking-wide text-white/90 transition-all hover:text-white"
-                  style={{
-                    background: 'rgba(99,102,241,0.3)',
-                    border: '1px solid rgba(99,102,241,0.4)',
-                    borderRadius: '3px',
-                    backdropFilter: 'blur(8px)',
-                  }}
-                >
-                  Save
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          <SettingsModal
+            onClose={() => { setShowSettings(false); setSettingsInitialTab('engine'); }}
+            config={config}
+            onConfigChange={setConfig}
+            initialTab={settingsInitialTab}
+            tier={tier}
+            setTier={setTier}
+            dailyUsage={dailyUsage}
+            setDailyUsage={setDailyUsage}
+            secureApiKey={secureApiKey}
+            approveAll={approveAll}
+            setApproveAll={setApproveAll}
+            scheduledJobs={scheduledJobs}
+            onOpenStripe={(url) => { setShowSettings(false); createTab(url); setAppMode('browser'); }}
+            onLicenseActivated={() => {
+              SubscriptionService.getStoredApiKeys().then(keys => {
+                if (keys.groq) setSecureApiKey(keys.groq);
+                if (keys.deepgram) setDeepgramKey(keys.deepgram);
+                setConfig(prev => {
+                  if (prev.engine === 'local') {
+                    const updated = { ...prev, engine: 'cloud' as const };
+                    try { localStorage.setItem('bleumr_config', JSON.stringify(updated)); } catch {}
+                    return updated;
+                  }
+                  return prev;
+                });
+              });
+            }}
+          />
         )}
       </AnimatePresence>
       {/* ── Upgrade / Paywall Notification ──────────────────────────────── */}
@@ -3359,7 +3139,7 @@ export default function App() {
 
                 {/* Upgrade button */}
                 <button
-                  onClick={() => { setShowUpgradeModal(false); setShowSettings(true); setActiveSettingsTab('plan'); }}
+                  onClick={() => { setShowUpgradeModal(false); setSettingsInitialTab('plan'); setShowSettings(true); }}
                   className="shrink-0 px-3 py-1.5 text-[11px] font-semibold text-white/90 transition-all hover:text-white whitespace-nowrap"
                   style={{
                     background: 'rgba(255,255,255,0.12)',
@@ -3474,6 +3254,44 @@ export default function App() {
         </motion.div>
       )}
     </AnimatePresence>
+
+    {/* Web Designer */}
+    <AnimatePresence>
+      {showWebDesigner && (
+        <motion.div
+          key="webdesigner"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <WebDesignerPage onClose={() => setShowWebDesigner(false)} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Apps Page */}
+    <AnimatePresence>
+      {showApps && (
+        <motion.div
+          key="apps"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <AppsPage
+            onClose={() => setShowApps(false)}
+            onOpenCoding={() => { setShowApps(false); setShowCoding(true); }}
+            onOpenTrading={() => { setShowApps(false); setShowTrading(true); }}
+            onOpenWebDesigner={() => { setShowApps(false); setShowWebDesigner(true); }}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
 
     {/* Voice Chat */}
     <AnimatePresence>

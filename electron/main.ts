@@ -558,6 +558,44 @@ ipcMain.handle('bleumr:update:install', () => {
   autoUpdater.quitAndInstall()
 })
 
+// ── CORS-free proxy fetch — routes HTTP requests through main process ──────
+// Renderer can't fetch DuckDuckGo (CORS blocked), so we proxy through Node.
+ipcMain.handle(
+  'orbit:proxyFetch',
+  async (_e, url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+    try {
+      // Security: only allow HTTPS URLs and a limited set of domains
+      const parsed = new URL(url)
+      const allowedHosts = [
+        'html.duckduckgo.com',
+        'duckduckgo.com',
+        'api.groq.com',
+        'generativelanguage.googleapis.com',
+        'api.pollinations.ai',
+        'image.pollinations.ai',
+      ]
+      if (parsed.protocol !== 'https:' || !allowedHosts.some(h => parsed.hostname.endsWith(h))) {
+        return { ok: false, status: 403, text: 'Domain not allowed for proxy fetch' }
+      }
+
+      // Merge caller headers with a sensible default User-Agent (DDG blocks bot-like UAs)
+      const mergedHeaders: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ...(options?.headers || {}),
+      }
+      const res = await fetch(url, {
+        method: options?.method || 'GET',
+        headers: mergedHeaders,
+        body: options?.body,
+      })
+      const text = await res.text()
+      return { ok: res.ok, status: res.status, text }
+    } catch (err: any) {
+      return { ok: false, status: 0, text: err.message || 'Proxy fetch failed' }
+    }
+  },
+)
+
 // Connector / plugin system
 ipcMain.handle(
   'orbit:connector:invoke',
