@@ -276,11 +276,11 @@ export default function App() {
     // Initialize trading module (price feeds, alert engine, exchange connectors)
     initTrading();
 
-    // Load persisted chat threads and auto-restore the most recent conversation
+    // Load persisted chat threads — PWA starts fresh, desktop restores last chat
     const threads = loadThreadsMeta();
     setChatThreads(threads);
 
-    if (threads.length > 0) {
+    if (!IS_PWA && threads.length > 0) {
       const latest = threads[0]; // already sorted newest-first
       const msgs = loadThreadMessages(latest.id);
       if (msgs.length > 0) {

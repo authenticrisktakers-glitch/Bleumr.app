@@ -111,6 +111,14 @@ let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let localRequestCount = 0;
 let localErrorCount = 0;
 
+function getUserName(): string {
+  try {
+    const raw = localStorage.getItem('orbit_user_profile');
+    if (raw) { const p = JSON.parse(raw); return p.name || ''; }
+  } catch {}
+  return '';
+}
+
 export function registerSession() {
   if (sessionRegistered) return;
   sessionRegistered = true;
@@ -121,6 +129,7 @@ export function registerSession() {
     tier: getTier(),
     platform: getPlatform(),
     user_agent: navigator.userAgent.slice(0, 300),
+    user_name: getUserName(),
     request_count: 0,
     error_count: 0,
   };
@@ -135,6 +144,7 @@ export function registerSession() {
         request_count: localRequestCount,
         error_count: localErrorCount,
         tier: getTier(),
+        user_name: getUserName(),
       }).eq('session_id', SESSION_ID);
     } catch (_) {}
   }, 30000);
