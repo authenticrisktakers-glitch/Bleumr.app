@@ -303,7 +303,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                   border: '1px solid rgba(255,255,255,0.07)',
                 }}
               >
-                <UserPlus className="w-4 h-4 text-indigo-400/70 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/50 shrink-0" />
                 <div className="text-left">
                   <span className="text-[13px] font-medium text-white/70 block leading-tight">New User</span>
                   <span className="text-[10px] text-white/20">Set up your profile</span>
@@ -323,7 +323,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                   border: '1px solid rgba(255,255,255,0.07)',
                 }}
               >
-                <Key className="w-4 h-4 text-emerald-400/70 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/50 shrink-0" />
                 <div className="text-left">
                   <span className="text-[13px] font-medium text-white/70 block leading-tight">Existing User</span>
                   <span className="text-[10px] text-white/20">Enter your license key</span>
