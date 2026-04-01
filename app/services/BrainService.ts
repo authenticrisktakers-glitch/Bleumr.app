@@ -216,11 +216,34 @@ export async function queryBrain(question: string): Promise<BrainResult | null> 
   }
 }
 
+// ─── Groq training constants ─────────────────────────────────────────────────
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const TEACHER_MODEL = 'llama-3.3-70b-versatile'; // best quality for distillation
+
+const TEACHER_PROMPT = `You are a knowledge distillation engine. Your job is to extract clean, reusable knowledge from a conversation.
+
+Given a USER QUESTION and an AI RESPONSE, produce a JSON object with:
+- "answer": A clean, standalone, factual answer (no conversational fluff, no "I think", no "Sure!", no filler). This answer should work for anyone asking a similar question in the future. 200-800 words max.
+- "tags": Array of 5-8 lowercase keyword tags for search matching.
+- "category": One of: general, factual, coding, capability, creative, bleumr
+- "quality": float 0.0-1.0 rating of how reusable/factual this knowledge is. Rate LOW (< 0.3) if the answer is opinion-based, time-sensitive, too personal, or vague. Rate HIGH (> 0.7) if it's factual, evergreen, and universally useful.
+- "skip": boolean — true if this Q&A should NOT be stored (greetings, personal questions, time-sensitive data, pure opinion, commands)
+
+ONLY output the JSON. No markdown, no explanation.`;
+
 /**
- * After Groq responds, distill the Q&A and store it in the brain.
- * Applies garbage filters. Deduplicates against existing entries.
+ * GROQ TRAINING LOOP — the core learning mechanism.
+ *
+ * After Groq answers a user, this function:
+ * 1. Sends the Q&A to Groq as a "teacher" call
+ * 2. Groq distills it into clean, reusable knowledge
+ * 3. Stores the distilled knowledge (NOT the raw conversational response)
+ * 4. Deduplicates against existing entries
+ *
+ * This means brain entries are HIGHER QUALITY than raw chat responses.
+ * Groq literally teaches JUMARI what to remember.
  */
-export async function distillAndStore(question: string, groqResponse: string): Promise<void> {
+export async function distillAndStore(question: string, groqResponse: string, apiKey?: string): Promise<void> {
   try {
     await refreshConfig();
     if (!config.learning_enabled) return;
@@ -231,16 +254,16 @@ export async function distillAndStore(question: string, groqResponse: string): P
     const pattern = normalizeQuestion(question);
     if (pattern.length < 4) return;
 
-    // Check for near-duplicate
+    // Check for near-duplicate first (cheap — no API call)
     const { data: existing } = await getClient().rpc('brain_search', {
       q_pattern: pattern,
       q_tags: [],
-      min_conf: 0,    // check all entries, not just high-confidence
-      min_sim: 0.7,   // high threshold for "same question"
+      min_conf: 0,
+      min_sim: 0.7,
     });
 
     if (existing && existing.length > 0) {
-      // Duplicate — bump confidence on existing entry
+      // Duplicate — bump confidence on existing entry instead of creating new
       const entry = existing[0];
       const newConf = Math.min(1.0, (entry.confidence || 0.5) + 0.05);
       await getClient()
@@ -254,19 +277,72 @@ export async function distillAndStore(question: string, groqResponse: string): P
       return;
     }
 
-    // New entry
-    const tags = extractTags(question + ' ' + groqResponse);
-    const category = detectCategory(question);
+    // ── Groq Teacher Call — distill knowledge ──
+    // If we have an API key, ask Groq to distill. Otherwise fall back to raw storage.
+    let distilled: { answer: string; tags: string[]; category: string; quality: number; skip: boolean } | null = null;
+
+    const key = apiKey || await getApiKeyFromStorage();
+    if (key) {
+      try {
+        const teacherRes = await fetch(GROQ_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: TEACHER_MODEL,
+            messages: [
+              { role: 'system', content: TEACHER_PROMPT },
+              { role: 'user', content: `USER QUESTION:\n${question.slice(0, 500)}\n\nAI RESPONSE:\n${groqResponse.slice(0, 3000)}` },
+            ],
+            stream: false,
+            max_completion_tokens: 1024,
+            temperature: 0.2, // low temp for factual distillation
+          }),
+        });
+
+        if (teacherRes.ok) {
+          const teacherData = await teacherRes.json();
+          const raw = teacherData.choices?.[0]?.message?.content?.trim();
+          if (raw) {
+            // Parse JSON — Groq might wrap in ```json blocks
+            const jsonStr = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+            try {
+              distilled = JSON.parse(jsonStr);
+            } catch {
+              // Try extracting JSON from within the response
+              const match = jsonStr.match(/\{[\s\S]*\}/);
+              if (match) distilled = JSON.parse(match[0]);
+            }
+          }
+        }
+      } catch {} // teacher call failed — fall back to raw
+    }
+
+    // If teacher said skip, respect it
+    if (distilled?.skip) return;
+
+    // Use distilled knowledge if available, otherwise fall back to raw
+    const finalAnswer = distilled?.answer || groqResponse.slice(0, 4000);
+    const finalTags = distilled?.tags || extractTags(question + ' ' + groqResponse);
+    const finalCategory = distilled?.category || detectCategory(question);
+    const qualityBoost = distilled?.quality || 0;
+
+    // Quality gate — if Groq rated it below 0.3, don't store
+    if (distilled && qualityBoost < 0.3) return;
+
+    // Initial confidence: 0.5 base + quality bonus (max 0.15)
+    // High-quality distilled entries start closer to serving threshold
+    const initialConfidence = Math.min(0.75, 0.5 + (qualityBoost > 0.7 ? 0.15 : qualityBoost > 0.5 ? 0.08 : 0));
     const status = config.require_admin_review ? 'pending_review' : 'active';
+    const source = distilled ? 'groq_trained' : 'groq_distill';
 
     await getClient().from('brain_entries').insert({
       question_pattern: pattern,
       question_raw: question.slice(0, 500),
-      answer: groqResponse.slice(0, 4000),
-      category,
-      tags,
-      confidence: 0.5,
-      source: 'groq_distill',
+      answer: finalAnswer.slice(0, 4000),
+      category: finalCategory,
+      tags: finalTags,
+      confidence: initialConfidence,
+      source,
       status,
       created_by_session: getSessionId(),
       created_by_device: getDeviceId(),
@@ -276,6 +352,101 @@ export async function distillAndStore(question: string, groqResponse: string): P
   } catch {
     // Fail silently — learning is best-effort
   }
+}
+
+/**
+ * Consolidation — use Groq to merge and improve existing brain entries.
+ * Called from admin panel or on a schedule. Takes low-confidence or similar
+ * entries and asks Groq to produce one clean, improved version.
+ */
+export async function consolidateEntries(entryIds: string[], apiKey: string): Promise<boolean> {
+  try {
+    const { data: entries } = await getClient()
+      .from('brain_entries')
+      .select('*')
+      .in('id', entryIds);
+
+    if (!entries || entries.length < 2) return false;
+
+    const entrySummary = entries.map((e: any) =>
+      `Q: ${e.question_raw}\nA: ${e.answer?.slice(0, 500)}\nConfidence: ${e.confidence}\nHits: ${e.hit_count}`
+    ).join('\n---\n');
+
+    const res = await fetch(GROQ_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: TEACHER_MODEL,
+        messages: [
+          { role: 'system', content: `You are merging similar knowledge entries into one superior entry. Given multiple Q&A pairs about the same topic, produce ONE JSON object with: "question" (best version of the question), "answer" (comprehensive merged answer, 200-800 words), "tags" (5-8 keywords), "category" (general/factual/coding/capability/creative/bleumr). ONLY output JSON.` },
+          { role: 'user', content: entrySummary },
+        ],
+        stream: false,
+        max_completion_tokens: 1500,
+        temperature: 0.3,
+      }),
+    });
+
+    if (!res.ok) return false;
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content?.trim();
+    if (!raw) return false;
+
+    const jsonStr = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+    const merged = JSON.parse(jsonStr.match(/\{[\s\S]*\}/)?.[0] || jsonStr);
+
+    // Archive old entries
+    for (const e of entries) {
+      await getClient()
+        .from('brain_entries')
+        .update({ status: 'archived', updated_at: new Date().toISOString() })
+        .eq('id', e.id);
+    }
+
+    // Create merged entry with boosted confidence
+    const bestConf = Math.max(...entries.map((e: any) => e.confidence || 0));
+    const totalHits = entries.reduce((s: number, e: any) => s + (e.hit_count || 0), 0);
+
+    await getClient().from('brain_entries').insert({
+      question_pattern: normalizeQuestion(merged.question || entries[0].question_raw),
+      question_raw: (merged.question || entries[0].question_raw).slice(0, 500),
+      answer: merged.answer.slice(0, 4000),
+      category: merged.category || entries[0].category,
+      tags: merged.tags || entries[0].tags,
+      confidence: Math.min(1.0, bestConf + 0.1),
+      hit_count: totalHits,
+      source: 'groq_trained',
+      status: 'active',
+      reviewed_by_admin: true,
+      parent_id: entries[0].id, // link to first entry for history
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Helper — get stored API key for background teacher calls */
+async function getApiKeyFromStorage(): Promise<string | null> {
+  try {
+    // Try SecureStorage first (Electron), then localStorage fallback
+    const key = localStorage.getItem('orbit_api_key_raw') ||
+                localStorage.getItem('bleumr_pwa_keys_v3');
+    if (key) {
+      try {
+        const parsed = JSON.parse(key);
+        return parsed.groq || parsed.apiKey || null;
+      } catch {
+        return key; // raw string
+      }
+    }
+    // Check SecureStorage wrapper
+    if ((window as any).orbit?.storage?.getSecure) {
+      return await (window as any).orbit.storage.getSecure('orbit_api_key');
+    }
+  } catch {}
+  return null;
 }
 
 /**

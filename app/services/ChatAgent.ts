@@ -789,8 +789,8 @@ export async function runChatAgent(
           });
         }
       } catch {} // never fail visibly
-      // Learn from Groq — distill Q&A into the brain for future use
-      try { distillAndStore(question, accumulatedResponse); } catch {}
+      // Learn from Groq — teacher call distills clean knowledge into the brain
+      try { distillAndStore(question, accumulatedResponse, apiKey); } catch {}
     }
     options.onDone();
   };
