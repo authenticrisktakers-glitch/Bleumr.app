@@ -37,6 +37,24 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, serviceKey)
 
+    // ── Admin reset: ?reset=true&new_limit=50&admin_key=BLEUMR_ADMIN ──
+    const resetRequested = url.searchParams.get('reset') === 'true'
+    const adminKey = url.searchParams.get('admin_key')
+    if (resetRequested && adminKey === 'BLEUMR_ADMIN_2025') {
+      const newLimit = parseInt(url.searchParams.get('new_limit') || '0') || undefined
+      const updates: Record<string, any> = {
+        is_cooled_down: false,
+        cooldown_until: null,
+        updated_at: new Date().toISOString(),
+      }
+      if (newLimit) updates.daily_limit = newLimit
+      await supabase.from('tier_limits').update(updates).eq('tier', tier)
+      return new Response(
+        JSON.stringify({ reset: true, tier, new_limit: newLimit || 'unchanged' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Get the limit config for this tier
     const { data: limitRow } = await supabase
       .from('tier_limits')

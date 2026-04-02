@@ -853,9 +853,18 @@ export default function App() {
        // 1. Fast local check first
        const subCheck = SubscriptionService.canSendMessage();
        if (!subCheck.allowed) {
-         setUpgradeReason('limit');
-         setShowUpgradeModal(true);
-         setMessages(prev => prev.filter(m => m.role !== 'user' || m.content !== processedInput));
+         if (subCheck.cooldown) {
+           // Cooldown — show the user's message + block notice (don't silently swallow)
+           const blockId = Date.now().toString();
+           setMessages(prev => [
+             ...prev,
+             { id: blockId + '-u', role: 'user' as const, content: processedInput },
+             { id: blockId + '-block', role: 'assistant' as const, content: subCheck.reason || '\u26A1 Absorbing solar energy \u2014 please try again shortly.' },
+           ]);
+         } else {
+           setUpgradeReason('limit');
+           setShowUpgradeModal(true);
+         }
          return;
        }
        // 2. Server-side rate limit check (authoritative — catches admin cooldowns + central tier limits)
@@ -863,9 +872,11 @@ export default function App() {
          const serverCheck = await SubscriptionService.checkServerRateLimit();
          if (serverCheck && !serverCheck.allowed) {
            const mins = serverCheck.cooldown_remaining_sec ? Math.ceil(serverCheck.cooldown_remaining_sec / 60) : 10;
+           const blockId = Date.now().toString();
            setMessages(prev => [
-             ...prev.filter(m => m.role !== 'user' || m.content !== processedInput),
-             { role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.`, createdAt: Date.now() },
+             ...prev,
+             { id: blockId + '-u', role: 'user' as const, content: processedInput },
+             { id: blockId + '-block', role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.` },
            ]);
            return;
          }
@@ -1290,9 +1301,17 @@ export default function App() {
     {
       const subCheck = SubscriptionService.canSendMessage();
       if (!subCheck.allowed) {
-        setUpgradeReason('limit');
-        setShowUpgradeModal(true);
-        setMessages(prev => prev.filter(m => m.role !== 'user' || m.content !== processedInput));
+        if (subCheck.cooldown) {
+          const blockId = Date.now().toString();
+          setMessages(prev => [
+            ...prev,
+            { id: blockId + '-u', role: 'user' as const, content: processedInput },
+            { id: blockId + '-block', role: 'assistant' as const, content: subCheck.reason || '\u26A1 Absorbing solar energy \u2014 please try again shortly.' },
+          ]);
+        } else {
+          setUpgradeReason('limit');
+          setShowUpgradeModal(true);
+        }
         return;
       }
       // Server-side check (authoritative)
@@ -1300,9 +1319,11 @@ export default function App() {
         const serverCheck = await SubscriptionService.checkServerRateLimit();
         if (serverCheck && !serverCheck.allowed) {
           const mins = serverCheck.cooldown_remaining_sec ? Math.ceil(serverCheck.cooldown_remaining_sec / 60) : 10;
+          const blockId = Date.now().toString();
           setMessages(prev => [
-            ...prev.filter(m => m.role !== 'user' || m.content !== processedInput),
-            { role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.`, createdAt: Date.now() },
+            ...prev,
+            { id: blockId + '-u', role: 'user' as const, content: processedInput },
+            { id: blockId + '-block', role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.` },
           ]);
           return;
         }
