@@ -445,9 +445,9 @@ async function streamFromGroq(
         messages,
         stream: true,
         temperature: 0.7,
-        max_completion_tokens: 8192,
-        frequency_penalty: 0.3,
-        presence_penalty: 0.2,
+        max_completion_tokens: 2048,
+        frequency_penalty: 0.6,
+        presence_penalty: 0.5,
       }),
     });
 
@@ -502,17 +502,17 @@ async function streamFromGroq(
     let hasContentTokens = false;
     let fullText = '';
     const seenLines = new Set<string>(); // track every line for instant dedup
-    const HARD_CHAR_CAP = 6000; // safety net — catches runaway loops before they get crazy
+    const HARD_CHAR_CAP = 3000; // hard kill — no response should ever be this long
 
     // When a loop is detected, find where the repetition starts and truncate there
     const truncateAtRepeat = (text: string): string => {
       const t = text.toLowerCase();
-      // Find a 40-char phrase that appears twice — truncate at the second occurrence
-      for (let start = 0; start < Math.min(t.length, 800); start += 5) {
-        const phrase = t.slice(start, start + 40);
-        if (phrase.length < 40) break;
-        const secondIdx = t.indexOf(phrase, start + 40);
-        if (secondIdx !== -1 && secondIdx - start > 50) {
+      // Find a 25-char phrase that appears twice — truncate at the second occurrence
+      for (let start = 0; start < Math.min(t.length, 1200); start += 4) {
+        const phrase = t.slice(start, start + 25);
+        if (phrase.length < 25) break;
+        const secondIdx = t.indexOf(phrase, start + 25);
+        if (secondIdx !== -1 && secondIdx - start > 30) {
           // Cut at the last sentence boundary before the repeat
           const cutRegion = text.slice(0, secondIdx);
           const lastSentenceEnd = cutRegion.search(/[.!?]\s*$/);
@@ -520,24 +520,22 @@ async function streamFromGroq(
           return text.slice(0, cutPoint).trim();
         }
       }
-      // No repeat found — return the full text (don't chop arbitrarily)
       return text.trim();
     };
 
-    // Repetition detector — catches mid-stream looping before it gets bad
-    // Tuned to avoid false positives on normal text while still catching real loops
+    // Aggressive repetition detector — catches mid-stream looping fast
     const detectLoop = (text: string): boolean => {
-      if (text.length < 200) return false;
+      if (text.length < 120) return false;
       const t = text.toLowerCase();
 
-      // Strategy 1: 50+ char phrase appearing twice — long enough to avoid false positives
-      const window = t.slice(-3000);
+      // Strategy 1: 30+ char phrase appearing twice — catches repeated sentences/paragraphs
+      const window = t.slice(-2000);
       const wLen = window.length;
-      for (let start = 0; start < wLen - 120; start += 12) {
-        const phrase = window.slice(start, start + 50);
-        if (phrase.length < 50) break;
-        const secondIdx = window.indexOf(phrase, start + 50);
-        if (secondIdx !== -1 && secondIdx - start > 60) return true;
+      for (let start = 0; start < wLen - 80; start += 8) {
+        const phrase = window.slice(start, start + 30);
+        if (phrase.length < 30) break;
+        const secondIdx = window.indexOf(phrase, start + 30);
+        if (secondIdx !== -1 && secondIdx - start > 35) return true;
       }
 
       // Strategy 2: duplicate headings (markdown ## or ** headers)
@@ -551,13 +549,17 @@ async function streamFromGroq(
         }
       }
 
-      // Strategy 3: duplicate sentences — only flag if sentence is >40 chars (avoids short common phrases)
-      const sentences = t.split(/(?<=[.!?\n])\s+/).map(s => s.trim().replace(/\s+/g, ' ')).filter(s => s.length > 40);
+      // Strategy 3: duplicate sentences — catch anything >25 chars repeated
+      const sentences = t.split(/(?<=[.!?\n])\s+/).map(s => s.trim().replace(/\s+/g, ' ')).filter(s => s.length > 25);
       const sentenceSet = new Set<string>();
       for (const s of sentences) {
         if (sentenceSet.has(s)) return true;
         sentenceSet.add(s);
       }
+
+      // Strategy 4: bullet spam — more than 10 bullets is a loop sign
+      const bulletCount = (text.match(/^[\s]*[-•*]\s/gm) || []).length;
+      if (bulletCount > 10) return true;
 
       return false;
     };
@@ -589,11 +591,11 @@ async function streamFromGroq(
               return;
             }
 
-            // Line-level instant dedup — only catch obviously repeated long lines
+            // Line-level instant dedup — catch repeated lines aggressively
             const newLines = fullText.split('\n');
             for (const ln of newLines.slice(0, -1)) { // skip last (incomplete) line
               const key = ln.trim().toLowerCase().replace(/\s+/g, ' ');
-              if (key.length > 60) { // only flag long lines — short ones are often legitimately similar
+              if (key.length > 30) { // catch any meaningfully repeated line
                 if (seenLines.has(key)) {
                   reader.cancel();
                   const cleaned = truncateAtRepeat(fullText);
@@ -606,7 +608,7 @@ async function streamFromGroq(
             }
 
             // Kill stream if repetition loop detected; emit cleaned text before stopping
-            if (fullText.length > 100 && detectLoop(fullText)) {
+            if (fullText.length > 80 && detectLoop(fullText)) {
               reader.cancel();
               const cleaned = truncateAtRepeat(fullText);
               if (cleaned !== fullText) onToken(cleaned, true);
@@ -763,41 +765,10 @@ export async function runChatAgent(
     options.onToken(token, replace);
   };
   const onDone = async () => {
-    // Auto-continuation: if response ends mid-sentence, ask model to finish
+    // Auto-continuation DISABLED — was causing looped/repeated responses.
+    // With max_completion_tokens: 2048 and tight formatting rules,
+    // responses should end cleanly without needing a continuation call.
     const trimmed = accumulatedResponse.trim();
-    if (
-      !continuationAttempted &&
-      trimmed.length > 30 &&
-      !/[.!?)"'\u2019]$/.test(trimmed) &&
-      !/```\s*$/.test(trimmed) && // don't continue code blocks
-      !/<\/\w+>\s*$/.test(trimmed) // don't continue XML tags
-    ) {
-      continuationAttempted = true;
-      try {
-        const contRes = await guardedGroqFetch(GROQ_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: await resolveModel(apiKey),
-            messages: [
-              { role: 'assistant', content: trimmed },
-              { role: 'user', content: 'You got cut off. Continue exactly where you stopped and finish the full answer. Start from the last incomplete word or sentence.' },
-            ],
-            stream: false,
-            max_completion_tokens: 4096,
-            temperature: 0.7,
-          }),
-        });
-        if (contRes.ok) {
-          const contData = await contRes.json();
-          const contText = contData.choices?.[0]?.message?.content?.trim();
-          if (contText && contText.length < 8000) {
-            accumulatedResponse += ' ' + contText;
-            options.onToken(' ' + contText);
-          }
-        }
-      } catch (e: any) { trackError('groq', 'continuation', e?.message || 'Continuation failed'); }
-    }
     if (accumulatedResponse.length > 10) {
       memoryService.extractFromTurn(question, accumulatedResponse);
       // JUMARI self-awareness: detect if response showed a knowledge gap
@@ -936,19 +907,22 @@ Today: ${todayStr}
 - User is being funny? → Be funny back. Banter is encouraged.
 - User sends one word? → Don't write a paragraph. Match their brevity.
 
-## FORMATTING
-- Short (casual/simple) → 1–3 sentences. Done.
-- Medium → Direct answer first, then **bullet list** with **bold label:** per point.
-- Long → **## Section headers**, bullets under each, bold key terms. Max ~250 words.
-- Code → fenced blocks with language tag. Brief explanation.
-- NEVER output a paragraph longer than 3 sentences. Break it up.
-- Lead with the answer. No preamble.
+## FORMATTING (ABSOLUTE RULES — breaking these is a critical failure)
+- **Short question?** → 1–3 sentences max. Done. Stop writing.
+- **Medium question?** → One direct answer sentence, then 3-5 bullets with **bold label:** each. That's it.
+- **Complex question?** → One **## Header**, 4-6 bullets under it. If you need a second section, one more header + bullets. MAX 2 sections. MAX 200 words total.
+- **Code?** → Fenced block with language tag. 1-2 sentence explanation. Done.
+- NEVER write a wall of text. NEVER write more than 3 sentences in a row without a bullet or line break.
+- NEVER write more than 6 bullets in a single list.
+- Lead with the answer. First sentence = the answer. No warm-up, no context-setting, no preamble.
 
-## ANTI-LOOP (never violate)
-- Say it ONCE. Never repeat a point, sentence, phrase, or idea.
-- Never restate the user's question back to them.
-- Max 8 bullets per section. Total: 300 words max unless they ask for more.
-- When done, STOP. No summary, no closing paragraph, no "let me know."
+## ANTI-LOOP (violating this = broken response)
+- Say it ONCE. If you wrote it, it's done. Moving on.
+- Never restate, rephrase, or re-explain something you already said.
+- Never restate the user's question.
+- If you catch yourself about to repeat a point — STOP the response right there.
+- MAX 6 bullets per list. MAX 200 words per response unless user explicitly asks for detail.
+- When the answer is complete, STOP IMMEDIATELY. No summary. No closing line. No "feel free to ask." Just stop.
 
 ## Core rules
 - STAY ON TOPIC. Answer what they asked. No tangents or bonus info.
