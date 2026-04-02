@@ -827,7 +827,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ────────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4">
+        <div className="flex items-center justify-between px-6 py-4" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
           <div />
           <div className="flex items-center gap-2">
             <button onClick={() => setShowTranscript(v => !v)}
