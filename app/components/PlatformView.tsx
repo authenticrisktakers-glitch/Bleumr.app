@@ -515,8 +515,8 @@ export const PlatformView = memo(function PlatformView({
   }), [isFocused]);
 
   return (
-    <div className="fixed inset-x-0 top-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
-      style={{ height: keyboardOffset > 0 ? viewportHeight : '100%' }}>
+    <div className="fixed inset-x-0 top-0 bottom-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
+      style={{ height: keyboardOffset > 0 ? viewportHeight : '100dvh', minHeight: keyboardOffset > 0 ? undefined : '100dvh' }}>
 
       {/* Background stars — memoised, never re-renders */}
       <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-50' : 'opacity-100'}`}>

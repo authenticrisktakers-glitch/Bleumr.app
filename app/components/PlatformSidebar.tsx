@@ -270,7 +270,7 @@ export function PlatformSidebar({
       <div className="border-t border-white/5 relative">
         {/* Settings row */}
         <button
-          onClick={() => { onOpenSettings(); onClose(); }}
+          onClick={() => { onClose(); setTimeout(() => onOpenSettings(), 250); }}
           className="w-full flex items-center gap-2.5 px-4 py-3 text-[13px] text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-left border-b border-white/5"
         >
           <Settings className="w-3.5 h-3.5 text-slate-500 shrink-0" />
