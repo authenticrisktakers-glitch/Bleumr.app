@@ -563,8 +563,196 @@ async function runCycle(): Promise<CycleResult> {
 
   await reportCycle(result);
 
+  // Generate consolidated improvements report after every cycle
+  try {
+    await generateImprovementsReport();
+  } catch (e: any) {
+    console.error(`  ⚠ Report generation failed: ${e.message}`);
+  }
+
   console.log(`\n  ✅ Cycle complete: ${thoughtCount} thoughts, ${draftCount} drafts, ${groqCallsThisCycle} Groq calls\n`);
   return result;
+}
+
+// ─── Improvements Report Generator ────────────────────────────────────────────
+
+const REPORTS_DIR = path.join(__dirname, 'reports');
+
+async function generateImprovementsReport(): Promise<string> {
+  if (!fs.existsSync(REPORTS_DIR)) fs.mkdirSync(REPORTS_DIR, { recursive: true });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const reportPath = path.join(REPORTS_DIR, `improvements_${timestamp}.txt`);
+
+  // Fetch all thoughts from Supabase grouped by priority
+  let allThoughts: any[] = [];
+  try {
+    const sb = getSupabase();
+    const { data } = await sb
+      .from('consciousness_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    allThoughts = data || [];
+  } catch {
+    // Fall back to empty
+  }
+
+  // Categorize
+  const critical: any[] = [];
+  const high: any[] = [];
+  const medium: any[] = [];
+  const low: any[] = [];
+  const draftsWritten: any[] = [];
+  const completed = CHANGELOG.split('\n').filter(l => l.trim().startsWith('-')).map(l => l.trim().slice(2));
+
+  for (const t of allThoughts) {
+    if (t.type === 'reflection' && (t.tags?.includes('cycle-start') || t.tags?.includes('cycle-end'))) continue;
+    if (t.type === 'draft') { draftsWritten.push(t); continue; }
+    if (t.priority === 'critical') critical.push(t);
+    else if (t.priority === 'high') high.push(t);
+    else if (t.priority === 'medium') medium.push(t);
+    else low.push(t);
+  }
+
+  // Build report
+  const lines: string[] = [];
+  lines.push('╔══════════════════════════════════════════════════════════════════════╗');
+  lines.push('║             JUMARI CONSCIOUSNESS — IMPROVEMENTS REPORT             ║');
+  lines.push('╚══════════════════════════════════════════════════════════════════════╝');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  lines.push(`Total thoughts analyzed: ${allThoughts.length}`);
+  lines.push(`Drafts written: ${draftsWritten.length}`);
+  lines.push('');
+  lines.push('');
+
+  // Already completed
+  lines.push('════════════════════════════════════════════════════════════════');
+  lines.push('  ✅ ALREADY COMPLETED');
+  lines.push('════════════════════════════════════════════════════════════════');
+  lines.push('');
+  for (const item of completed) {
+    lines.push(`  ✓ ${item}`);
+  }
+  lines.push('');
+  lines.push('');
+
+  // Critical
+  if (critical.length) {
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('  🔴 CRITICAL PRIORITY');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+    for (const t of critical) {
+      lines.push(`  [${t.type.toUpperCase()}] ${t.file_context || 'general'}`);
+      lines.push(`  ${t.content}`);
+      lines.push(`  Confidence: ${((t.confidence || 0) * 100).toFixed(0)}% | Tags: ${(t.tags || []).join(', ')}`);
+      lines.push(`  Date: ${new Date(t.created_at).toLocaleString()}`);
+      lines.push('  ─────────────────────────────────────────');
+    }
+    lines.push('');
+  }
+
+  // High
+  if (high.length) {
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('  🟠 HIGH PRIORITY');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+    for (const t of high) {
+      lines.push(`  [${t.type.toUpperCase()}] ${t.file_context || 'general'}`);
+      lines.push(`  ${t.content}`);
+      lines.push(`  Confidence: ${((t.confidence || 0) * 100).toFixed(0)}% | Tags: ${(t.tags || []).join(', ')}`);
+      lines.push('  ─────────────────────────────────────────');
+    }
+    lines.push('');
+  }
+
+  // Medium
+  if (medium.length) {
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('  🟡 MEDIUM PRIORITY');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+    for (const t of medium) {
+      lines.push(`  [${t.type.toUpperCase()}] ${t.file_context || 'general'}`);
+      lines.push(`  ${t.content}`);
+      lines.push(`  Confidence: ${((t.confidence || 0) * 100).toFixed(0)}% | Tags: ${(t.tags || []).join(', ')}`);
+      lines.push('  ─────────────────────────────────────────');
+    }
+    lines.push('');
+  }
+
+  // Low
+  if (low.length) {
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('  🔵 LOW PRIORITY');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+    for (const t of low) {
+      lines.push(`  [${t.type.toUpperCase()}] ${t.file_context || 'general'}`);
+      lines.push(`  ${t.content}`);
+      lines.push(`  Confidence: ${((t.confidence || 0) * 100).toFixed(0)}% | Tags: ${(t.tags || []).join(', ')}`);
+      lines.push('  ─────────────────────────────────────────');
+    }
+    lines.push('');
+  }
+
+  // Drafts
+  if (draftsWritten.length) {
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('  📝 DRAFTS WRITTEN (review in consciousness/drafts/)');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+    for (const d of draftsWritten) {
+      lines.push(`  ${d.content}`);
+      lines.push(`  Tags: ${(d.tags || []).join(', ')}`);
+      lines.push('  ─────────────────────────────────────────');
+    }
+    lines.push('');
+  }
+
+  // File-level summary
+  lines.push('════════════════════════════════════════════════════════════════');
+  lines.push('  📊 BY FILE');
+  lines.push('════════════════════════════════════════════════════════════════');
+  lines.push('');
+  const byFile: Record<string, any[]> = {};
+  for (const t of allThoughts) {
+    const f = t.file_context || 'general';
+    if (!byFile[f]) byFile[f] = [];
+    byFile[f].push(t);
+  }
+  for (const [file, items] of Object.entries(byFile).sort((a, b) => b[1].length - a[1].length)) {
+    const critCount = items.filter(i => i.priority === 'critical').length;
+    const highCount = items.filter(i => i.priority === 'high').length;
+    lines.push(`  ${file} — ${items.length} thoughts (${critCount} critical, ${highCount} high)`);
+  }
+  lines.push('');
+  lines.push('');
+  lines.push('── End of Report ──');
+
+  const content = lines.join('\n');
+  fs.writeFileSync(reportPath, content, 'utf-8');
+
+  // Also write to Supabase so the admin panel can access it
+  try {
+    const sb = getSupabase();
+    await sb.from('consciousness_config').upsert({
+      key: 'latest_report',
+      value: content,
+      updated_at: new Date().toISOString(),
+    });
+    await sb.from('consciousness_config').upsert({
+      key: 'latest_report_date',
+      value: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  } catch {}
+
+  console.log(`  📋 Improvements report written: ${reportPath}`);
+  return reportPath;
 }
 
 // ─── Main Loop ─────────────────────────────────────────────────────────────────
