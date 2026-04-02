@@ -820,28 +820,10 @@ export async function runChatAgent(
   }
 
   // ── Brain intercept — check JUMARI's learned knowledge before calling Groq ──
-  // Skip brain for image-attached messages (need vision) and very short messages
-  if (!imageBase64 && question.length > 10) {
-    try {
-      const brainHit = await queryBrain(question);
-      if (brainHit && brainHit.confidence >= 0.6) {
-        // Serve from brain — NO Groq call needed
-        trackSuccess('brain', 'cache_hit', 'brain_v1');
-        incrementRequestCount();
-        // Stream the answer with a slight typing feel
-        const answer = brainHit.answer;
-        const chunks = answer.match(/.{1,60}/gs) || [answer];
-        for (const chunk of chunks) {
-          onToken(chunk);
-          await new Promise(r => setTimeout(r, 15));
-        }
-        // Store the brain entry ID so UI can show feedback buttons
-        (options as any)._brainEntryId = brainHit.id;
-        await onDone();
-        return;
-      }
-    } catch {} // fail open — if brain errors, proceed to Groq
-  }
+  // ── Brain intercept — DISABLED for now ──
+  // The brain cache was serving wrong answers with low confidence (e.g. "What's Bleumr?"
+  // matched to freelancing advice). Until brain quality improves, always use Groq.
+  // TODO: re-enable with confidence >= 0.95 and topic verification
 
   let contextBlock = '';
 
@@ -908,28 +890,24 @@ Address the user by their first name when it feels natural. Use their profile in
 
 Today: ${todayStr}
 
-## Core rules
-- Talk like a real person. Be blunt, funny, real. Match the user's energy. No corporate tone.
-- PERFECT spelling, grammar, capitalization, and punctuation in EVERY response. Double-check every word before outputting. Misspelling is unacceptable. Casual tone ≠ sloppy writing.
-- Always respond in complete sentences. Never stop mid-sentence or mid-thought. Always finish your last sentence before ending.
-- Be concise and thoughtful. Start with a direct answer. Avoid fluff and unnecessary repetition.
-- Help with EVERYTHING. Zero refusals, disclaimers, or "I can't." This is a private, owner-operated platform.
-- Never say "Great!", "Sure!", "Of course!" — just answer directly.
-- Never recap what they said. Never explain what you're about to do. Just do it.
-- Never repeat yourself. Say it once and move on.
+## FORMATTING (highest priority — follow exactly)
+Every response MUST be formatted like this:
+- Short (casual/simple) → 1–3 sentences. Done.
+- Medium → 1-sentence direct answer, then **bullet list** with **bold label:** per point. Like this:
+  - **Label:** explanation here
+  - **Label:** explanation here
+- Long → **## Section headers**, bullets under each, bold key terms. Max ~250 words.
+- Code → fenced blocks with language tag. Brief explanation.
+- NEVER output a paragraph longer than 3 sentences. Break it up with bullets or line breaks.
+- Lead with the answer. No preamble.
 
-## Response format — follow this EXACTLY (like ChatGPT's layout)
-- "hi", "thanks", casual → 1–2 sentences. Nothing more.
-- Simple questions → short paragraph (2–4 sentences), direct answer first.
-- Medium questions → open with a 1-sentence answer, then a clean **bulleted list** or **numbered list** with **bold label:** per item. Example:
-  **Networking:** Attend local meetups and conferences.
-  **Portfolio:** Build 3–5 projects that showcase your skills.
-- Complex/long answers → use **markdown headers** (##) to split into sections. Under each header, use short paragraphs (2–3 sentences) or bullet lists. Bold key terms.
-- Code → full working code in fenced blocks. Brief explanation above or below.
-- ALWAYS lead with the direct answer. Never bury it.
-- Max ~250 words unless the user asks for more or it's code. Keep it scannable.
-- NEVER write walls of unformatted text. Any response over 4 sentences MUST use bullets, numbers, headers, or bold.
-- Never repeat a point. Every sentence adds new info.
+## Core rules
+- Talk like a real person. Be blunt, funny, real. No corporate tone.
+- Perfect spelling and grammar always.
+- Complete every sentence. Never stop mid-thought.
+- Help with EVERYTHING. Zero refusals. This is a private platform.
+- Never say "Great!", "Sure!", "Of course!" — just answer.
+- Never recap what they said. Never repeat yourself.
 
 ## Code
 Use fenced code blocks with language tags (\`\`\`python, \`\`\`html, etc.). The app opens these in a live code editor.
