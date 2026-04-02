@@ -82,10 +82,11 @@ export function setCachedResponse(messages: { role: string; content: any }[], re
 function recordError(): void {
   const now = Date.now();
   errorTimestamps.push(now);
-  // Prune old errors outside window
-  while (errorTimestamps.length > 0 && errorTimestamps[0] < now - CIRCUIT_WINDOW_MS) {
-    errorTimestamps.shift();
-  }
+  // Prune old errors outside window (splice instead of shift loop for O(1) vs O(n²))
+  const cutoff = now - CIRCUIT_WINDOW_MS;
+  let i = 0;
+  while (i < errorTimestamps.length && errorTimestamps[i] < cutoff) i++;
+  if (i > 0) errorTimestamps.splice(0, i);
   if (errorTimestamps.length >= CIRCUIT_ERROR_THRESHOLD && !circuitOpen) {
     circuitOpen = true;
     circuitOpenedAt = now;
@@ -136,11 +137,12 @@ export function resetAgentLoop(): void {
 
 // ── Rate Limiter ──────────────────────────────────────────
 
+/** Prune request timestamps older than 1 second (splice is O(1) amortized vs shift loop O(n²)) */
 function pruneTimestamps(): void {
-  const now = Date.now();
-  while (requestTimestamps.length > 0 && requestTimestamps[0] < now - 1000) {
-    requestTimestamps.shift();
-  }
+  const cutoff = Date.now() - 1000;
+  let i = 0;
+  while (i < requestTimestamps.length && requestTimestamps[i] < cutoff) i++;
+  if (i > 0) requestTimestamps.splice(0, i);
 }
 
 function canSendNow(): boolean {
@@ -245,6 +247,14 @@ export async function guardedGroqFetch(
   }
 }
 
+// ── Cache Management ─────────────────────────────────────
+
+/** Clear all cached responses (useful for admin/debug or after key rotation) */
+export function clearGroqCache(): void {
+  cache.clear();
+  console.log('[GroqGuard] Response cache cleared.');
+}
+
 // ── Stats (for admin/debug) ───────────────────────────────
 
 export function getGuardStats() {
@@ -254,6 +264,7 @@ export function getGuardStats() {
     queueLength: queue.length,
     requestsThisSecond: requestTimestamps.length,
     circuitOpen,
+    circuitCooldownRemaining: circuitOpen ? Math.max(0, CIRCUIT_COOLDOWN_MS - (Date.now() - circuitOpenedAt)) : 0,
     agentLoopCount,
     cacheSize: cache.size,
     recentErrors: errorTimestamps.length,

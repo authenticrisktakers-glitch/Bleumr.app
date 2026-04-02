@@ -360,6 +360,86 @@ export const BrainMemory = {
   },
 
   /**
+   * Clear memories by category (e.g. only error_fix, only pattern)
+   * Returns count of removed entries.
+   */
+  clearByCategory(category: MemoryEntry['category']): number {
+    const entries = BrainMemory.getAll();
+    const kept = entries.filter(e => e.category !== category);
+    const removed = entries.length - kept.length;
+    if (removed > 0) BrainMemory.save(kept);
+    return removed;
+  },
+
+  /**
+   * Clear memories by source agent (e.g. only chat_agent memories)
+   * Returns count of removed entries.
+   */
+  clearBySource(source: MemoryEntry['source']): number {
+    const entries = BrainMemory.getAll();
+    const kept = entries.filter(e => e.source !== source);
+    const removed = entries.length - kept.length;
+    if (removed > 0) BrainMemory.save(kept);
+    return removed;
+  },
+
+  /**
+   * Clear memories older than maxAgeMs (based on lastUsedAt — stale memories go first)
+   * Returns count of removed entries.
+   */
+  clearByAge(maxAgeMs: number): number {
+    const cutoff = Date.now() - maxAgeMs;
+    const entries = BrainMemory.getAll();
+    const kept = entries.filter(e => e.lastUsedAt > cutoff);
+    const removed = entries.length - kept.length;
+    if (removed > 0) BrainMemory.save(kept);
+    return removed;
+  },
+
+  /**
+   * Get memory stats for admin/debug
+   */
+  getStats(): {
+    totalEntries: number;
+    byCategory: Record<string, number>;
+    bySource: Record<string, number>;
+    oldestEntry: number | null;
+    newestEntry: number | null;
+    avgConfidence: number;
+    totalUses: number;
+    storageSizeBytes: number;
+  } {
+    const entries = BrainMemory.getAll();
+    const byCategory: Record<string, number> = {};
+    const bySource: Record<string, number> = {};
+    let totalConf = 0;
+    let totalUses = 0;
+    let oldest: number | null = null;
+    let newest: number | null = null;
+
+    for (const e of entries) {
+      byCategory[e.category] = (byCategory[e.category] || 0) + 1;
+      bySource[e.source] = (bySource[e.source] || 0) + 1;
+      totalConf += e.confidence;
+      totalUses += e.uses;
+      if (oldest === null || e.createdAt < oldest) oldest = e.createdAt;
+      if (newest === null || e.createdAt > newest) newest = e.createdAt;
+    }
+
+    const raw = localStorage.getItem(MEMORY_KEY) || '';
+    return {
+      totalEntries: entries.length,
+      byCategory,
+      bySource,
+      oldestEntry: oldest,
+      newestEntry: newest,
+      avgConfidence: entries.length ? totalConf / entries.length : 0,
+      totalUses,
+      storageSizeBytes: new Blob([raw]).size,
+    };
+  },
+
+  /**
    * Clear all custom libraries (keep defaults)
    */
   clearLibraries() {

@@ -23,22 +23,15 @@ export interface PWAKeys {
   deepgram: string;
 }
 
-export async function getPWAKeys(): Promise<PWAKeys> {
-  // Clean up old versioned caches
-  try { localStorage.removeItem('bleumr_pwa_keys'); } catch {}
-  try { localStorage.removeItem('bleumr_pwa_keys_v2'); } catch {}
+// Cache expires after 24 hours — ensures rotated keys propagate within a day
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-  // Check cache first
-  try {
-    const cached = localStorage.getItem(PWA_KEYS_CACHE);
-    if (cached) {
-      const keys = JSON.parse(cached) as PWAKeys;
-      if (keys.groq) return keys;
-    }
-  } catch {}
+interface CachedPWAKeys {
+  keys: PWAKeys;
+  cachedAt: number;
+}
 
-  // Fetch from Supabase — use a direct API call to get keys for PWA users
-  // This calls the validate-license function with a special PWA flag
+async function fetchPWAKeysFromServer(): Promise<PWAKeys | null> {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/validate-license?key=PWA-TRIAL`, {
       headers: {
@@ -47,20 +40,87 @@ export async function getPWAKeys(): Promise<PWAKeys> {
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
       },
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.apiKeys) {
-        const keys: PWAKeys = {
-          groq: data.apiKeys.groq || '',
-          deepgram: data.apiKeys.deepgram || '',
-        };
-        localStorage.setItem(PWA_KEYS_CACHE, JSON.stringify(keys));
-        return keys;
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      console.warn(`[Platform] PWA keys fetch failed: HTTP ${res.status}`, errBody.slice(0, 300));
+      return null;
+    }
+    const data = await res.json();
+    if (data.apiKeys) {
+      const keys: PWAKeys = {
+        groq: data.apiKeys.groq || '',
+        deepgram: data.apiKeys.deepgram || '',
+      };
+      // Cache with timestamp
+      try {
+        const cached: CachedPWAKeys = { keys, cachedAt: Date.now() };
+        localStorage.setItem(PWA_KEYS_CACHE, JSON.stringify(cached));
+      } catch (e) {
+        console.warn('[Platform] Failed to cache keys:', e);
+      }
+      return keys;
+    }
+    return null;
+  } catch (e: any) {
+    console.warn('[Platform] Failed to fetch PWA keys:', e?.message || e);
+    return null;
+  }
+}
+
+export async function getPWAKeys(): Promise<PWAKeys> {
+  // Clean up old versioned caches
+  try { localStorage.removeItem('bleumr_pwa_keys'); } catch (e) {
+    console.warn('[Platform] Failed to clean old cache key:', e);
+  }
+  try { localStorage.removeItem('bleumr_pwa_keys_v2'); } catch (e) {
+    console.warn('[Platform] Failed to clean old cache key v2:', e);
+  }
+
+  // Check cache first — with expiry
+  try {
+    const raw = localStorage.getItem(PWA_KEYS_CACHE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Handle both old format (PWAKeys directly) and new format (CachedPWAKeys)
+      if (parsed.cachedAt && parsed.keys) {
+        // New format — check expiry
+        const cached = parsed as CachedPWAKeys;
+        if (cached.keys.groq && (Date.now() - cached.cachedAt) < CACHE_MAX_AGE_MS) {
+          return cached.keys;
+        }
+        // Expired — fall through to fetch
+      } else if (parsed.groq) {
+        // Old format (no timestamp) — treat as expired, fetch fresh
+        console.log('[Platform] Old cache format detected, refreshing keys');
       }
     }
   } catch (e) {
-    console.warn('[PWA] Failed to fetch keys:', e);
+    console.warn('[Platform] Failed to read cached keys:', e);
   }
 
+  // Fetch fresh from server
+  const keys = await fetchPWAKeysFromServer();
+  if (keys) return keys;
+
+  // Offline fallback — use expired cache if server is unreachable
+  try {
+    const raw = localStorage.getItem(PWA_KEYS_CACHE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const fallbackKeys = parsed.keys || parsed;
+      if (fallbackKeys.groq) {
+        console.log('[Platform] Using expired cached keys as offline fallback');
+        return fallbackKeys as PWAKeys;
+      }
+    }
+  } catch {}
+
   return { groq: '', deepgram: '' };
+}
+
+/** Force-refresh PWA keys (clears cache, re-fetches from server) */
+export async function refreshPWAKeys(): Promise<PWAKeys> {
+  try { localStorage.removeItem(PWA_KEYS_CACHE); } catch {}
+  const keys = await fetchPWAKeysFromServer();
+  return keys || { groq: '', deepgram: '' };
 }

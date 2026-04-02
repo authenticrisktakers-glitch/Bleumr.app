@@ -100,6 +100,8 @@ const PREFERRED_MODELS = [
 // Reset on every module load so stale cached reasoning models don't survive HMR
 let cachedModel: string | null = null;
 const blockedModels = new Set<string>();
+const blockedVisionModels = new Set<string>();
+let cachedAvailableModels: Set<string> | null = null;
 
 async function resolveModel(apiKey: string): Promise<string> {
   if (cachedModel && !blockedModels.has(cachedModel)) return cachedModel;
@@ -1038,12 +1040,33 @@ If activation fails, tell them the key is invalid or expired and to check their 
       groqVisionMsg,
     ];
     const groqVisionModels = [
+      'meta-llama/llama-4-scout-17b-16e-instruct',
       'llama-3.2-11b-vision-preview',
       'llama-3.2-90b-vision-preview',
-      'meta-llama/llama-4-scout-17b-16e-instruct',
     ];
 
+    // Resolve available models once per session to avoid trying decommissioned ones
+    if (!cachedAvailableModels) {
+      try {
+        const modelsRes = await guardedGroqFetch(GROQ_MODELS_ENDPOINT, {
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        if (modelsRes.ok) {
+          const modelsData = await modelsRes.json();
+          cachedAvailableModels = new Set((modelsData.data as any[]).map((m: any) => m.id));
+        }
+      } catch { /* fail open — try all models */ }
+    }
+
     for (const visionModel of groqVisionModels) {
+      // Skip null/empty, blocked, or known-unavailable models
+      if (!visionModel) { console.warn('[ChatAgent] Skipping null/empty vision model'); continue; }
+      if (blockedVisionModels.has(visionModel)) { continue; }
+      if (cachedAvailableModels && !cachedAvailableModels.has(visionModel)) {
+        console.log(`[ChatAgent] Vision model "${visionModel}" not in available models, skipping`);
+        continue;
+      }
+
       let res: Response;
       try {
         res = await guardedGroqFetch(GROQ_ENDPOINT, {
@@ -1055,8 +1078,13 @@ If activation fails, tell them the key is invalid or expired and to check their 
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        console.warn(`[ChatAgent] Groq vision "${visionModel}" failed (${res.status}):`, errBody.slice(0, 300));
-        trackError('groq', 'vision', `${visionModel}: HTTP ${res.status}`, res.status);
+        console.warn(`[ChatAgent] Groq vision "${visionModel}" failed (${res.status}):`, errBody.slice(0, 500));
+        trackError('groq', 'vision', `${visionModel}: HTTP ${res.status} — ${errBody.slice(0, 200)}`, res.status);
+        // Block model for this session if it's a permanent error
+        if (res.status === 400 || res.status === 403 || res.status === 404) {
+          blockedVisionModels.add(visionModel);
+          console.warn(`[ChatAgent] Vision model "${visionModel}" blocked for session`);
+        }
         continue;
       }
       const data = await res.json();
