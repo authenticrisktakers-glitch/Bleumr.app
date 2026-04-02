@@ -289,8 +289,21 @@ Bleumr context you carry:
 
 // ─── Assembled Full Prompt Blocks ─────────────────────────────────────────────
 
-/** Full Bleumr context block — inject into JUMARI's main chat and browser agent prompts */
+/** Full Bleumr context block — for reference docs and deep prompts (very long) */
 export const BLEUMR_FULL_CONTEXT = BLEUMR_ORIGIN + BLEUMR_PLATFORM + BLEUMR_UI_MAP + BLEUMR_IDENTITY + BLEUMR_ABOUT;
+
+/** Chat-optimized context — identity + about + condensed UI guide (no pixel map) */
+export const BLEUMR_CHAT_CONTEXT = BLEUMR_IDENTITY + BLEUMR_ABOUT + `
+## Quick UI Guide — How to Help Lost Users
+- **Sidebar** (≡ top-left): New Chat, Browser, Mission Team, Flash Drive, chat history, Settings (gear at bottom), user profile
+- **Top bar**: "JUMARI 1.0" dropdown to change AI mode (Local/Cloud/Max/Gemini)
+- **Chat input**: text field + mic button (voice) + image attach + send
+- **Browser (Observatory)**: tap Browser in sidebar or tell JUMARI to open a site. Tab bar, nav bar, page area.
+- **Scheduler (Timekeeper)**: say "remind me..." or "schedule..." in chat — auto-adds to calendar
+- **Mission Team**: 3 agents (Planner, Researcher, Synth) for deep research. Tap Mission Team in sidebar.
+- **Voice**: tap mic in input bar → chrome sphere appears → speak naturally
+- **Settings**: ≡ → gear icon. Cloud AI keys, AI mode, user profile, memory, Approve All Actions toggle.
+`;
 
 /** Condensed Bleumr context — for voice chat (shorter, still carries the identity) */
 export const BLEUMR_VOICE_CONTEXT = `

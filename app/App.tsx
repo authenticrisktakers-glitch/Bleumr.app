@@ -254,11 +254,15 @@ export default function App() {
           return prev;
         });
       }
-      // PWA: If no keys from SecureStorage, auto-provision from Supabase
-      if (IS_PWA && !keys.groq) {
+      // Auto-provision or refresh keys — works for both PWA and desktop
+      const shouldRefreshKey = !keys.groq || IS_PWA;
+      if (shouldRefreshKey) {
         getPWAKeys().then(pwaKeys => {
           if (pwaKeys.groq) setSecureApiKey(pwaKeys.groq);
           if (pwaKeys.deepgram) setDeepgramKey(pwaKeys.deepgram);
+          // Also persist so SecureStorage has the fresh key
+          if (pwaKeys.groq) SecureStorage.set('orbit_api_key', pwaKeys.groq).catch(() => {});
+          if (pwaKeys.deepgram) SecureStorage.set('orbit_deepgram_key', pwaKeys.deepgram).catch(() => {});
           if (pwaKeys.groq) {
             setConfig(prev => {
               if (prev.engine === 'local') {
@@ -270,6 +274,25 @@ export default function App() {
             });
           }
         });
+      }
+      // Key health check — if stored key gets org_restricted, refresh from Supabase
+      if (keys.groq) {
+        fetch('https://api.groq.com/openai/v1/models', { headers: { 'Authorization': `Bearer ${keys.groq}` } })
+          .then(res => {
+            if (!res.ok) {
+              console.warn('[App] Groq key health check failed, refreshing...');
+              getPWAKeys().then(pwaKeys => {
+                if (pwaKeys.groq) {
+                  setSecureApiKey(pwaKeys.groq);
+                  SecureStorage.set('orbit_api_key', pwaKeys.groq).catch(() => {});
+                }
+                if (pwaKeys.deepgram) {
+                  setDeepgramKey(pwaKeys.deepgram);
+                  SecureStorage.set('orbit_deepgram_key', pwaKeys.deepgram).catch(() => {});
+                }
+              });
+            }
+          }).catch(() => {});
       }
     });
 

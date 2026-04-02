@@ -5,7 +5,7 @@
  * - Image analysis via Groq vision models
  */
 
-import { BLEUMR_FULL_CONTEXT } from './BleumrLore';
+import { BLEUMR_CHAT_CONTEXT } from './BleumrLore';
 import { memoryService } from './MemoryService';
 import { BrainMemory } from './BrainMemory';
 import { GodAgent } from './GodAgent';
@@ -67,12 +67,11 @@ async function corsFetch(url: string, options?: RequestInit): Promise<{ ok: bool
 }
 
 // Preferred models in order — first available one wins
-// Groq models in priority order (best first)
+// Groq models in priority order (most stable first)
 const PREFERRED_MODELS = [
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
-  'openai/gpt-oss-120b',
   'llama-3.3-70b-versatile',
+  'openai/gpt-oss-120b',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
   'llama-3.1-8b-instant',
   'gemma2-9b-it',
   'llama3-8b-8192',
@@ -953,7 +952,7 @@ If a user provides a license key (format like BLM-XXXXX-XXXXX-XXXXX), activate i
 If activation fails, tell them the key is invalid or expired and to check their email or contact support.
 
 ## Bleumr — everything you know
-${BLEUMR_FULL_CONTEXT}
+${BLEUMR_CHAT_CONTEXT}
 
 Named after Martha Renee (born Dec 1977). Bleu (French for blue) + Renee = Bleumr. Built on her philosophy: help the person in front of you before yourself.
 
