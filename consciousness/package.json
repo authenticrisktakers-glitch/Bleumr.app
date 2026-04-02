@@ -1,0 +1,14 @@
+{
+  "name": "jumari-consciousness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JUMARI self-evolving consciousness daemon",
+  "scripts": {
+    "start": "tsx daemon.ts",
+    "dev": "tsx watch daemon.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "tsx": "^4.7.0"
+  }
+}
