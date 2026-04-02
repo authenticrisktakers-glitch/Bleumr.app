@@ -40,10 +40,10 @@ type QueueEntry = {
 const queue: QueueEntry[] = [];
 let processing = false;
 
-// Response cache
+// Response cache — LRU eviction (most recently accessed entries survive)
 const cache = new Map<string, { response: string; timestamp: number }>();
 
-// ── Cache ─────────────────────────────────────────────────
+// ── Cache (LRU) ──────────────────────────────────────────
 
 /** Generate a cache key from messages (only cache non-streaming short prompts) */
 function cacheKey(messages: { role: string; content: any }[]): string {
@@ -63,17 +63,22 @@ export function getCachedResponse(messages: { role: string; content: any }[]): s
     cache.delete(key);
     return null;
   }
+  // LRU: move to end of Map (most recently accessed = last)
+  cache.delete(key);
+  cache.set(key, entry);
   return entry.response;
 }
 
 export function setCachedResponse(messages: { role: string; content: any }[], response: string): void {
   const key = cacheKey(messages);
   if (!key || response.length < 10) return;
-  // Evict oldest if at capacity
+  // LRU eviction: delete oldest (first entry in Map) when at capacity
   if (cache.size >= CACHE_MAX_ENTRIES) {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
   }
+  // If key already exists, delete first to move to end (LRU position)
+  cache.delete(key);
   cache.set(key, { response, timestamp: Date.now() });
 }
 
@@ -151,7 +156,7 @@ function canSendNow(): boolean {
   pruneTimestamps();
   if (requestTimestamps.length >= MAX_PER_SECOND) return false;
   const timeSinceLast = Date.now() - lastRequestTime;
-  if (timeSinceLast < MIN_DELAY_MS) return false;
+  if (timeSinceLast < adaptiveDelayMs) return false;
   return true;
 }
 
@@ -218,6 +223,9 @@ export function enqueueGroqRequest(execute: () => Promise<void>): Promise<void> 
  * Wrap a fetch call to Groq — handles rate limiting automatically.
  * For streaming calls, pass the entire stream handler as `execute`.
  */
+// Adaptive delay — adjusted from Groq response headers
+let adaptiveDelayMs = MIN_DELAY_MS;
+
 export async function guardedGroqFetch(
   url: string,
   init: RequestInit,
@@ -235,7 +243,29 @@ export async function guardedGroqFetch(
     const res = await fetch(url, init);
     if (res.ok) {
       reportGroqSuccess();
-    } else if (res.status === 429 || res.status >= 500) {
+      // Adaptive: read Groq rate limit headers to tune our pacing
+      const remaining = res.headers.get('x-ratelimit-remaining-requests');
+      const resetMs = res.headers.get('x-ratelimit-reset-requests');
+      if (remaining !== null) {
+        const rem = parseInt(remaining, 10);
+        if (rem < 5) {
+          // Running low on quota — slow down
+          adaptiveDelayMs = Math.min(2000, adaptiveDelayMs * 1.5);
+        } else if (rem > 20) {
+          // Plenty of quota — speed back up toward minimum
+          adaptiveDelayMs = Math.max(MIN_DELAY_MS, adaptiveDelayMs * 0.8);
+        }
+      }
+    } else if (res.status === 429) {
+      reportGroqError();
+      // 429 = rate limited — back off aggressively
+      const retryAfter = res.headers.get('retry-after');
+      if (retryAfter) {
+        adaptiveDelayMs = Math.min(5000, parseInt(retryAfter, 10) * 1000);
+      } else {
+        adaptiveDelayMs = Math.min(5000, adaptiveDelayMs * 2);
+      }
+    } else if (res.status >= 500) {
       reportGroqError();
     }
     return res;

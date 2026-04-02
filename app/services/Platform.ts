@@ -31,40 +31,52 @@ interface CachedPWAKeys {
   cachedAt: number;
 }
 
-async function fetchPWAKeysFromServer(): Promise<PWAKeys | null> {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/validate-license?key=PWA-TRIAL`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-    });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      console.warn(`[Platform] PWA keys fetch failed: HTTP ${res.status}`, errBody.slice(0, 300));
+async function fetchPWAKeysFromServer(retries = 2): Promise<PWAKeys | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/validate-license?key=PWA-TRIAL`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        console.warn(`[Platform] PWA keys fetch failed (attempt ${attempt + 1}/${retries + 1}): HTTP ${res.status}`, errBody.slice(0, 300));
+        // Retry on server errors, not on client errors
+        if (res.status >= 500 && attempt < retries) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // backoff: 1s, 2s
+          continue;
+        }
+        return null;
+      }
+      const data = await res.json();
+      if (data.apiKeys) {
+        const keys: PWAKeys = {
+          groq: data.apiKeys.groq || '',
+          deepgram: data.apiKeys.deepgram || '',
+        };
+        // Cache with timestamp
+        try {
+          const cached: CachedPWAKeys = { keys, cachedAt: Date.now() };
+          localStorage.setItem(PWA_KEYS_CACHE, JSON.stringify(cached));
+        } catch (e) {
+          console.warn('[Platform] Failed to cache keys:', e);
+        }
+        return keys;
+      }
+      return null;
+    } catch (e: any) {
+      console.warn(`[Platform] Failed to fetch PWA keys (attempt ${attempt + 1}/${retries + 1}):`, e?.message || e);
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
       return null;
     }
-    const data = await res.json();
-    if (data.apiKeys) {
-      const keys: PWAKeys = {
-        groq: data.apiKeys.groq || '',
-        deepgram: data.apiKeys.deepgram || '',
-      };
-      // Cache with timestamp
-      try {
-        const cached: CachedPWAKeys = { keys, cachedAt: Date.now() };
-        localStorage.setItem(PWA_KEYS_CACHE, JSON.stringify(cached));
-      } catch (e) {
-        console.warn('[Platform] Failed to cache keys:', e);
-      }
-      return keys;
-    }
-    return null;
-  } catch (e: any) {
-    console.warn('[Platform] Failed to fetch PWA keys:', e?.message || e);
-    return null;
   }
+  return null;
 }
 
 export async function getPWAKeys(): Promise<PWAKeys> {
