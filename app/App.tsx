@@ -303,7 +303,7 @@ export default function App() {
     const threads = loadThreadsMeta();
     setChatThreads(threads);
 
-    if (!IS_PWA && threads.length > 0) {
+    if (threads.length > 0) {
       const latest = threads[0]; // already sorted newest-first
       const msgs = loadThreadMessages(latest.id);
       if (msgs.length > 0) {
@@ -617,7 +617,13 @@ export default function App() {
 
   const handleSelectThread = useCallback((threadId: string) => {
     const msgs = loadThreadMessages(threadId);
-    if (msgs.length === 0) return;
+    if (msgs.length === 0) {
+      // Orphaned metadata — messages were lost (localStorage cleared, quota, etc.)
+      // Clean up the dead entry and stay on current view
+      deleteStoredThread(threadId);
+      setChatThreads(loadThreadsMeta());
+      return;
+    }
     currentThreadIdRef.current = threadId;
     setCurrentThreadId(threadId);
     // Sanitize any leaked hidden tags from older saved messages
