@@ -1045,10 +1045,10 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
       { role: 'system', content: 'You are a vision AI. Describe the image accurately and in detail. Perfect spelling and grammar required.' },
       groqVisionMsg,
     ];
+    // As of April 2026, only llama-4-scout supports vision on Groq.
+    // llama-3.2-*-vision-preview models were removed.
     const groqVisionModels = [
       'meta-llama/llama-4-scout-17b-16e-instruct',
-      'llama-3.2-11b-vision-preview',
-      'llama-3.2-90b-vision-preview',
     ];
 
     // Resolve available models once per session to avoid trying decommissioned ones
@@ -1086,10 +1086,20 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
         const errBody = await res.text().catch(() => '');
         console.warn(`[ChatAgent] Groq vision "${visionModel}" failed (${res.status}):`, errBody.slice(0, 500));
         trackError('groq', 'vision', `${visionModel}: HTTP ${res.status} — ${errBody.slice(0, 200)}`, res.status);
-        // Block model for this session if it's a permanent error
-        if (res.status === 400 || res.status === 403 || res.status === 404) {
+        // Block model for this session ONLY on 403/404 (model removed or access denied)
+        // Do NOT block on 400 — could be image format/size issue, not the model's fault
+        if (res.status === 403 || res.status === 404) {
           blockedVisionModels.add(visionModel);
           console.warn(`[ChatAgent] Vision model "${visionModel}" blocked for session`);
+        }
+        // On 400, give user a helpful message about image format
+        if (res.status === 400) {
+          const errLower = errBody.toLowerCase();
+          if (errLower.includes('pixel') || errLower.includes('dimension') || errLower.includes('size') || errLower.includes('too large') || errLower.includes('format')) {
+            onToken("that image didn't work — try a different one or a smaller size. some formats don't play nice with vision rn", true);
+            onDone();
+            return;
+          }
         }
         continue;
       }
@@ -1129,7 +1139,7 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
     }
 
     // All vision options exhausted
-    onToken("Vision's down right now — try again in a sec.", true);
+    onToken("couldn't read that image rn — groq's vision might be having a moment. try again in a bit or send a different pic", true);
     onDone();
     return;
   }
