@@ -49,13 +49,33 @@ async function corsFetch(url: string, options?: RequestInit): Promise<{ ok: bool
       return { ok: false, text: '' };
     }
   }
-  // In browser/PWA — use allorigins CORS proxy for cross-origin requests
+  // In browser/PWA — use CORS proxy chain with fallbacks for cross-origin requests
   try {
     const needsProxy = url.includes('duckduckgo.com');
     if (needsProxy) {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const res = await fetch(proxyUrl);
-      return { ok: res.ok, text: await res.text() };
+      const encoded = encodeURIComponent(url);
+      const proxies = [
+        `https://corsproxy.io/?${encoded}`,
+        `https://api.allorigins.win/raw?url=${encoded}`,
+      ];
+      for (const proxyUrl of proxies) {
+        try {
+          const res = await fetch(proxyUrl);
+          const text = await res.text();
+          // Only accept if we got real HTML back (not an error page or empty response)
+          if (res.ok && text.length > 500 && text.includes('<')) {
+            console.log(`[corsFetch] Proxy success: ${proxyUrl.split('?')[0]} → ${text.length} chars`);
+            return { ok: true, text };
+          }
+          console.warn(`[corsFetch] Proxy returned bad data: ${proxyUrl.split('?')[0]} → status=${res.status}, len=${text.length}`);
+        } catch (proxyErr: any) {
+          console.warn(`[corsFetch] Proxy failed: ${proxyUrl.split('?')[0]} → ${proxyErr.message}`);
+        }
+      }
+      // All proxies failed
+      console.warn('[corsFetch] All CORS proxies failed for:', url.slice(0, 80));
+      trackError('network', 'cors_fetch', 'All CORS proxies failed');
+      return { ok: false, text: '' };
     }
     const res = await fetch(url, options);
     return { ok: res.ok, text: await res.text() };
