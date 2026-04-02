@@ -515,8 +515,8 @@ export const PlatformView = memo(function PlatformView({
   }), [isFocused]);
 
   return (
-    <div className="fixed inset-x-0 top-0 bottom-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
-      style={{ height: keyboardOffset > 0 ? viewportHeight : '100dvh', minHeight: keyboardOffset > 0 ? undefined : '100dvh' }}>
+    <div className="fixed inset-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
+      style={{ height: keyboardOffset > 0 ? viewportHeight : undefined }}>
 
       {/* Background stars — memoised, never re-renders */}
       <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-50' : 'opacity-100'}`}>
@@ -653,6 +653,8 @@ export const PlatformView = memo(function PlatformView({
             ref={chatContainerRef}
             className={`flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 lg:px-32 scrollbar-hide transition-opacity duration-500 ${hasStartedChat ? 'opacity-100' : 'opacity-0'}`}
             style={{
+              WebkitOverflowScrolling: 'touch',
+              overscrollBehavior: 'contain',
               paddingBottom: keyboardOffset > 0 ? 80 : 128,
               ...(keyboardOffset > 0 ? {} : {
                 WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 200px), transparent calc(100% - 110px))',

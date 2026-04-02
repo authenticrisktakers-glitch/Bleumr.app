@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, memo } from 'react';
-import { cpuCores } from '../services/CPUAccelerator';
+import { cpuCores, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
 
 interface InlineStarSphereProps {
   className?: string;
@@ -13,7 +13,10 @@ interface InlineStarSphereProps {
 // capped by CPU tier.
 function starsForSize(size: number): number {
   const base = Math.round(size * size * 0.55);
-  const tierCap = cpuCores >= 8 ? 3000 : cpuCores >= 4 ? 1400 : 600;
+  // Mobile gets drastically fewer stars to prevent overheating
+  const tierCap = isMobileDevice
+    ? (cpuCores >= 6 ? 600 : 300)
+    : (cpuCores >= 8 ? 3000 : cpuCores >= 4 ? 1400 : 600);
   return Math.min(base, tierCap);
 }
 
@@ -56,7 +59,7 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     });
 
     const setupCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = isMobileDevice ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = size * dpr;
       canvas.height = size * dpr;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -73,13 +76,20 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
 
     let animationFrameId: number;
     let isVisible = true; // assume visible until observer says otherwise
+    let lastFrameTime = 0;
 
     const render = (timestamp: number) => {
       if (!isVisible) {
-        // Pause rendering when out of viewport — just reschedule check
         animationFrameId = requestAnimationFrame(render);
         return;
       }
+
+      // FPS throttle
+      if (timestamp - lastFrameTime < frameIntervalMs) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastFrameTime = timestamp;
 
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;

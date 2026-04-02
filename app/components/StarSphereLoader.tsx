@@ -1,9 +1,13 @@
 import React, { useEffect, useRef, memo } from 'react';
-import { cpuCores } from '../services/CPUAccelerator';
+import { performanceTier, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
 
-// Background star count scaled to CPU tier — no need to animate 3500 stars
-// on a 2-core machine running the entire app at the same time.
-const BG_STAR_COUNT = cpuCores >= 8 ? 2200 : cpuCores >= 4 ? 1200 : 500;
+// Star count — aggressive mobile reduction to prevent overheating
+const BG_STAR_COUNT = isMobileDevice
+  ? (performanceTier === 'medium' ? 400 : 200)
+  : (performanceTier === 'high' ? 2200 : performanceTier === 'medium' ? 1200 : 500);
+
+// Mobile uses 1x DPR for canvas — saves 4x fill rate vs 2x retina
+const CANVAS_DPR = isMobileDevice ? 1 : (typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1);
 
 export const StarSphereLoader = memo(function StarSphereLoader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -11,7 +15,6 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Opaque background — enables additive blending without alpha compositing cost
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
@@ -19,6 +22,7 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     let width = 0;
     let height = 0;
     let startTimestamp: number | null = null;
+    let lastFrameTime = 0;
 
     const bgStars = Array.from({ length: BG_STAR_COUNT }, () => ({
       x: Math.random(),
@@ -31,18 +35,24 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     }));
 
     const resizeCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
       width = window.innerWidth;
       height = window.innerHeight;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
+      canvas.width = width * CANVAS_DPR;
+      canvas.height = height * CANVAS_DPR;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
+      ctx.scale(CANVAS_DPR, CANVAS_DPR);
     };
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
     const render = (timestamp: number) => {
+      // FPS throttle — skip frames to stay within budget
+      if (timestamp - lastFrameTime < frameIntervalMs) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastFrameTime = timestamp;
+
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;
 
@@ -77,7 +87,6 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     <canvas
       ref={canvasRef}
       className="fixed inset-0 w-screen h-screen block z-0 pointer-events-none"
-      // hint compositor to promote to own layer — avoids repaints touching layout
       style={{ willChange: 'transform' }}
     />
   );

@@ -147,6 +147,19 @@
   will-change: background-position;
 }
 
+/* ── PWA overscroll / bounce prevention ─────────────────────────────────── */
+html, body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Prevent pull-to-refresh in standalone PWA */
+@media (display-mode: standalone) {
+  html { overflow: hidden; }
+  body { overflow: hidden; position: fixed; inset: 0; }
+}
+
 /* ── Global compositor / perf hints ─────────────────────────────────────── */
 
 /* Canvas elements (InlineStarSphere, StarSphereLoader) get dedicated GPU layers */

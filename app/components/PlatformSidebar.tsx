@@ -196,7 +196,7 @@ export function PlatformSidebar({
       </div>
 
       {/* Thread List */}
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>
 
         {/* Quick-action tabs */}
         <div className="flex flex-col gap-px px-2 py-2">
