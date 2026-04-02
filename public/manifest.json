@@ -1,10 +1,12 @@
 {
+  "id": "bleumr-pwa",
   "name": "Bleumr — AI Platform",
   "short_name": "Bleumr",
   "description": "AI-powered browser, chat agent, and web designer",
-  "start_url": "/",
+  "start_url": "https://app.bleumr.com/",
+  "scope": "https://app.bleumr.com/",
   "display": "standalone",
-  "background_color": "#0a0a0a",
+  "background_color": "#020208",
   "theme_color": "#8b5cf6",
   "orientation": "any",
   "icons": [

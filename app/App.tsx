@@ -848,14 +848,26 @@ export default function App() {
 
     if (universalQueue.length === 0 && !routeToBrowserAgent) {
        // ── Subscription gate — blocks ALL engines at the real send point ──────
+       // 1. Fast local check first
        const subCheck = SubscriptionService.canSendMessage();
        if (!subCheck.allowed) {
          setUpgradeReason('limit');
          setShowUpgradeModal(true);
-         // Remove the optimistically added user message bubble
          setMessages(prev => prev.filter(m => m.role !== 'user' || m.content !== processedInput));
          return;
        }
+       // 2. Server-side rate limit check (authoritative — catches admin cooldowns + central tier limits)
+       try {
+         const serverCheck = await SubscriptionService.checkServerRateLimit();
+         if (serverCheck && !serverCheck.allowed) {
+           const mins = serverCheck.cooldown_remaining_sec ? Math.ceil(serverCheck.cooldown_remaining_sec / 60) : 10;
+           setMessages(prev => [
+             ...prev.filter(m => m.role !== 'user' || m.content !== processedInput),
+             { role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.`, createdAt: Date.now() },
+           ]);
+           return;
+         }
+       } catch {} // Fail open if server unreachable — local check already passed
        SubscriptionService.incrementUsage();
        setDailyUsage(SubscriptionService.getDailyUsage());
 
@@ -1245,6 +1257,18 @@ export default function App() {
         setMessages(prev => prev.filter(m => m.role !== 'user' || m.content !== processedInput));
         return;
       }
+      // Server-side check (authoritative)
+      try {
+        const serverCheck = await SubscriptionService.checkServerRateLimit();
+        if (serverCheck && !serverCheck.allowed) {
+          const mins = serverCheck.cooldown_remaining_sec ? Math.ceil(serverCheck.cooldown_remaining_sec / 60) : 10;
+          setMessages(prev => [
+            ...prev.filter(m => m.role !== 'user' || m.content !== processedInput),
+            { role: 'assistant' as const, content: `\u26A1 Absorbing solar energy \u2014 please try again in ${mins} minute${mins !== 1 ? 's' : ''}.`, createdAt: Date.now() },
+          ]);
+          return;
+        }
+      } catch {}
       SubscriptionService.incrementUsage();
       setDailyUsage(SubscriptionService.getDailyUsage());
     }

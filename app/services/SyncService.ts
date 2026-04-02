@@ -17,10 +17,9 @@ const DEVICE_ID = localStorage.getItem('bleumr_device_id') || (() => {
   return id;
 })();
 
-function generateToken(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const seg = () => Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  return `SYNC-${seg()}-${seg()}-${seg()}`;
+/** Generate a 6-digit numeric transfer code */
+function generateCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 export interface SyncData {
@@ -118,66 +117,76 @@ function applySyncData(data: SyncData) {
 
 // ── Public API ─────────────────────────────────────────
 
-/** Generate a new sync token and push current device data to Supabase */
-export async function createSyncToken(label?: string): Promise<{ token: string; error?: string }> {
-  const token = generateToken();
+/** Generate a temporary 6-digit transfer code (valid 60 seconds) and push data to Supabase */
+export async function createSyncToken(label?: string): Promise<{ token: string; expiresAt: string; error?: string }> {
+  const code = generateCode();
   const data = collectSyncData();
+  const expiresAt = new Date(Date.now() + 60_000).toISOString(); // 60 seconds
+
+  // Deactivate any previous codes from this device first
+  await client.from('sync_tokens').update({ active: false }).eq('device_id', DEVICE_ID);
 
   const { error } = await client.from('sync_tokens').insert({
-    token,
+    token: code,
     device_id: DEVICE_ID,
     label: label || 'My Device',
     data,
     active: true,
+    expires_at: expiresAt,
   });
 
-  if (error) return { token: '', error: error.message };
+  if (error) return { token: '', expiresAt: '', error: error.message };
 
-  // Store locally so user can see their active token
-  localStorage.setItem('bleumr_sync_token', token);
-  return { token };
+  localStorage.setItem('bleumr_sync_token', code);
+  localStorage.setItem('bleumr_sync_expires', expiresAt);
+  return { token: code, expiresAt };
 }
 
-/** Update the data for an existing sync token (push latest state) */
-export async function pushSyncData(token: string): Promise<{ error?: string }> {
-  const data = collectSyncData();
-  const { error } = await client.from('sync_tokens').update({
-    data,
-    updated_at: new Date().toISOString(),
-  }).eq('token', token).eq('active', true);
+/** Pull data using a 6-digit transfer code */
+export async function pullSyncData(code: string): Promise<{ success: boolean; error?: string }> {
+  const trimmed = code.trim().replace(/\D/g, ''); // strip non-digits
+  if (trimmed.length !== 6) return { success: false, error: 'Enter a valid 6-digit code' };
 
-  if (error) return { error: error.message };
-  return {};
-}
-
-/** Pull data from a sync token onto this device */
-export async function pullSyncData(token: string): Promise<{ success: boolean; error?: string }> {
   const { data, error } = await client.from('sync_tokens')
     .select('*')
-    .eq('token', token.trim().toUpperCase())
+    .eq('token', trimmed)
     .eq('active', true)
     .single();
 
-  if (error || !data) return { success: false, error: error?.message || 'Token not found or expired' };
+  if (error || !data) return { success: false, error: 'Code not found or already used' };
 
-  // Check expiry
+  // Check 60-second expiry
   if (data.expires_at && new Date(data.expires_at) < new Date()) {
-    return { success: false, error: 'Token has expired. Generate a new one from the source device.' };
+    // Auto-deactivate expired code
+    await client.from('sync_tokens').update({ active: false }).eq('token', trimmed);
+    return { success: false, error: 'Code expired. Generate a new one from the source device.' };
   }
 
   applySyncData(data.data as SyncData);
+
+  // Deactivate after successful pull (one-time use)
+  await client.from('sync_tokens').update({ active: false }).eq('token', trimmed);
+
   return { success: true };
 }
 
-/** Revoke a sync token */
-export async function revokeSyncToken(token: string): Promise<void> {
-  await client.from('sync_tokens').update({ active: false }).eq('token', token);
-  if (localStorage.getItem('bleumr_sync_token') === token) {
-    localStorage.removeItem('bleumr_sync_token');
-  }
+/** Revoke a transfer code */
+export async function revokeSyncToken(code: string): Promise<void> {
+  await client.from('sync_tokens').update({ active: false }).eq('token', code);
+  localStorage.removeItem('bleumr_sync_token');
+  localStorage.removeItem('bleumr_sync_expires');
 }
 
-/** Get the current device's active sync token */
-export function getActiveSyncToken(): string | null {
-  return localStorage.getItem('bleumr_sync_token');
+/** Get the current device's active code + expiry (null if expired or absent) */
+export function getActiveSyncToken(): { code: string; expiresAt: string } | null {
+  const code = localStorage.getItem('bleumr_sync_token');
+  const expiresAt = localStorage.getItem('bleumr_sync_expires');
+  if (!code || !expiresAt) return null;
+  if (new Date(expiresAt) < new Date()) {
+    // Expired locally — clean up
+    localStorage.removeItem('bleumr_sync_token');
+    localStorage.removeItem('bleumr_sync_expires');
+    return null;
+  }
+  return { code, expiresAt };
 }

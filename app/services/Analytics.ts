@@ -38,7 +38,14 @@ function getPlatform(): string {
 }
 
 function getTier(): string {
-  return localStorage.getItem('orbit_tier') || 'free';
+  try {
+    const raw = localStorage.getItem('orbit_subscription_tier');
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data.tier) return data.tier;
+    }
+  } catch {}
+  return 'free';
 }
 
 // ── Queue + batch to avoid spamming ────────────────────

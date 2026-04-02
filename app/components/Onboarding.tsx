@@ -5,6 +5,7 @@ import { UserProfile, saveProfile } from '../services/UserProfile';
 import { InlineStarSphere } from './InlineStarSphere';
 import { cpuCores } from '../services/CPUAccelerator';
 import SubscriptionService from '../services/SubscriptionService';
+import { pullSyncData } from '../services/SyncService';
 
 interface OnboardingProps {
   onComplete: (profile: UserProfile) => void;
@@ -173,8 +174,44 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     if (!licenseKey.trim()) return;
     setLicenseStatus('validating');
     setLicenseError('');
+
+    const trimmed = licenseKey.trim();
+    const isTransferCode = /^\d{6}$/.test(trimmed);
+
+    if (isTransferCode) {
+      // 6-digit transfer code — pull data from Supabase
+      try {
+        const { success, error } = await pullSyncData(trimmed);
+        if (success) {
+          setLicenseStatus('success');
+          // Data restored — check if profile exists now
+          setTimeout(() => {
+            const profileRaw = localStorage.getItem('orbit_user_profile');
+            if (profileRaw) {
+              try {
+                const profile = JSON.parse(profileRaw);
+                onComplete(profile);
+              } catch {
+                setPhase('form');
+              }
+            } else {
+              setPhase('form');
+            }
+          }, 1200);
+        } else {
+          setLicenseStatus('error');
+          setLicenseError(error || 'Invalid or expired code. Try again.');
+        }
+      } catch {
+        setLicenseStatus('error');
+        setLicenseError('Connection failed. Check your internet.');
+      }
+      return;
+    }
+
+    // License key flow
     try {
-      const result = await SubscriptionService.activateLicenseKey(licenseKey.trim());
+      const result = await SubscriptionService.activateLicenseKey(trimmed);
       if (result.success) {
         setLicenseStatus('idle');
         setPhase('form');
@@ -260,81 +297,71 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </motion.div>
         )}
 
-        {/* ── WELCOME — glass card with options ── */}
+        {/* ── WELCOME — floating text on starfield ── */}
         {phase === 'usertype' && (
           <motion.div
             key="usertype"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
             className="relative z-10 flex flex-col items-center justify-center h-full px-6"
           >
-            {/* Glass card */}
+            {/* Spinning sphere */}
             <motion.div
-              initial={{ scale: 0.92, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1, duration: 0.5, ease: 'easeOut' }}
-              className="flex flex-col items-center gap-5 px-8 py-10 rounded-3xl max-w-xs w-full"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)',
-              }}
+              initial={{ scale: 0.6, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.8, type: 'spring', bounce: 0.2 }}
             >
-              <InlineStarSphere size={80} />
-
-              <div className="text-center">
-                <h2 className="text-lg font-semibold text-white/90 tracking-tight">Welcome to Bleumr</h2>
-                <p className="text-[11px] text-white/25 mt-1 tracking-wide uppercase">Beta</p>
-              </div>
-
-              {/* New User */}
-              <motion.button
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25, duration: 0.35 }}
-                onClick={() => setPhase('form')}
-                className="w-full flex items-center gap-3 py-3 px-4 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-                style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                }}
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/50 shrink-0" />
-                <div className="text-left">
-                  <span className="text-[13px] font-medium text-white/70 block leading-tight">New User</span>
-                  <span className="text-[10px] text-white/20">Set up your profile</span>
-                </div>
-                <ArrowRight className="w-3 h-3 text-white/15 ml-auto" />
-              </motion.button>
-
-              {/* Existing User */}
-              <motion.button
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.35, duration: 0.35 }}
-                onClick={() => setPhase('license')}
-                className="w-full flex items-center gap-3 py-3 px-4 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-                style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                }}
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/50 shrink-0" />
-                <div className="text-left">
-                  <span className="text-[13px] font-medium text-white/70 block leading-tight">Existing User</span>
-                  <span className="text-[10px] text-white/20">Enter your license key</span>
-                </div>
-                <ArrowRight className="w-3 h-3 text-white/15 ml-auto" />
-              </motion.button>
+              <InlineStarSphere size={160} />
             </motion.div>
+
+            {/* Floating title */}
+            <motion.h2
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3, duration: 0.6 }}
+              className="text-xl font-semibold text-white/90 tracking-tight mt-8"
+            >
+              Welcome to Bleumr
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.45, duration: 0.5 }}
+              className="text-[11px] text-white/20 mt-1.5 tracking-[0.25em] uppercase font-light"
+            >
+              Beta
+            </motion.p>
+
+            {/* Bare floating buttons — no container */}
+            <div className="flex flex-col items-center gap-4 mt-10">
+              <motion.button
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.55, duration: 0.4 }}
+                onClick={() => setPhase('form')}
+                className="group flex items-center gap-2.5 text-white/50 hover:text-white/90 transition-colors duration-300 text-sm tracking-wide"
+              >
+                New User
+                <ArrowRight className="w-3.5 h-3.5 opacity-40 group-hover:opacity-80 group-hover:translate-x-0.5 transition-all duration-300" />
+              </motion.button>
+
+              <motion.button
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.65, duration: 0.4 }}
+                onClick={() => setPhase('license')}
+                className="group flex items-center gap-2.5 text-white/30 hover:text-white/70 transition-colors duration-300 text-sm tracking-wide"
+              >
+                Existing User
+                <ArrowRight className="w-3.5 h-3.5 opacity-30 group-hover:opacity-60 group-hover:translate-x-0.5 transition-all duration-300" />
+              </motion.button>
+            </div>
           </motion.div>
         )}
 
-        {/* ── LICENSE KEY ENTRY ── */}
+        {/* ── LICENSE KEY / TRANSFER CODE ENTRY ── */}
         {phase === 'license' && (
           <motion.div
             key="license"
@@ -354,7 +381,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
             <div className="text-center">
               <h2 className="text-lg font-semibold text-white/90 tracking-tight mb-1.5">Welcome Back</h2>
-              <p className="text-xs text-white/30">Enter your license key to continue</p>
+              <p className="text-xs text-white/30">Enter a license key or 6-digit transfer code</p>
             </div>
 
             <div className="w-full max-w-sm space-y-3">
@@ -363,7 +390,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 value={licenseKey}
                 onChange={e => { setLicenseKey(e.target.value.toUpperCase()); setLicenseError(''); }}
                 onKeyDown={e => e.key === 'Enter' && handleLicenseSubmit()}
-                placeholder="BLM-XXXXX-XXXXX-XXXXX"
+                placeholder="License key or 6-digit code"
                 className="w-full px-4 py-3 rounded-xl text-center text-sm font-mono tracking-widest text-white/80 placeholder-white/15 outline-none transition-all focus:ring-1 focus:ring-emerald-500/30"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
               />
@@ -378,13 +405,23 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 </motion.p>
               )}
 
+              {licenseStatus === 'success' && (
+                <motion.p
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-emerald-400 text-center"
+                >
+                  Data restored! Continuing setup...
+                </motion.p>
+              )}
+
               <button
                 onClick={handleLicenseSubmit}
                 disabled={!licenseKey.trim() || licenseStatus === 'validating'}
                 className="w-full py-3 rounded-xl text-sm font-semibold tracking-wide transition-all disabled:opacity-30"
                 style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}
               >
-                {licenseStatus === 'validating' ? 'Validating...' : 'Activate'}
+                {licenseStatus === 'validating' ? 'Validating...' : 'Continue'}
               </button>
 
               <button
