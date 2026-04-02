@@ -82,7 +82,10 @@ if (typeof window !== 'undefined') {
     try {
       const tierRaw = localStorage.getItem(TIER_STORAGE_KEY);
       const tier = tierRaw ? (JSON.parse(tierRaw) as { tier: string }).tier || 'free' : 'free';
-      const res = await fetch(`${RATE_LIMIT_URL}?tier=${encodeURIComponent(tier)}`, {
+      const fp = localStorage.getItem('bleumr_device_fp') || '';
+      const params = new URLSearchParams({ tier });
+      if (fp) params.set('device_fp', fp);
+      const res = await fetch(`${RATE_LIMIT_URL}?${params.toString()}`, {
         headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
       });
       if (res.status === 429) {
@@ -133,7 +136,10 @@ class SubscriptionService {
     // Local cache is only used as a fast fallback when the server is unreachable.
     try {
       const tier = this.getTier();
-      const res = await fetch(`${RATE_LIMIT_URL}?tier=${encodeURIComponent(tier)}`, {
+      const fp = localStorage.getItem('bleumr_device_fp') || '';
+      const params = new URLSearchParams({ tier });
+      if (fp) params.set('device_fp', fp);
+      const res = await fetch(`${RATE_LIMIT_URL}?${params.toString()}`, {
         headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
       });
       if (res.ok || res.status === 429) {
@@ -144,6 +150,10 @@ class SubscriptionService {
           try { localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify(state)); } catch {}
         } else {
           try { localStorage.removeItem(COOLDOWN_CACHE_KEY); } catch {}
+        }
+        // Cache server device usage count — source of truth for canSendMessage
+        if (data.device_used !== undefined) {
+          this._setServerDeviceUsage(data.device_used);
         }
         return data;
       }
@@ -358,6 +368,16 @@ class SubscriptionService {
     try {
       localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify({ date: today, count: next }));
     } catch {}
+
+    // Also consume on server (fire-and-forget) — server is source of truth
+    const fp = localStorage.getItem('bleumr_device_fp') || '';
+    if (fp) {
+      const params = new URLSearchParams({ tier, device_fp: fp, action: 'consume' });
+      fetch(`${RATE_LIMIT_URL}?${params.toString()}`, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      }).catch(() => {});
+    }
+
     return next;
   }
 
@@ -377,6 +397,27 @@ class SubscriptionService {
       };
     }
 
+    // Check server-synced device usage (survives reinstall)
+    const serverUsage = this._getServerDeviceUsage();
+    if (serverUsage !== null) {
+      // Server data available — use it as source of truth
+      const tier = this.getTier();
+      if (tier === 'stellur') return { allowed: true, remaining: Infinity };
+      const limit = tier === 'pro' ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
+      if (limit === 0) return { allowed: true, remaining: Infinity }; // unlimited
+      const remaining = Math.max(0, limit - serverUsage);
+      if (remaining === 0) {
+        return {
+          allowed: false, limitReached: true, remaining: 0,
+          reason: tier === 'free'
+            ? `You've used all ${FREE_DAILY_LIMIT} free messages today. Upgrade to keep going.`
+            : `You've reached your daily limit. Upgrade to STELLUR for truly unlimited usage.`,
+        };
+      }
+      return { allowed: true, remaining };
+    }
+
+    // Fallback to localStorage counts if server data isn't cached yet
     const tier = this.getTier();
 
     if (tier === 'stellur') {
@@ -408,6 +449,27 @@ class SubscriptionService {
       };
     }
     return { allowed: true, remaining };
+  }
+
+  // ── Server device usage cache ──
+  private _getServerDeviceUsage(): number | null {
+    try {
+      const raw = localStorage.getItem('bleumr_server_device_usage');
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      // Only valid if from today and less than 60s old
+      if (data.date !== this._getTodayStr()) return null;
+      if (Date.now() - data.ts > 60000) return null;
+      return data.used;
+    } catch { return null; }
+  }
+
+  private _setServerDeviceUsage(used: number) {
+    try {
+      localStorage.setItem('bleumr_server_device_usage', JSON.stringify({
+        date: this._getTodayStr(), used, ts: Date.now(),
+      }));
+    } catch {}
   }
 
   canUseBrowserAgent(): boolean {
