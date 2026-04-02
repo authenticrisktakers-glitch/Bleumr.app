@@ -128,17 +128,8 @@ class SubscriptionService {
     allowed: boolean; remaining: number; limit: number; used: number;
     cooldown?: boolean; cooldown_until?: string; cooldown_remaining_sec?: number; reason?: string;
   } | null> {
-    // If we're already in cached cooldown, don't even hit the server
-    const cached = getCooldownState();
-    if (cached && cached.tier === this.getTier()) {
-      const remainingSec = Math.ceil((new Date(cached.cooldown_until).getTime() - Date.now()) / 1000);
-      return {
-        allowed: false, remaining: 0, limit: 0, used: 0,
-        cooldown: true, cooldown_until: cached.cooldown_until,
-        cooldown_remaining_sec: remainingSec, reason: cached.reason,
-      };
-    }
-
+    // Always hit the server — admin resets must propagate immediately.
+    // Local cache is only used as a fast fallback when the server is unreachable.
     try {
       const tier = this.getTier();
       const res = await fetch(`${RATE_LIMIT_URL}?tier=${encodeURIComponent(tier)}`, {
@@ -146,7 +137,7 @@ class SubscriptionService {
       });
       if (res.ok || res.status === 429) {
         const data = await res.json();
-        // Cache cooldown state locally
+        // Cache cooldown state locally (only for offline fallback)
         if (data.cooldown && data.cooldown_until) {
           const state: CooldownState = { tier, cooldown_until: data.cooldown_until, reason: data.reason || 'Cooldown active' };
           try { localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify(state)); } catch {}
@@ -155,7 +146,18 @@ class SubscriptionService {
         }
         return data;
       }
-    } catch {}
+    } catch {
+      // Server unreachable — fall back to cached cooldown if available
+      const cached = getCooldownState();
+      if (cached && cached.tier === this.getTier()) {
+        const remainingSec = Math.ceil((new Date(cached.cooldown_until).getTime() - Date.now()) / 1000);
+        return {
+          allowed: false, remaining: 0, limit: 0, used: 0,
+          cooldown: true, cooldown_until: cached.cooldown_until,
+          cooldown_remaining_sec: remainingSec, reason: cached.reason,
+        };
+      }
+    }
     return null;
   }
 

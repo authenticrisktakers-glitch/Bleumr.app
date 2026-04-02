@@ -48,9 +48,20 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }
       if (newLimit) updates.daily_limit = newLimit
+
+      // Clear today's request count so cooldown doesn't instantly re-trigger
+      const todayStart = new Date()
+      todayStart.setUTCHours(0, 0, 0, 0)
+      await supabase
+        .from('api_requests')
+        .delete()
+        .eq('tier', tier)
+        .gte('created_at', todayStart.toISOString())
+
       await supabase.from('tier_limits').update(updates).eq('tier', tier)
+
       return new Response(
-        JSON.stringify({ reset: true, tier, new_limit: newLimit || 'unchanged' }),
+        JSON.stringify({ reset: true, tier, new_limit: newLimit || 'unchanged', requests_cleared: true }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
