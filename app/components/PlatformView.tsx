@@ -168,7 +168,7 @@ const MessageRow = memo(function MessageRow({
                               <a
                                 key={`${i}-${j}`}
                                 href={src.url}
-                                onClick={(e) => { if (onNavigateInternal) { e.preventDefault(); onNavigateInternal(src.url); } }}
+                                onClick={(e) => { e.preventDefault(); handleNavigate(src.url); }}
                                 className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0 rounded-md bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] text-[10px] text-slate-400 hover:text-white transition-colors align-baseline no-underline cursor-pointer"
                                 title={src.title}
                               >
@@ -185,7 +185,7 @@ const MessageRow = memo(function MessageRow({
                       return (
                         <a
                           href={href}
-                          onClick={(e) => { if (onNavigateInternal && href) { e.preventDefault(); onNavigateInternal(href); } }}
+                          onClick={(e) => { if (href) { e.preventDefault(); handleNavigate(href); } }}
                           className="text-sky-400 hover:text-sky-300 underline cursor-pointer"
                           title={href}
                           {...props}
@@ -289,7 +289,7 @@ const MessageRow = memo(function MessageRow({
                       <a
                         key={i}
                         href={src.url}
-                        onClick={(e) => { if (onNavigateInternal) { e.preventDefault(); onNavigateInternal(src.url); } }}
+                        onClick={(e) => { e.preventDefault(); handleNavigate(src.url); }}
                         title={src.title || domain}
                         className="w-6 h-6 rounded-full bg-white/[0.06] hover:bg-white/[0.14] flex items-center justify-center transition-colors cursor-pointer"
                       >
@@ -360,6 +360,21 @@ export const PlatformView = memo(function PlatformView({
   onStopAgent,
   onNavigateInternal,
 }: PlatformViewProps) {
+  // ── Mini in-app browser (PWA) — opens source pages without leaving chat ──
+  const [miniBrowserUrl, setMiniBrowserUrl] = useState<string | null>(null);
+  const [miniBrowserLoading, setMiniBrowserLoading] = useState(false);
+
+  const handleNavigate = (url: string) => {
+    if (IS_ELECTRON) {
+      // Electron: use native WebContentsView tabs
+      onNavigateInternal?.(url);
+    } else {
+      // PWA: open mini browser overlay
+      setMiniBrowserUrl(url);
+      setMiniBrowserLoading(true);
+    }
+  };
+
   // ── Local input state — typing never touches App.tsx ──
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<{ base64: string; preview: string } | null>(null);
@@ -888,6 +903,53 @@ export const PlatformView = memo(function PlatformView({
         </div>
 
       </div>
+
+      {/* ── Mini In-App Browser (PWA) ─────────────────────────────────── */}
+      {miniBrowserUrl && (
+        <div className="fixed inset-0 z-[99999] flex flex-col" style={{ background: '#0a0a0a' }}>
+          {/* Top bar */}
+          <div className="flex items-center gap-3 px-3 shrink-0" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingBottom: 8, background: '#111118', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+            {/* Close button */}
+            <button
+              onClick={() => { setMiniBrowserUrl(null); setMiniBrowserLoading(false); }}
+              className="flex items-center justify-center w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 transition-colors shrink-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+            {/* URL bar */}
+            <div className="flex-1 min-w-0 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.08]">
+              <div className="flex items-center gap-2">
+                {miniBrowserLoading && (
+                  <div className="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                )}
+                <span className="text-xs text-white/50 truncate">{(() => { try { return new URL(miniBrowserUrl).hostname; } catch { return miniBrowserUrl; } })()}</span>
+              </div>
+            </div>
+            {/* Open in system browser */}
+            <a
+              href={miniBrowserUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 transition-colors shrink-0"
+              title="Open in browser"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11 7.5V11a1.5 1.5 0 01-1.5 1.5h-6A1.5 1.5 0 012 11V5a1.5 1.5 0 011.5-1.5H7" stroke="white" strokeWidth="1.2" strokeLinecap="round"/><path d="M9 1.5h3.5V5M6 8l5.5-5.5" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </a>
+          </div>
+          {/* Iframe */}
+          <div className="flex-1 relative">
+            <iframe
+              src={miniBrowserUrl}
+              className="absolute inset-0 w-full h-full border-0"
+              style={{ background: 'white' }}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              onLoad={() => setMiniBrowserLoading(false)}
+              title="Source page"
+            />
+          </div>
+        </div>
+      )}
+
     </div>
   );
 });
