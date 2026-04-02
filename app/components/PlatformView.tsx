@@ -531,7 +531,11 @@ export const PlatformView = memo(function PlatformView({
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0a] text-slate-200 font-sans overflow-hidden flex selection:bg-indigo-500/30 z-[9999]"
-      style={{ height: keyboardOffset > 0 ? viewportHeight : undefined }}>
+      style={{
+        height: keyboardOffset > 0 ? viewportHeight : undefined,
+        paddingTop: IS_ELECTRON ? undefined : 'env(safe-area-inset-top, 0px)',
+        paddingBottom: IS_ELECTRON ? undefined : 'env(safe-area-inset-bottom, 0px)',
+      }}>
 
       {/* Background stars — memoised, never re-renders */}
       <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-60' : 'opacity-100'}`}>
@@ -560,7 +564,7 @@ export const PlatformView = memo(function PlatformView({
 
       <div className="flex-1 flex flex-col relative z-10 w-full h-full">
         {/* Top Header */}
-        <div className="flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: IS_ELECTRON ? 80 : 16, paddingTop: IS_ELECTRON ? 16 : 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingBottom: 8, minHeight: IS_ELECTRON ? 64 : undefined }}>
+        <div className="flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: IS_ELECTRON ? 80 : 16, paddingTop: IS_ELECTRON ? 16 : 8, paddingBottom: 8, minHeight: IS_ELECTRON ? 64 : undefined }}>
           <div className="flex items-center">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -571,7 +575,7 @@ export const PlatformView = memo(function PlatformView({
             </button>
           </div>
 
-          <div className="absolute left-1/2 -translate-x-1/2 z-50" style={{ top: IS_ELECTRON ? 16 : 'calc(env(safe-area-inset-top, 0px) + 8px)' }}>
+          <div className="absolute left-1/2 -translate-x-1/2 z-50" style={{ top: IS_ELECTRON ? 16 : 8 }}>
             <div className="relative">
               <button
                 onClick={() => setIsAgentDropdownOpen(!isAgentDropdownOpen)}
@@ -788,7 +792,7 @@ export const PlatformView = memo(function PlatformView({
         {/* ── Liquid Glass Input Area ── */}
         <div className="absolute left-0 right-0 bottom-0 w-full px-4 z-30 transition-[padding] duration-200 ease-out" style={{
           paddingTop: keyboardOffset > 0 ? 8 : 16,
-          paddingBottom: keyboardOffset > 0 ? 8 : 'max(1.25rem, env(safe-area-inset-bottom, 1.25rem))',
+          paddingBottom: keyboardOffset > 0 ? 8 : '1.25rem',
           background: keyboardOffset > 0
             ? 'rgba(10,10,10,0.98)'
             : 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%)',
