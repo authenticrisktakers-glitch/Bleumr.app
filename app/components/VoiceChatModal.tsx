@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Volume2, VolumeX, RotateCcw } from 'lucide-react';
+import { X, Volume2, VolumeX, RotateCcw, MessageSquareText } from 'lucide-react';
 import { BLEUMR_VOICE_CONTEXT } from '../services/BleumrLore';
 import * as THREE from 'three';
 import { trackError } from '../services/Analytics';
@@ -370,6 +370,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const [liveText, setLiveText]     = useState('');
   const [muted, setMuted]           = useState(false);
   const [volume, setVolume]         = useState(0); // 0–1, from analyser
+  const [showTranscript, setShowTranscript] = useState(false);
 
   const voiceStateRef = useRef<VoiceState>('idle');
   const mutedRef      = useRef(false);
@@ -829,6 +830,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         <div className="flex items-center justify-between px-6 py-4">
           <div />
           <div className="flex items-center gap-2">
+            <button onClick={() => setShowTranscript(v => !v)}
+              className="p-2 rounded-xl transition-colors hover:bg-white/8"
+              style={{ color: showTranscript ? '#818cf8' : '#475569' }} title={showTranscript ? 'Hide transcript' : 'Show transcript'}>
+              <MessageSquareText className="w-4 h-4" />
+            </button>
             <button onClick={clearConversation}
               className="p-2 rounded-xl transition-colors hover:bg-white/8"
               style={{ color: '#475569' }} title="Clear conversation">
@@ -847,45 +853,57 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           </div>
         </div>
 
-        {/* ── Transcript ─────────────────────────────────────────────────────── */}
-        <div ref={scrollRef}
-          className="absolute left-1/2 -translate-x-1/2 overflow-y-auto flex flex-col gap-2 px-1"
-          style={{ top: 72, bottom: 290, width: 440, scrollbarWidth: 'none' }}>
-          <AnimatePresence initial={false}>
-            {turns.map(turn => (
-              <motion.div key={turn.id}
-                initial={{ opacity: 0, y: 10, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${turn.role === 'user' ? 'self-end' : 'self-start'}`}
-                style={turn.role === 'user' ? {
-                  background: 'rgba(99,102,241,0.18)',
-                  border: '1px solid rgba(99,102,241,0.28)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)',
-                } : {
-                  background: 'rgba(255,255,255,0.055)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
-                }}>
-                {turn.role === 'assistant' && (
-                  <p className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: '#34d399' }}>JUMARI</p>
+        {/* ── Transcript (toggled via header button) ──────────────────────── */}
+        <AnimatePresence>
+          {showTranscript && (
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+              ref={scrollRef}
+              className="absolute left-4 overflow-y-auto flex flex-col gap-2 px-1 z-10"
+              style={{ top: 72, bottom: 24, width: 320, maxWidth: '40vw', scrollbarWidth: 'none',
+                background: 'rgba(10,10,16,0.75)', backdropFilter: 'blur(16px)',
+                borderRadius: 16, border: '1px solid rgba(255,255,255,0.06)', padding: 12 }}>
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>Transcript</p>
+              <AnimatePresence initial={false}>
+                {turns.map(turn => (
+                  <motion.div key={turn.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className={`max-w-[95%] rounded-2xl px-3.5 py-2.5 ${turn.role === 'user' ? 'self-end' : 'self-start'}`}
+                    style={turn.role === 'user' ? {
+                      background: 'rgba(99,102,241,0.18)',
+                      border: '1px solid rgba(99,102,241,0.28)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)',
+                    } : {
+                      background: 'rgba(255,255,255,0.055)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+                    }}>
+                    {turn.role === 'assistant' && (
+                      <p className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: '#34d399' }}>JUMARI</p>
+                    )}
+                    <p className="text-[13px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.75)' }}>
+                      {turn.text}
+                    </p>
+                  </motion.div>
+                ))}
+                {voiceState === 'processing' && liveText && (
+                  <motion.div key="live"
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                    className="self-end max-w-[85%] rounded-2xl px-3.5 py-2.5"
+                    style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                    <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>{liveText}</p>
+                  </motion.div>
                 )}
-                <p className="text-[13px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.75)' }}>
-                  {turn.text}
-                </p>
-              </motion.div>
-            ))}
-            {voiceState === 'processing' && liveText && (
-              <motion.div key="live"
-                initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                className="self-end max-w-[85%] rounded-2xl px-3.5 py-2.5"
-                style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>{liveText}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── Mercury sphere — centered in the void ─────────────────────────── */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
