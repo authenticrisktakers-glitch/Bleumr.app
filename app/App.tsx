@@ -172,6 +172,8 @@ function PWAInstallStarField() {
 
 function isStandaloneMode(): boolean {
   if (IS_ELECTRON) return true; // Electron is always "installed"
+  // Dev bypass — ?standalone=1 in URL
+  if (new URLSearchParams(window.location.search).get('standalone') === '1') return true;
   // iOS standalone
   if ((navigator as any).standalone === true) return true;
   // Android / desktop PWA

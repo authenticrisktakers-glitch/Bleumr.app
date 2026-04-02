@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "Bleumr Renderer (Vite)",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["./node_modules/vite/bin/vite.js", "--config", "vite.renderer.config.ts"],
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/authentic/Desktop/src (17)/node_modules/vite/bin/vite.js", "--config", "/Users/authentic/Desktop/src (17)/vite.renderer.config.ts"],
       "port": 5173
     },
     {
