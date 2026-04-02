@@ -4,6 +4,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getDeviceFingerprint, getDeviceFingerprintSync } from './DeviceFingerprint';
 
 const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
@@ -23,12 +24,27 @@ function getClient(): SupabaseClient {
 const SESSION_ID = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 localStorage.setItem('orbit_session_id', SESSION_ID);
 
-const DEVICE_ID = localStorage.getItem('bleumr_device_id') || (() => {
+// Device ID: use hardware fingerprint if available, fall back to random ID
+// The fingerprint survives PWA uninstall/reinstall — same device = same ID
+const LEGACY_DEVICE_ID = localStorage.getItem('bleumr_device_id') || (() => {
   const id = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   localStorage.setItem('bleumr_device_id', id);
   return id;
 })();
-// Also store as orbit_device_id for KnowledgeService compatibility
+
+// Start with legacy ID, upgrade to fingerprint once computed
+let DEVICE_ID = getDeviceFingerprintSync() || LEGACY_DEVICE_ID;
+
+// Async: compute fingerprint in background and update device ID
+getDeviceFingerprint().then(fp => {
+  DEVICE_ID = fp;
+  // Store fingerprint as the canonical device ID for all services
+  localStorage.setItem('bleumr_device_id', fp);
+  localStorage.setItem('bleumr_device_fp', fp);
+  localStorage.setItem('orbit_device_id', fp);
+}).catch(() => {});
+
+// Also store legacy for KnowledgeService compatibility
 localStorage.setItem('orbit_device_id', DEVICE_ID);
 
 function getPlatform(): string {

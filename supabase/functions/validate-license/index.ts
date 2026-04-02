@@ -93,19 +93,63 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Check activation limit
-    if (license.current_activations >= license.max_activations) {
+    // ── Device fingerprint tracking ──
+    // If client sends a device fingerprint, check if this device already
+    // activated this key. Same device = no extra activation consumed.
+    const deviceFp = url.searchParams.get('device_fp') || ''
+
+    let isKnownDevice = false
+    if (deviceFp) {
+      // Check if this fingerprint already activated this license
+      const { data: existing } = await supabase
+        .from('device_activations')
+        .select('id')
+        .eq('license_key_id', license.id)
+        .eq('device_fingerprint', deviceFp)
+        .limit(1)
+
+      if (existing && existing.length > 0) {
+        // Known device — don't count as new activation
+        isKnownDevice = true
+        // Update last seen
+        await supabase
+          .from('device_activations')
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq('license_key_id', license.id)
+          .eq('device_fingerprint', deviceFp)
+      }
+    }
+
+    // Check activation limit (only for NEW devices)
+    if (!isKnownDevice && license.current_activations >= license.max_activations) {
       return new Response(
         JSON.stringify({ error: 'License key activation limit reached' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Increment activation count
-    await supabase
-      .from('license_keys')
-      .update({ current_activations: license.current_activations + 1 })
-      .eq('id', license.id)
+    // Track new device activation
+    if (!isKnownDevice) {
+      // Increment activation count
+      await supabase
+        .from('license_keys')
+        .update({ current_activations: license.current_activations + 1 })
+        .eq('id', license.id)
+
+      // Record the device fingerprint so it won't count again
+      if (deviceFp) {
+        await supabase
+          .from('device_activations')
+          .insert({
+            license_key_id: license.id,
+            device_fingerprint: deviceFp,
+            platform: url.searchParams.get('platform') || 'unknown',
+            first_seen_at: new Date().toISOString(),
+            last_seen_at: new Date().toISOString(),
+          })
+          .catch(() => {}) // don't fail if table doesn't exist yet
+      }
+    }
 
     // Return tier + API keys from secrets
     const apiKeys: Record<string, string> = {

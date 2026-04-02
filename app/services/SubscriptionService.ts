@@ -10,6 +10,7 @@
  */
 
 import { SecureStorage } from './SecureStorage';
+import { getDeviceFingerprint } from './DeviceFingerprint';
 
 export type SubscriptionTier = 'free' | 'pro' | 'stellur';
 
@@ -229,7 +230,20 @@ class SubscriptionService {
     if (!trimmed) return null;
 
     try {
-      const res = await fetch(`${VALIDATE_URL}?key=${encodeURIComponent(trimmed)}`, {
+      // Get device fingerprint to send with validation
+      // This ensures same device doesn't consume multiple activation slots
+      let deviceFp = '';
+      try { deviceFp = await getDeviceFingerprint(); } catch {}
+
+      const platform = typeof window !== 'undefined' && (window as any).orbit ? 'electron'
+        : (navigator as any).standalone || window.matchMedia?.('(display-mode: standalone)').matches ? 'pwa'
+        : 'browser';
+
+      const params = new URLSearchParams({ key: trimmed });
+      if (deviceFp) params.set('device_fp', deviceFp);
+      params.set('platform', platform);
+
+      const res = await fetch(`${VALIDATE_URL}?${params.toString()}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
