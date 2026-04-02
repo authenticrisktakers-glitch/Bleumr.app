@@ -98,8 +98,37 @@ Deno.serve(async (req) => {
     // activated this key. Same device = no extra activation consumed.
     const deviceFp = url.searchParams.get('device_fp') || ''
 
-    let isKnownDevice = false
+    // Auto-create device_activations table if it doesn't exist
+    let deviceTableReady = true
     if (deviceFp) {
+      const { error: tableCheck } = await supabase.from('device_activations').select('id').limit(0)
+      if (tableCheck && (tableCheck.code === '42P01' || tableCheck.message?.includes('device_activations'))) {
+        // Table doesn't exist — create it via raw SQL
+        try {
+          await supabase.rpc('exec_sql', { query: `
+            CREATE TABLE IF NOT EXISTS device_activations (
+              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+              license_key_id uuid NOT NULL REFERENCES license_keys(id) ON DELETE CASCADE,
+              device_fingerprint text NOT NULL,
+              platform text DEFAULT 'unknown',
+              first_seen_at timestamptz DEFAULT now(),
+              last_seen_at timestamptz DEFAULT now(),
+              UNIQUE(license_key_id, device_fingerprint)
+            );
+            CREATE INDEX IF NOT EXISTS idx_device_activations_lookup ON device_activations(license_key_id, device_fingerprint);
+            ALTER TABLE device_activations ENABLE ROW LEVEL SECURITY;
+            CREATE POLICY IF NOT EXISTS "service_full" ON device_activations FOR ALL USING (true) WITH CHECK (true);
+          `})
+        } catch {
+          // exec_sql rpc might not exist — fall back to individual table creation
+          // via supabase-js (won't work for DDL, but at least we tried)
+          deviceTableReady = false
+        }
+      }
+    }
+
+    let isKnownDevice = false
+    if (deviceFp && deviceTableReady) {
       // Check if this fingerprint already activated this license
       const { data: existing } = await supabase
         .from('device_activations')
@@ -137,7 +166,7 @@ Deno.serve(async (req) => {
         .eq('id', license.id)
 
       // Record the device fingerprint so it won't count again
-      if (deviceFp) {
+      if (deviceFp && deviceTableReady) {
         await supabase
           .from('device_activations')
           .insert({
