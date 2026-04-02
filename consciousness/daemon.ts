@@ -21,10 +21,26 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// ─── Load .env file ────────────────────────────────────────────────────────────
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
 const GROQ_KEY = process.env.GROQ_API_KEY || '';
 
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -122,23 +138,32 @@ async function groqChat(
 
 // ─── Thought Logger ────────────────────────────────────────────────────────────
 
+let supabaseWorking = true; // tracks if Supabase tables exist
+
 async function logThought(thought: ThoughtEntry, cycleId: string): Promise<void> {
-  const sb = getSupabase();
-  try {
-    await sb.from('consciousness_log').insert({
-      cycle_id: cycleId,
-      type: thought.type,
-      content: thought.content,
-      file_context: thought.file_context || null,
-      confidence: thought.confidence,
-      priority: thought.priority,
-      tags: thought.tags,
-      created_at: new Date().toISOString(),
-    });
-  } catch (e: any) {
-    console.error('[Thought] Failed to log:', e.message);
+  if (supabaseWorking) {
+    try {
+      const sb = getSupabase();
+      const { error } = await sb.from('consciousness_log').insert({
+        cycle_id: cycleId,
+        type: thought.type,
+        content: thought.content,
+        file_context: thought.file_context || null,
+        confidence: thought.confidence,
+        priority: thought.priority,
+        tags: thought.tags,
+        created_at: new Date().toISOString(),
+      });
+      if (error && error.code === '42P01') {
+        console.warn('  ⚠ Supabase tables not set up yet — logging locally only');
+        console.warn('  ⚠ Paste consciousness/setup.sql into Supabase SQL Editor to enable admin panel');
+        supabaseWorking = false;
+      }
+    } catch (e: any) {
+      // Supabase unreachable — continue locally
+    }
   }
-  // Always print locally too
+  // Always print locally
   const icon = { observation: '👁', idea: '💡', analysis: '🔬', draft: '📝', reflection: '🪞', learning: '🧠' }[thought.type] || '💭';
   console.log(`  ${icon} [${thought.type.toUpperCase()}] ${thought.content.slice(0, 120)}`);
 }
@@ -276,6 +301,7 @@ async function checkAdminCommands(): Promise<{ shouldRun: boolean; shouldPause: 
 // ─── Report Cycle Metrics ──────────────────────────────────────────────────────
 
 async function reportCycle(result: CycleResult): Promise<void> {
+  if (!supabaseWorking) return;
   try {
     const sb = getSupabase();
     await sb.from('consciousness_cycles').insert({
@@ -290,7 +316,7 @@ async function reportCycle(result: CycleResult): Promise<void> {
       errors: result.errors,
     });
   } catch (e: any) {
-    console.error('[Cycle] Failed to report:', e.message);
+    // Silent — local output already handles visibility
   }
 }
 
@@ -520,8 +546,9 @@ async function main() {
   console.log(`  Groq budget: ${MAX_GROQ_CALLS_PER_CYCLE} calls/cycle\n`);
 
   // Validate env
-  if (!GROQ_KEY) { console.error('  ❌ Set GROQ_API_KEY env var'); process.exit(1); }
-  if (!SUPABASE_KEY) { console.error('  ❌ Set SUPABASE_SERVICE_KEY env var'); process.exit(1); }
+  if (!GROQ_KEY) { console.error('  ❌ Set GROQ_API_KEY in .env file'); process.exit(1); }
+  console.log(`  Supabase: ${SUPABASE_KEY === SUPABASE_ANON_KEY ? 'anon key' : 'service role key'}`);
+  console.log(`  Groq: ${GROQ_KEY.slice(0, 8)}...${GROQ_KEY.slice(-4)}\n`);
 
   // Ensure drafts dir
   if (!fs.existsSync(DRAFTS_DIR)) fs.mkdirSync(DRAFTS_DIR, { recursive: true });
