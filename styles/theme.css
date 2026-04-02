@@ -147,6 +147,29 @@
   will-change: background-position;
 }
 
+/* ── Hide scrollbars globally (PWA + Electron) ────────────────────────── */
+* {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE / Edge */
+}
+*::-webkit-scrollbar {
+  display: none;                  /* Chrome / Safari / PWA */
+}
+
+/* ── Text selection — only allow in chat message content ───────────────── */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection for chat message prose / text and input fields */
+.prose, .prose *, textarea, input, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* ── PWA overscroll / bounce prevention ─────────────────────────────────── */
 html, body {
   overscroll-behavior: none;
