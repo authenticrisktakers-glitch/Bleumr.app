@@ -293,6 +293,7 @@ export default function App() {
                 .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
                 .replace(/<open>[\s\S]*?<\/open>/gi, '')
                 .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
+                .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
                 .trimEnd() }
             : m
         );
@@ -603,6 +604,7 @@ export default function App() {
             .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
             .replace(/<open>[\s\S]*?<\/open>/gi, '')
             .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
+            .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
             .trimEnd() }
         : m
     );
@@ -939,14 +941,16 @@ export default function App() {
           .replace(/<schedule>[\s\S]*?<\/schedule>/gi, '')
           .replace(/<open>[\s\S]*?<\/open>/gi, '')
           .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
+          .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
           .replace(/<followups>[\s\S]*?<\/followups>/gi, '')
           // Catch orphaned closing tags (model sometimes forgets opening tag)
           .replace(/<\/followups>/gi, '')
           .replace(/<\/schedule>/gi, '')
           .replace(/<\/open>/gi, '')
-          .replace(/<\/workspace>/gi, '');
+          .replace(/<\/workspace>/gi, '')
+          .replace(/<\/activate_key>/gi, '');
         // Hide partial opening tags still mid-stream
-        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '');
+        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '').replace(/<activate_key[\s\S]*$/i, '');
         return s.trimEnd();
       };
 
@@ -1144,6 +1148,40 @@ export default function App() {
            }
 
            parseWorkspaceFromRaw(rawContent);
+
+           // ── License key activation via <activate_key> tag ──
+           const keyMatch = rawContent.match(/<activate_key>([\s\S]*?)<\/activate_key>/i);
+           if (keyMatch) {
+             const key = keyMatch[1].trim();
+             if (key) {
+               SubscriptionService.activateLicenseKey(key).then(result => {
+                 if (result.success) {
+                   setTier(SubscriptionService.getTier());
+                   SubscriptionService.getStoredApiKeys().then(keys => {
+                     if (keys.groq) setSecureApiKey(keys.groq);
+                     if (keys.deepgram) setDeepgramKey(keys.deepgram);
+                   });
+                   // Build activation details for the conversation context
+                   let details = `✅ Key activated — **${(result.tier || 'pro').charAt(0).toUpperCase() + (result.tier || 'pro').slice(1)}** tier unlocked.`;
+                   if (result.expiresAt) {
+                     const exp = new Date(result.expiresAt);
+                     details += ` Expires **${exp.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}**.`;
+                   }
+                   if (result.activationsUsed != null && result.maxActivations != null) {
+                     const remaining = result.maxActivations - result.activationsUsed;
+                     details += ` Activations: **${result.activationsUsed} of ${result.maxActivations} used** — ${remaining} remaining.`;
+                   }
+                   // Inject as a system-level note so the agent can relay it
+                   setMessages(prev => [...prev, { role: 'assistant' as const, content: details }]);
+                 } else {
+                   setMessages(prev => [...prev, { role: 'assistant' as const, content: `❌ ${result.error || 'Key activation failed. The key may be invalid or expired.'}` }]);
+                 }
+               }).catch(() => {
+                 setMessages(prev => [...prev, { role: 'assistant' as const, content: '❌ Something went wrong activating that key. Try again in a moment.' }]);
+               });
+             }
+           }
+
            openHtmlInBrowser(rawContent);
 
            const isRawHtmlDump = rawContent.trim().match(/^<!DOCTYPE\s+html/i) || rawContent.trim().match(/^<html[\s>]/i);

@@ -222,7 +222,7 @@ class SubscriptionService {
 
   // ── License key validation ──────────────────────────────────────────────────
 
-  async validateLicenseKey(key: string): Promise<{ tier: SubscriptionTier; apiKeys?: ApiKeys } | null> {
+  async validateLicenseKey(key: string): Promise<{ tier: SubscriptionTier; apiKeys?: ApiKeys; expiresAt?: string; activationsUsed?: number; maxActivations?: number } | null> {
     const trimmed = key.trim().toUpperCase();
     if (!trimmed) return null;
 
@@ -239,7 +239,13 @@ class SubscriptionService {
       const data = await res.json();
       const tier = data?.tier as SubscriptionTier;
       if (tier === 'pro' || tier === 'stellur') {
-        return { tier, apiKeys: data.apiKeys as ApiKeys };
+        return {
+          tier,
+          apiKeys: data.apiKeys as ApiKeys,
+          expiresAt: data.expires_at || data.expiresAt || undefined,
+          activationsUsed: data.activations_used ?? data.activationsUsed ?? undefined,
+          maxActivations: data.max_activations ?? data.maxActivations ?? undefined,
+        };
       }
       return null;
     } catch {
@@ -247,7 +253,7 @@ class SubscriptionService {
     }
   }
 
-  async activateLicenseKey(key: string): Promise<{ success: boolean; tier?: SubscriptionTier; error?: string }> {
+  async activateLicenseKey(key: string): Promise<{ success: boolean; tier?: SubscriptionTier; error?: string; expiresAt?: string; activationsUsed?: number; maxActivations?: number }> {
     const trimmed = key.trim();
     if (!trimmed) return { success: false, error: 'Please enter a license key.' };
 
@@ -264,7 +270,13 @@ class SubscriptionService {
       if (result.apiKeys.gemini) await SecureStorage.set('orbit_gemini_key', result.apiKeys.gemini);
     }
 
-    return { success: true, tier: result.tier };
+    return {
+      success: true,
+      tier: result.tier,
+      expiresAt: result.expiresAt,
+      activationsUsed: result.activationsUsed,
+      maxActivations: result.maxActivations,
+    };
   }
 
   /** Load API keys from SecureStorage (previously fetched from Supabase) */
