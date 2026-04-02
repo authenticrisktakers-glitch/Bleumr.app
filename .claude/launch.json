@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Bleumr Renderer (Vite)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["./node_modules/vite/bin/vite.js", "--config", "vite.renderer.config.ts"],
+      "port": 5173
+    },
+    {
+      "name": "Bleumr (Electron + Vite)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "Bleumr Admin",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/authentic/Desktop/bleumr-admin/node_modules/vite/bin/vite.js", "--config", "/Users/authentic/Desktop/bleumr-admin/vite.config.ts", "--port", "5174"],
+      "port": 5174
+    }
+  ]
+}

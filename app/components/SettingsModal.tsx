@@ -526,103 +526,73 @@ function SyncTab() {
   const codeDigits = activeCode ? activeCode.code.split('') : [];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-2 mb-1">
-        <Smartphone className="w-4 h-4 text-cyan-400" />
-        <h3 className="text-sm font-semibold text-white/80">Data Transfer</h3>
-      </div>
-      <p className="text-[11px] text-white/30 leading-relaxed -mt-3">
-        Generate a temporary 6-digit code to transfer your data to another device. Codes expire in 60 seconds.
-      </p>
+    <div className="space-y-4">
+      {/* Send section */}
+      <div>
+        <div className="text-[10px] text-white/30 uppercase tracking-widest mb-2 font-medium">Send Data</div>
 
-      {/* Active Code Display */}
-      {activeCode && secondsLeft > 0 ? (
-        <div className="rounded-2xl p-5 text-center" style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)' }}>
-          <div className="text-[10px] text-cyan-400/60 uppercase tracking-widest mb-3 font-medium">Your Transfer Code</div>
-
-          {/* Big digit display */}
-          <div className="flex justify-center gap-2 mb-4" onClick={copyCode} style={{ cursor: 'pointer' }}>
-            {codeDigits.map((d, i) => (
-              <div
-                key={i}
-                className="w-11 h-14 rounded-xl flex items-center justify-center text-2xl font-bold text-cyan-300 font-mono"
-                style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)', textShadow: '0 0 12px rgba(6,182,212,0.4)' }}
-              >
-                {d}
-              </div>
-            ))}
-          </div>
-
-          {copied && <div className="text-[10px] text-cyan-400 mb-2">Copied to clipboard!</div>}
-
-          {/* Countdown ring */}
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <div className="relative w-8 h-8">
-              <svg className="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(6,182,212,0.15)" strokeWidth="3" />
-                <circle
-                  cx="18" cy="18" r="15" fill="none" stroke="rgba(6,182,212,0.8)" strokeWidth="3"
-                  strokeDasharray={`${(secondsLeft / 60) * 94.25} 94.25`}
-                  strokeLinecap="round"
-                  style={{ transition: 'stroke-dasharray 1s linear' }}
-                />
-              </svg>
+        {activeCode && secondsLeft > 0 ? (
+          <div className="text-center">
+            {/* Compact digit display */}
+            <div className="flex justify-center gap-1.5 mb-2" onClick={copyCode} style={{ cursor: 'pointer' }}>
+              {codeDigits.map((d, i) => (
+                <div
+                  key={i}
+                  className="w-9 h-11 rounded-lg flex items-center justify-center text-xl font-bold text-cyan-300 font-mono"
+                  style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)' }}
+                >
+                  {d}
+                </div>
+              ))}
             </div>
-            <span className="text-sm font-mono text-cyan-300/80">{secondsLeft}s</span>
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-cyan-400/60">
+              <span className="font-mono">{secondsLeft}s</span>
+              <span className="text-white/20">remaining</span>
+              {copied && <span className="text-cyan-400 ml-1">Copied!</span>}
+            </div>
           </div>
-
-          <p className="text-[10px] text-white/25">Tap the code to copy. Enter it on your other device.</p>
-
+        ) : (
           <button
             onClick={handleGenerate}
             disabled={status === 'generating'}
-            className="mt-3 w-full py-2 rounded-lg text-[11px] font-medium text-white/40 transition-all hover:bg-white/5 hover:text-white/60"
+            className="w-full py-2.5 rounded-xl text-[13px] font-medium text-cyan-300 transition-all hover:bg-cyan-500/10"
+            style={{ border: '1px solid rgba(6,182,212,0.15)', background: 'rgba(6,182,212,0.04)' }}
           >
-            Generate New Code
+            {status === 'generating' ? 'Generating...' : 'Generate 6-Digit Code'}
           </button>
-        </div>
-      ) : (
-        <button
-          onClick={handleGenerate}
-          disabled={status === 'generating'}
-          className="w-full py-4 rounded-2xl text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-500/10"
-          style={{ border: '1px solid rgba(6,182,212,0.2)', background: 'rgba(6,182,212,0.04)' }}
-        >
-          {status === 'generating' ? (
-            <RefreshCw className="w-4 h-4 inline mr-2 animate-spin" />
-          ) : null}
-          {status === 'generating' ? 'Generating...' : 'Generate Transfer Code'}
-        </button>
-      )}
+        )}
+      </div>
 
-      {/* Receive data from another device */}
-      <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="text-[10px] text-white/40 uppercase tracking-widest mb-2 font-medium">Receive Data</div>
-        <p className="text-[10px] text-white/25 mb-3">Enter the 6-digit code from your other device.</p>
+      {/* Divider */}
+      <div className="h-px bg-white/5" />
+
+      {/* Receive section */}
+      <div>
+        <div className="text-[10px] text-white/30 uppercase tracking-widest mb-2 font-medium">Receive Data</div>
         <div className="flex gap-2">
           <input
             value={pullCode}
             onChange={e => setPullCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="000000"
+            placeholder="6-digit code"
             maxLength={6}
             inputMode="numeric"
-            className="flex-1 px-3 py-2.5 rounded-xl text-center text-lg font-mono tracking-[0.3em] text-white/80 placeholder-white/15 outline-none"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+            className="flex-1 px-3 py-2 rounded-lg text-center text-sm font-mono tracking-[0.2em] text-white/80 placeholder-white/15 outline-none"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
           />
           <button
             onClick={handlePull}
             disabled={pullCode.length !== 6 || status === 'pulling'}
-            className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white/80 transition-all hover:bg-white/10 disabled:opacity-30"
-            style={{ background: 'rgba(255,255,255,0.06)' }}
+            className="px-4 py-2 rounded-lg text-xs font-medium text-white/70 transition-all hover:bg-white/10 disabled:opacity-25"
+            style={{ background: 'rgba(255,255,255,0.05)' }}
           >
-            {status === 'pulling' ? 'Pulling...' : 'Pull'}
+            {status === 'pulling' ? '...' : 'Pull'}
           </button>
         </div>
       </div>
 
-      {/* Status message */}
+      {/* Status */}
       {message && (
-        <div className={`text-[11px] text-center py-2 rounded-lg ${status === 'error' ? 'text-red-400 bg-red-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>
+        <div className={`text-[11px] text-center py-1.5 rounded-lg ${status === 'error' ? 'text-red-400 bg-red-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>
           {message}
         </div>
       )}

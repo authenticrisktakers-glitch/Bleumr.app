@@ -519,7 +519,7 @@ export const PlatformView = memo(function PlatformView({
       style={{ height: keyboardOffset > 0 ? viewportHeight : undefined }}>
 
       {/* Background stars — memoised, never re-renders */}
-      <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-50' : 'opacity-100'}`}>
+      <div className={`absolute inset-0 z-0 pointer-events-none transition-opacity duration-1000 ${hasStartedChat ? 'opacity-60' : 'opacity-100'}`}>
         <StarSphereLoader />
       </div>
 
@@ -771,13 +771,12 @@ export const PlatformView = memo(function PlatformView({
         </AnimatePresence>
 
         {/* ── Liquid Glass Input Area ── */}
-        <div className="absolute left-0 right-0 w-full px-4 z-30 transition-[bottom,padding] duration-200 ease-out" style={{
-          bottom: 0,
+        <div className="absolute left-0 right-0 bottom-0 w-full px-4 z-30 transition-[padding] duration-200 ease-out" style={{
           paddingTop: keyboardOffset > 0 ? 8 : 16,
-          paddingBottom: keyboardOffset > 0 ? 8 : 'calc(1.5rem + env(safe-area-inset-bottom))',
+          paddingBottom: keyboardOffset > 0 ? 8 : 'max(1.25rem, env(safe-area-inset-bottom, 1.25rem))',
           background: keyboardOffset > 0
             ? 'rgba(10,10,10,0.98)'
-            : 'linear-gradient(to top, rgba(10,10,10,0.72) 0%, rgba(10,10,10,0.35) 40%, transparent 100%)',
+            : 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%)',
         }}>
           <div className="max-w-xl mx-auto w-full px-2 sm:px-0">
 

@@ -151,13 +151,15 @@
 html, body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
 }
 
-/* Prevent pull-to-refresh in standalone PWA */
+/* Prevent pull-to-refresh bounce in standalone PWA */
 @media (display-mode: standalone) {
-  html { overflow: hidden; }
-  body { overflow: hidden; position: fixed; inset: 0; }
+  html, body {
+    overflow: hidden;
+    height: 100%;
+    height: 100dvh;
+  }
 }
 
 /* ── Global compositor / perf hints ─────────────────────────────────────── */

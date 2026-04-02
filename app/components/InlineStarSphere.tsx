@@ -12,11 +12,10 @@ interface InlineStarSphereProps {
 // 4000 stars for a 32px avatar. Formula: ~8 stars per CSS pixel of diameter,
 // capped by CPU tier.
 function starsForSize(size: number): number {
-  const base = Math.round(size * size * 0.55);
-  // Mobile gets drastically fewer stars to prevent overheating
+  const base = Math.round(size * size * 0.7);
   const tierCap = isMobileDevice
-    ? (cpuCores >= 6 ? 600 : 300)
-    : (cpuCores >= 8 ? 3000 : cpuCores >= 4 ? 1400 : 600);
+    ? (cpuCores >= 6 ? 1000 : 500)
+    : (cpuCores >= 8 ? 4000 : cpuCores >= 4 ? 2000 : 800);
   return Math.min(base, tierCap);
 }
 
@@ -59,7 +58,7 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     });
 
     const setupCanvas = () => {
-      const dpr = isMobileDevice ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = size * dpr;
       canvas.height = size * dpr;
       ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, memo } from 'react';
 import { performanceTier, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
 
-// Star count — aggressive mobile reduction to prevent overheating
+// More stars, smaller and brighter for a 4K-quality look
 const BG_STAR_COUNT = isMobileDevice
-  ? (performanceTier === 'medium' ? 400 : 200)
-  : (performanceTier === 'high' ? 2200 : performanceTier === 'medium' ? 1200 : 500);
+  ? (performanceTier === 'medium' ? 800 : 400)
+  : (performanceTier === 'high' ? 3000 : performanceTier === 'medium' ? 1800 : 700);
 
-// Mobile uses 1x DPR for canvas — saves 4x fill rate vs 2x retina
-const CANVAS_DPR = isMobileDevice ? 1 : (typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1);
+// Use native DPR for crisp rendering (capped at 2x to avoid GPU overload)
+const CANVAS_DPR = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;
 
 export const StarSphereLoader = memo(function StarSphereLoader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,8 +27,8 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     const bgStars = Array.from({ length: BG_STAR_COUNT }, () => ({
       x: Math.random(),
       y: Math.random(),
-      size: Math.random() * 1.2 + 0.3,
-      baseAlpha: Math.random() * 0.4 + 0.1,
+      size: Math.random() * 0.8 + 0.2,
+      baseAlpha: Math.random() * 0.6 + 0.15,
       twinkleSpeed: Math.random() * 0.001 + 0.0005,
       twinklePhase: Math.random() * Math.PI * 2,
       driftSpeed: Math.random() * 0.015 + 0.005,
