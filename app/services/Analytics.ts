@@ -3,20 +3,14 @@
  * for the Bleumr admin dashboard.
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { getDeviceFingerprint, getDeviceFingerprintSync } from './DeviceFingerprint';
-
-const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
+import { getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY } from './SupabaseConfig';
 
 const IS_ELECTRON = typeof window !== 'undefined' && !!(window as any).orbit;
 
-let client: SupabaseClient | null = null;
 function getClient(): SupabaseClient {
-  if (!client) {
-    client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  }
-  return client;
+  return getSupabaseClient();
 }
 
 // Persistent session ID for this app instance — also stored in localStorage

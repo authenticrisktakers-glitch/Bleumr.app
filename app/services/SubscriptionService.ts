@@ -11,6 +11,7 @@
 
 import { SecureStorage } from './SecureStorage';
 import { getDeviceFingerprint } from './DeviceFingerprint';
+import { trackError } from './Analytics';
 
 export type SubscriptionTier = 'free' | 'pro' | 'stellur';
 
@@ -21,8 +22,8 @@ export interface ApiKeys {
 }
 
 // Fallback limits if server is unreachable — admin can override via tier_limits table
-let FREE_DAILY_LIMIT = 20;
-let PRO_DAILY_LIMIT = 200;
+let FREE_DAILY_LIMIT = 15;
+let PRO_DAILY_LIMIT = 150;
 const TIER_STORAGE_KEY = 'orbit_subscription_tier';
 const USAGE_STORAGE_KEY = 'orbit_daily_usage';
 const PRO_USAGE_STORAGE_KEY = 'orbit_pro_daily_usage';
@@ -40,8 +41,7 @@ interface UsageRecord {
 }
 
 // ─── Supabase config ─────────────────────────────────────────────────────────
-const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './SupabaseConfig';
 const VALIDATE_URL = `${SUPABASE_URL}/functions/v1/validate-license`;
 const RATE_LIMIT_URL = `${SUPABASE_URL}/functions/v1/check-rate-limit`;
 
@@ -70,8 +70,12 @@ async function fetchTierLimits() {
       if (limits.free !== undefined) FREE_DAILY_LIMIT = limits.free;
       if (limits.pro !== undefined) PRO_DAILY_LIMIT = limits.pro;
       localStorage.setItem(LIMITS_CACHE_KEY, JSON.stringify({ limits, ts: Date.now() }));
+      console.log(`[SubscriptionService] Tier limits loaded: free=${FREE_DAILY_LIMIT}, pro=${PRO_DAILY_LIMIT}`);
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[SubscriptionService] Failed to fetch tier limits:', e.message);
+    trackError('subscription', 'fetch_tier_limits', e.message);
+  }
 }
 
 // Fire on load
@@ -261,10 +265,14 @@ class SubscriptionService {
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         },
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`[SubscriptionService] License validation failed: HTTP ${res.status}`);
+        return null;
+      }
       const data = await res.json();
       const tier = data?.tier as SubscriptionTier;
       if (tier === 'pro' || tier === 'stellur') {
+        console.log(`[SubscriptionService] License validated: tier=${tier}, activations=${data.activations_used ?? '?'}/${data.max_activations ?? '?'}`);
         return {
           tier,
           apiKeys: data.apiKeys as ApiKeys,
@@ -273,8 +281,11 @@ class SubscriptionService {
           maxActivations: data.max_activations ?? data.maxActivations ?? undefined,
         };
       }
+      console.log(`[SubscriptionService] License returned tier="${tier}" — not pro/stellur`);
       return null;
-    } catch {
+    } catch (e: any) {
+      console.warn('[SubscriptionService] License validation error:', e.message);
+      trackError('subscription', 'validate_license', e.message);
       return null;
     }
   }
@@ -473,8 +484,106 @@ class SubscriptionService {
   }
 
   canUseBrowserAgent(): boolean {
-    // Unlocked for all tiers until payment system is live
+    return this.getTier() === 'stellur';
+  }
+
+  // ── Feature Gates ─────────────────────────────────────────────────────────
+
+  /** Voice chat — Pro and Stellur only */
+  canUseVoiceChat(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Web search in chat — Pro and Stellur only */
+  canUseWebSearch(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Vision / image analysis — Pro and Stellur only */
+  canUseVision(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Image generation — Pro and Stellur only */
+  canUseImageGen(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Web Designer app — Pro and Stellur only */
+  canUseWebDesigner(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Code Lab app — Pro and Stellur only */
+  canUseCodeLab(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Trading Dashboard — Stellur only */
+  canUseTrading(): boolean {
+    return this.getTier() === 'stellur';
+  }
+
+  /** Calendar — all tiers */
+  canUseCalendar(): boolean {
     return true;
+  }
+
+  /** All models (free = 8b only) */
+  canUseAllModels(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Cross-device sync — Pro and Stellur only */
+  canUseSync(): boolean {
+    return this.getTier() !== 'free';
+  }
+
+  /** Get allowed models for current tier */
+  getAllowedModels(): string[] {
+    if (this.getTier() === 'free') {
+      return ['llama-3.1-8b-instant', 'llama3-8b-8192'];
+    }
+    // Pro + Stellur get all models
+    return [];  // empty = all allowed
+  }
+
+  /** Check any feature by name — convenience for UI */
+  canUseFeature(feature: string): boolean {
+    switch (feature) {
+      case 'voice_chat': return this.canUseVoiceChat();
+      case 'web_search': return this.canUseWebSearch();
+      case 'vision': return this.canUseVision();
+      case 'image_gen': return this.canUseImageGen();
+      case 'web_designer': return this.canUseWebDesigner();
+      case 'code_lab': return this.canUseCodeLab();
+      case 'trading': return this.canUseTrading();
+      case 'calendar': return this.canUseCalendar();
+      case 'browser_agent': return this.canUseBrowserAgent();
+      case 'all_models': return this.canUseAllModels();
+      case 'sync': return this.canUseSync();
+      default: return true;
+    }
+  }
+
+  /** Get feature name for upgrade modal */
+  getRequiredTier(feature: string): SubscriptionTier {
+    switch (feature) {
+      case 'browser_agent':
+      case 'trading':
+        return 'stellur';
+      case 'voice_chat':
+      case 'web_search':
+      case 'vision':
+      case 'image_gen':
+      case 'web_designer':
+      case 'code_lab':
+      case 'all_models':
+      case 'sync':
+        return 'pro';
+      default:
+        return 'free';
+    }
   }
 
   getRemainingMessages(): number {

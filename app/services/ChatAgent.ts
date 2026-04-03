@@ -9,6 +9,7 @@
 import { memoryService } from './MemoryService';
 import { BrainMemory } from './BrainMemory';
 import { GodAgent } from './GodAgent';
+import SubscriptionService from './SubscriptionService';
 import { trackApiRequest, trackError, trackSuccess, registerSession, incrementRequestCount, incrementErrorCount } from './Analytics';
 import { guardedGroqFetch, reportGroqError, reportGroqSuccess, getCachedResponse, setCachedResponse, incrementAgentLoop, resetAgentLoop } from './GroqGuard';
 import { detectKnowledgeGap, requestKnowledge } from './KnowledgeService';
@@ -30,7 +31,18 @@ const GROQ_MODELS_ENDPOINT = 'https://api.groq.com/openai/v1/models';
 const IS_BROWSER = typeof window !== 'undefined' && !(window as any).orbit;
 const DDG_BASE = 'https://html.duckduckgo.com';
 
-/** CORS-safe fetch — uses Electron's main process proxy when available, falls back to direct fetch */
+/** Fetch with AbortController timeout */
+async function fetchWithTimeout(url: string, opts?: RequestInit, timeoutMs = 6000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** CORS-safe fetch — uses Electron's main process proxy when available, falls back to proxy chain */
 async function corsFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; text: string }> {
   const orbit = (window as any).orbit;
   if (orbit?.proxyFetch) {
@@ -49,39 +61,54 @@ async function corsFetch(url: string, options?: RequestInit): Promise<{ ok: bool
       return { ok: false, text: '' };
     }
   }
+
   // In browser/PWA — use CORS proxy chain with fallbacks for cross-origin requests
   try {
     const needsProxy = url.includes('duckduckgo.com');
     if (needsProxy) {
       const encoded = encodeURIComponent(url);
+
+      // 5-proxy chain — ordered by reliability. Each gets 6s timeout.
       const proxies = [
+        // 1. Our own Supabase edge function proxy (most reliable, first-party)
+        `https://aybwlypsrmnfogtnibho.supabase.co/functions/v1/cors-proxy?url=${encoded}`,
+        // 2-5. Third-party CORS proxies (public, less reliable)
         `https://corsproxy.io/?${encoded}`,
         `https://api.allorigins.win/raw?url=${encoded}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
+        `https://thingproxy.freeboard.io/fetch/${url}`,
       ];
-      for (const proxyUrl of proxies) {
+
+      for (let i = 0; i < proxies.length; i++) {
+        const proxyUrl = proxies[i];
+        const proxyName = proxyUrl.split('?')[0].split('/').slice(2, 3)[0] || `proxy-${i}`;
         try {
-          const res = await fetch(proxyUrl);
+          const res = await fetchWithTimeout(proxyUrl, undefined, 6000);
           const text = await res.text();
           // Only accept if we got real HTML back (not an error page or empty response)
           if (res.ok && text.length > 500 && text.includes('<')) {
-            console.log(`[corsFetch] Proxy success: ${proxyUrl.split('?')[0]} → ${text.length} chars`);
+            console.log(`[corsFetch] Proxy success: ${proxyName} → ${text.length} chars`);
             return { ok: true, text };
           }
-          console.warn(`[corsFetch] Proxy returned bad data: ${proxyUrl.split('?')[0]} → status=${res.status}, len=${text.length}`);
+          console.warn(`[corsFetch] Proxy bad data: ${proxyName} → status=${res.status}, len=${text.length}`);
         } catch (proxyErr: any) {
-          console.warn(`[corsFetch] Proxy failed: ${proxyUrl.split('?')[0]} → ${proxyErr.message}`);
+          const reason = proxyErr.name === 'AbortError' ? 'timeout (6s)' : proxyErr.message;
+          console.warn(`[corsFetch] Proxy failed: ${proxyName} → ${reason}`);
         }
       }
+
       // All proxies failed
-      console.warn('[corsFetch] All CORS proxies failed for:', url.slice(0, 80));
-      trackError('network', 'cors_fetch', 'All CORS proxies failed');
+      console.warn('[corsFetch] All 5 CORS proxies failed for:', url.slice(0, 80));
+      trackError('network', 'cors_fetch', 'All CORS proxies failed (5/5)');
       return { ok: false, text: '' };
     }
-    const res = await fetch(url, options);
+
+    const res = await fetchWithTimeout(url, options, 10000);
     return { ok: res.ok, text: await res.text() };
   } catch (e: any) {
-    console.warn('[corsFetch] Browser fetch failed (CORS?):', url.slice(0, 80), e.message);
-    trackError('network', 'cors_fetch', `Browser: ${e.message}`);
+    const reason = e.name === 'AbortError' ? 'timeout' : e.message;
+    console.warn('[corsFetch] Browser fetch failed:', url.slice(0, 80), reason);
+    trackError('network', 'cors_fetch', `Browser: ${reason}`);
     return { ok: false, text: '' };
   }
 }
@@ -104,24 +131,29 @@ const blockedVisionModels = new Set<string>();
 let cachedAvailableModels: Set<string> | null = null;
 
 async function resolveModel(apiKey: string): Promise<string> {
-  if (cachedModel && !blockedModels.has(cachedModel)) return cachedModel;
+  // Free tier: restricted to 8b models only
+  const allowedModels = SubscriptionService.getAllowedModels();
+  const modelPool = allowedModels.length > 0
+    ? PREFERRED_MODELS.filter(m => allowedModels.some(a => m.includes(a) || a.includes(m)))
+    : PREFERRED_MODELS;
+
+  if (cachedModel && !blockedModels.has(cachedModel) && (allowedModels.length === 0 || modelPool.includes(cachedModel))) return cachedModel;
   try {
     const res = await guardedGroqFetch(GROQ_MODELS_ENDPOINT, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
-    if (!res.ok) return PREFERRED_MODELS.find(m => !blockedModels.has(m)) ?? PREFERRED_MODELS[0];
+    if (!res.ok) return modelPool.find(m => !blockedModels.has(m)) ?? modelPool[0] ?? PREFERRED_MODELS[0];
     const data = await res.json();
     const available = new Set((data.data as any[]).map((m: any) => m.id));
-    // Only use PREFERRED_MODELS — never fall through to arbitrary available models
-    // which may require terms acceptance, be deprecated, or produce unexpected output
-    const match = PREFERRED_MODELS.find(m => available.has(m) && !blockedModels.has(m))
-      ?? PREFERRED_MODELS.find(m => !blockedModels.has(m));
-    cachedModel = match ?? PREFERRED_MODELS[0];
-    console.log('[ChatAgent] Using model:', cachedModel);
+    // Only use allowed models — free tier gets 8b only, Pro+ gets all
+    const match = modelPool.find(m => available.has(m) && !blockedModels.has(m))
+      ?? modelPool.find(m => !blockedModels.has(m));
+    cachedModel = match ?? modelPool[0] ?? PREFERRED_MODELS[0];
+    console.log('[ChatAgent] Using model:', cachedModel, allowedModels.length ? '(tier-restricted)' : '(full access)');
     return cachedModel;
   } catch (e: any) {
     trackError('groq', 'model_list', e?.message || 'Failed to resolve model');
-    return PREFERRED_MODELS.find(m => !blockedModels.has(m)) ?? PREFERRED_MODELS[0];
+    return modelPool.find(m => !blockedModels.has(m)) ?? modelPool[0] ?? PREFERRED_MODELS[0];
   }
 }
 
@@ -445,9 +477,9 @@ async function streamFromGroq(
         messages,
         stream: true,
         temperature: 0.7,
-        max_completion_tokens: 2048,
-        frequency_penalty: 0.6,
-        presence_penalty: 0.5,
+        max_completion_tokens: 4096,
+        frequency_penalty: 0.3,
+        presence_penalty: 0.2,
       }),
     });
 
@@ -502,17 +534,17 @@ async function streamFromGroq(
     let hasContentTokens = false;
     let fullText = '';
     const seenLines = new Set<string>(); // track every line for instant dedup
-    const HARD_CHAR_CAP = 3000; // hard kill — no response should ever be this long
+    const HARD_CHAR_CAP = 8000; // hard kill — safety net for truly runaway responses
 
     // When a loop is detected, find where the repetition starts and truncate there
     const truncateAtRepeat = (text: string): string => {
       const t = text.toLowerCase();
-      // Find a 25-char phrase that appears twice — truncate at the second occurrence
-      for (let start = 0; start < Math.min(t.length, 1200); start += 4) {
-        const phrase = t.slice(start, start + 25);
-        if (phrase.length < 25) break;
-        const secondIdx = t.indexOf(phrase, start + 25);
-        if (secondIdx !== -1 && secondIdx - start > 30) {
+      // Find a 60-char phrase that appears twice — must be long enough to avoid false positives
+      for (let start = 0; start < Math.min(t.length, 2000); start += 8) {
+        const phrase = t.slice(start, start + 60);
+        if (phrase.length < 60) break;
+        const secondIdx = t.indexOf(phrase, start + 60);
+        if (secondIdx !== -1 && secondIdx - start > 80) {
           // Cut at the last sentence boundary before the repeat
           const cutRegion = text.slice(0, secondIdx);
           const lastSentenceEnd = cutRegion.search(/[.!?]\s*$/);
@@ -523,19 +555,19 @@ async function streamFromGroq(
       return text.trim();
     };
 
-    // Aggressive repetition detector — catches mid-stream looping fast
+    // Repetition detector — catches real loops without false positives on normal text
     const detectLoop = (text: string): boolean => {
-      if (text.length < 120) return false;
+      if (text.length < 300) return false; // don't even check short responses
       const t = text.toLowerCase();
 
-      // Strategy 1: 30+ char phrase appearing twice — catches repeated sentences/paragraphs
-      const window = t.slice(-2000);
+      // Strategy 1: 60+ char phrase appearing twice — real paragraph-level repetition
+      const window = t.slice(-3000);
       const wLen = window.length;
-      for (let start = 0; start < wLen - 80; start += 8) {
-        const phrase = window.slice(start, start + 30);
-        if (phrase.length < 30) break;
-        const secondIdx = window.indexOf(phrase, start + 30);
-        if (secondIdx !== -1 && secondIdx - start > 35) return true;
+      for (let start = 0; start < wLen - 150; start += 12) {
+        const phrase = window.slice(start, start + 60);
+        if (phrase.length < 60) break;
+        const secondIdx = window.indexOf(phrase, start + 80);
+        if (secondIdx !== -1 && secondIdx - start > 100) return true;
       }
 
       // Strategy 2: duplicate headings (markdown ## or ** headers)
@@ -549,17 +581,17 @@ async function streamFromGroq(
         }
       }
 
-      // Strategy 3: duplicate sentences — catch anything >25 chars repeated
-      const sentences = t.split(/(?<=[.!?\n])\s+/).map(s => s.trim().replace(/\s+/g, ' ')).filter(s => s.length > 25);
+      // Strategy 3: duplicate sentences — catch full sentences >50 chars repeated
+      const sentences = t.split(/(?<=[.!?\n])\s+/).map(s => s.trim().replace(/\s+/g, ' ')).filter(s => s.length > 50);
       const sentenceSet = new Set<string>();
       for (const s of sentences) {
         if (sentenceSet.has(s)) return true;
         sentenceSet.add(s);
       }
 
-      // Strategy 4: bullet spam — more than 10 bullets is a loop sign
+      // Strategy 4: bullet spam — more than 20 bullets is excessive
       const bulletCount = (text.match(/^[\s]*[-•*]\s/gm) || []).length;
-      if (bulletCount > 10) return true;
+      if (bulletCount > 20) return true;
 
       return false;
     };
@@ -595,7 +627,7 @@ async function streamFromGroq(
             const newLines = fullText.split('\n');
             for (const ln of newLines.slice(0, -1)) { // skip last (incomplete) line
               const key = ln.trim().toLowerCase().replace(/\s+/g, ' ');
-              if (key.length > 30) { // catch any meaningfully repeated line
+              if (key.length > 80) { // only flag truly repeated full lines (not short common phrases)
                 if (seenLines.has(key)) {
                   reader.cancel();
                   const cleaned = truncateAtRepeat(fullText);
@@ -768,7 +800,7 @@ export async function runChatAgent(
   };
   const onDone = async () => {
     // Auto-continuation DISABLED — was causing looped/repeated responses.
-    // With max_completion_tokens: 2048 and tight formatting rules,
+    // With max_completion_tokens: 4096 and formatting rules,
     // responses should end cleanly without needing a continuation call.
     const trimmed = accumulatedResponse.trim();
     if (accumulatedResponse.length > 10) {
@@ -798,7 +830,12 @@ export async function runChatAgent(
     return;
   }
 
-  // --- Image generation route ---
+  // --- Image generation route --- (Pro+ only)
+  if (isImageGenRequest(question) && !SubscriptionService.canUseImageGen()) {
+    onToken('Image generation is a Pro feature. Upgrade to create images with JUMARI. ');
+    onDone();
+    return;
+  }
   if (isImageGenRequest(question)) {
     const imagePrompt = extractImagePrompt(question);
     onSearching?.('image');
@@ -825,8 +862,8 @@ export async function runChatAgent(
 
   let contextBlock = '';
 
-  // Search the web if question needs live data
-  if (needsWebSearch(question)) {
+  // Search the web if question needs live data (Pro+ only)
+  if (needsWebSearch(question) && SubscriptionService.canUseWebSearch()) {
     onSearching?.(question);
     if (isShoppingQuery(question)) {
       const productResult = await searchProducts(question);
@@ -912,7 +949,7 @@ Today: ${todayStr}
 ## FORMATTING (ABSOLUTE RULES — breaking these is a critical failure)
 - **Short question?** → 1–3 sentences max. Done. Stop writing.
 - **Medium question?** → One direct answer sentence, then 3-5 bullets with **bold label:** each. That's it.
-- **Complex question?** → One **## Header**, 4-6 bullets under it. If you need a second section, one more header + bullets. MAX 2 sections. MAX 200 words total.
+- **Complex question?** → One **## Header**, 4-6 bullets under it. If you need a second section, one more header + bullets. MAX 3 sections.
 - **Code?** → Fenced block with language tag. 1-2 sentence explanation. Done.
 - NEVER write a wall of text. NEVER write more than 3 sentences in a row without a bullet or line break.
 - NEVER write more than 6 bullets in a single list.
@@ -923,8 +960,8 @@ Today: ${todayStr}
 - Never restate, rephrase, or re-explain something you already said.
 - Never restate the user's question.
 - If you catch yourself about to repeat a point — STOP the response right there.
-- MAX 6 bullets per list. MAX 200 words per response unless user explicitly asks for detail.
-- When the answer is complete, STOP IMMEDIATELY. No summary. No closing line. No "feel free to ask." Just stop.
+- MAX 8 bullets per list. Be concise but ALWAYS finish your thought. Never stop mid-sentence.
+- When the answer is complete, STOP. No summary. No closing line. No "feel free to ask." Just stop.
 
 ## Core rules
 - STAY ON TOPIC. Answer what they asked. No tangents or bonus info.
@@ -1010,7 +1047,12 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
     userMessage,
   ];
 
-  // Use a vision-capable model when an image is attached
+  // Use a vision-capable model when an image is attached (Pro+ only)
+  if (imageBase64 && !SubscriptionService.canUseVision()) {
+    onToken('Vision is a Pro feature. Upgrade to analyze images. ');
+    onDone();
+    return;
+  }
   if (imageBase64) {
     onSearching?.('image');
     const mimeType = detectMimeType(imageBase64);

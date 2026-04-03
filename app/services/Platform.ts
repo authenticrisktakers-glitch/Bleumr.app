@@ -15,8 +15,7 @@ export const IS_PWA = !IS_ELECTRON;
 // Version-stamped cache key — bump to invalidate old cached keys on deploy
 const PWA_KEYS_VERSION = 'v3';
 const PWA_KEYS_CACHE = `bleumr_pwa_keys_${PWA_KEYS_VERSION}`;
-const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './SupabaseConfig';
 
 export interface PWAKeys {
   groq: string;

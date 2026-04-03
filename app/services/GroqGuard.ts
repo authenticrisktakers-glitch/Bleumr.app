@@ -226,6 +226,9 @@ export function enqueueGroqRequest(execute: () => Promise<void>): Promise<void> 
 // Adaptive delay — adjusted from Groq response headers
 let adaptiveDelayMs = MIN_DELAY_MS;
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 1000; // 1s, 2s, 4s exponential backoff
+
 export async function guardedGroqFetch(
   url: string,
   init: RequestInit,
@@ -234,47 +237,68 @@ export async function guardedGroqFetch(
     throw new Error('CIRCUIT_OPEN');
   }
 
-  await waitForSlot();
-  activeRequests++;
-  lastRequestTime = Date.now();
-  requestTimestamps.push(Date.now());
+  let lastError: Error | null = null;
 
-  try {
-    const res = await fetch(url, init);
-    if (res.ok) {
-      reportGroqSuccess();
-      // Adaptive: read Groq rate limit headers to tune our pacing
-      const remaining = res.headers.get('x-ratelimit-remaining-requests');
-      const resetMs = res.headers.get('x-ratelimit-reset-requests');
-      if (remaining !== null) {
-        const rem = parseInt(remaining, 10);
-        if (rem < 5) {
-          // Running low on quota — slow down
-          adaptiveDelayMs = Math.min(2000, adaptiveDelayMs * 1.5);
-        } else if (rem > 20) {
-          // Plenty of quota — speed back up toward minimum
-          adaptiveDelayMs = Math.max(MIN_DELAY_MS, adaptiveDelayMs * 0.8);
-        }
-      }
-    } else if (res.status === 429) {
-      reportGroqError();
-      // 429 = rate limited — back off aggressively
-      const retryAfter = res.headers.get('retry-after');
-      if (retryAfter) {
-        adaptiveDelayMs = Math.min(5000, parseInt(retryAfter, 10) * 1000);
-      } else {
-        adaptiveDelayMs = Math.min(5000, adaptiveDelayMs * 2);
-      }
-    } else if (res.status >= 500) {
-      reportGroqError();
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Wait for backoff on retries (exponential: 1s, 2s, 4s)
+    if (attempt > 0) {
+      const backoffMs = RETRY_BASE_MS * Math.pow(2, attempt - 1) + Math.random() * 500;
+      console.log(`[GroqGuard] Retry ${attempt}/${MAX_RETRIES} after ${Math.round(backoffMs)}ms`);
+      await new Promise(r => setTimeout(r, backoffMs));
+      // Re-check circuit between retries
+      if (isCircuitOpen()) throw new Error('CIRCUIT_OPEN');
     }
-    return res;
-  } catch (err) {
-    reportGroqError();
-    throw err;
-  } finally {
-    activeRequests--;
+
+    await waitForSlot();
+    activeRequests++;
+    lastRequestTime = Date.now();
+    requestTimestamps.push(Date.now());
+
+    let shouldRetry = false;
+    try {
+      const res = await fetch(url, init);
+      if (res.ok) {
+        reportGroqSuccess();
+        const remaining = res.headers.get('x-ratelimit-remaining-requests');
+        if (remaining !== null) {
+          const rem = parseInt(remaining, 10);
+          if (rem < 5) {
+            adaptiveDelayMs = Math.min(2000, adaptiveDelayMs * 1.5);
+          } else if (rem > 20) {
+            adaptiveDelayMs = Math.max(MIN_DELAY_MS, adaptiveDelayMs * 0.8);
+          }
+        }
+        return res;
+      } else if (res.status === 429) {
+        reportGroqError();
+        const retryAfter = res.headers.get('retry-after');
+        if (retryAfter) {
+          adaptiveDelayMs = Math.min(5000, parseInt(retryAfter, 10) * 1000);
+        } else {
+          adaptiveDelayMs = Math.min(5000, adaptiveDelayMs * 2);
+        }
+        lastError = new Error(`Groq API rate limited (429)`);
+        shouldRetry = true;
+      } else if (res.status >= 500) {
+        reportGroqError();
+        lastError = new Error(`Groq API server error (${res.status})`);
+        shouldRetry = true;
+      } else {
+        // 4xx non-429 — don't retry (bad request, auth error, etc.)
+        return res;
+      }
+    } catch (err: any) {
+      reportGroqError();
+      lastError = err;
+      shouldRetry = true;
+    } finally {
+      activeRequests--;
+    }
+    if (!shouldRetry) break;
   }
+
+  // All retries exhausted
+  throw lastError || new Error('Groq API request failed after retries');
 }
 
 // ── Cache Management ─────────────────────────────────────

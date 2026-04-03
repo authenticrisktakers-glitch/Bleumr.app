@@ -371,6 +371,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const [muted, setMuted]           = useState(false);
   const [volume, setVolume]         = useState(0); // 0–1, from analyser
   const [showTranscript, setShowTranscript] = useState(false);
+  const [micError, setMicError] = useState<'denied' | 'unavailable' | null>(null);
 
   const voiceStateRef = useRef<VoiceState>('idle');
   const mutedRef      = useRef(false);
@@ -708,10 +709,28 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
     let stream: MediaStream;
     try {
+      // Check permission state first (if API available)
+      if (navigator.permissions?.query) {
+        try {
+          const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          if (perm.state === 'denied') {
+            trackError('system', 'microphone', 'Microphone permission denied (checked via Permissions API)');
+            setMicError('denied');
+            return;
+          }
+        } catch { /* Permissions API not supported for mic on this browser — continue */ }
+      }
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch {
-      trackError('system', 'microphone', 'Microphone access denied');
-      alert('Please allow microphone access to use voice chat.');
+      setMicError(null); // Clear any previous error
+    } catch (micErr: any) {
+      const errName = micErr?.name || '';
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        trackError('system', 'microphone', 'Microphone access denied by user');
+        setMicError('denied');
+      } else {
+        trackError('system', 'microphone', `Microphone unavailable: ${micErr?.message || errName}`);
+        setMicError('unavailable');
+      }
       return;
     }
     streamRef.current = stream;
@@ -911,12 +930,43 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           {/* Status */}
           <AnimatePresence mode="wait">
             <motion.p
-              key={voiceState}
+              key={micError ? `mic-err-${micError}` : voiceState}
               initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
               className="text-[11px] font-medium tracking-[0.18em] uppercase"
-              style={{ color: 'rgba(255,255,255,0.28)' }}>
-              {STATUS[voiceState]}
+              style={{ color: micError ? 'rgba(239,68,68,0.85)' : 'rgba(255,255,255,0.28)' }}>
+              {micError ? (micError === 'denied' ? 'Microphone blocked' : 'Microphone unavailable') : STATUS[voiceState]}
             </motion.p>
+          </AnimatePresence>
+
+          {/* Mic error inline UI */}
+          <AnimatePresence>
+            {micError && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex flex-col items-center gap-2 px-4"
+              >
+                <p className="text-[11px] text-center leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)', maxWidth: 240 }}>
+                  {micError === 'denied'
+                    ? 'Microphone access was blocked. Open your browser or system settings to allow microphone access, then try again.'
+                    : 'No microphone detected. Please connect a microphone and try again.'}
+                </p>
+                <button
+                  onClick={() => { setMicError(null); startListening(); }}
+                  className="mt-1 px-4 py-1.5 rounded-full text-[11px] font-medium tracking-wider uppercase transition-all"
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    color: 'rgba(255,255,255,0.6)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                >
+                  Try again
+                </button>
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {/* Void container — click target wraps the sphere */}

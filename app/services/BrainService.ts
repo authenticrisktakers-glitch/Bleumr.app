@@ -12,15 +12,11 @@
  * every user benefits from the collective knowledge.
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from './SupabaseConfig';
 
-const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
-
-let client: SupabaseClient | null = null;
 function getClient(): SupabaseClient {
-  if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return client;
+  return getSupabaseClient();
 }
 
 // ─── Config (fetched from brain_config table) ────────────────────────────────
@@ -479,8 +475,78 @@ export async function reportFeedback(entryId: string, signal: 'thumbs_up' | 'thu
       if (signal === 'thumbs_down') update.thumbs_down = (data.thumbs_down || 0) + 1;
 
       await getClient().from('brain_entries').update(update).eq('id', entryId);
+
+      // If heavily downvoted (3+ thumbs_down), flag for review
+      if (signal === 'thumbs_down' && (data.thumbs_down || 0) + 1 >= 3) {
+        await getClient().from('brain_entries').update({
+          status: 'needs_review',
+          updated_at: new Date().toISOString(),
+        }).eq('id', entryId);
+        console.log(`[BrainService] Entry ${entryId} flagged for review — ${(data.thumbs_down || 0) + 1} downvotes`);
+      }
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[BrainService] Feedback recording failed:', e.message);
+  }
+}
+
+/**
+ * Get feedback analytics — used by consciousness daemon to understand quality trends.
+ * Returns aggregate stats on which categories users like/dislike.
+ */
+export async function getFeedbackAnalytics(): Promise<{
+  totalUp: number; totalDown: number;
+  byCategory: Record<string, { up: number; down: number; ratio: number }>;
+  worstEntries: { id: string; question: string; downvotes: number }[];
+} | null> {
+  try {
+    // Entries with most negative feedback
+    const { data: worst } = await getClient()
+      .from('brain_entries')
+      .select('id, question_raw, thumbs_down, thumbs_up, category')
+      .gt('thumbs_down', 0)
+      .order('thumbs_down', { ascending: false })
+      .limit(10);
+
+    if (!worst) return null;
+
+    let totalUp = 0, totalDown = 0;
+    const byCategory: Record<string, { up: number; down: number; ratio: number }> = {};
+
+    // Aggregate all entries with any feedback
+    const { data: all } = await getClient()
+      .from('brain_entries')
+      .select('category, thumbs_up, thumbs_down')
+      .or('thumbs_up.gt.0,thumbs_down.gt.0');
+
+    for (const entry of all || []) {
+      const cat = entry.category || 'general';
+      if (!byCategory[cat]) byCategory[cat] = { up: 0, down: 0, ratio: 0 };
+      byCategory[cat].up += entry.thumbs_up || 0;
+      byCategory[cat].down += entry.thumbs_down || 0;
+      totalUp += entry.thumbs_up || 0;
+      totalDown += entry.thumbs_down || 0;
+    }
+
+    // Calculate ratios
+    for (const cat of Object.keys(byCategory)) {
+      const { up, down } = byCategory[cat];
+      byCategory[cat].ratio = up + down > 0 ? up / (up + down) : 0;
+    }
+
+    return {
+      totalUp,
+      totalDown,
+      byCategory,
+      worstEntries: worst.map(w => ({
+        id: w.id,
+        question: w.question_raw,
+        downvotes: w.thumbs_down || 0,
+      })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

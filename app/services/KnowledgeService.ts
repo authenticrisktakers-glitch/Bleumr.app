@@ -8,12 +8,9 @@
  * Users never see this. JUMARI decides on its own.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from './SupabaseConfig';
 
-const SUPABASE_URL = 'https://aybwlypsrmnfogtnibho.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5YndseXBzcm1uZm9ndG5pYmhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MTM5NDQsImV4cCI6MjA5MDQ4OTk0NH0.wwwPoWskIIrKzJJhzgsL8W38WJ3G_FLz5D5iooExUu8';
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = getSupabaseClient();
 
 // Track what we've already requested this session to avoid spam
 const requestedThisSession = new Set<string>();

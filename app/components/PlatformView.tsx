@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { shimmerDuration } from '../services/CPUAccelerator';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X } from 'lucide-react';
+import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { reportFeedback } from '../services/BrainService';
+import { trackSuccess, trackError } from '../services/Analytics';
 import { IS_ELECTRON } from '../services/Platform';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,6 +31,7 @@ interface Message {
   sources?: WebSource[];
   followUps?: string[];
   generatedImage?: string;
+  brainEntryId?: string;
 }
 
 interface PlatformViewProps {
@@ -81,6 +84,7 @@ const MessageRow = memo(function MessageRow({
 }) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = React.useState(false);
+  const [feedbackGiven, setFeedbackGiven] = React.useState<'up' | 'down' | null>(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(msg.content).then(() => {
@@ -276,6 +280,40 @@ const MessageRow = memo(function MessageRow({
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M8.5 5A3.5 3.5 0 1 1 6.5 2M6.5 1v2.5H9" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       <span>Retry</span>
                     </button>
+                  )}
+
+                  {/* Thumbs Up / Down feedback */}
+                  {!isUser && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setFeedbackGiven('up');
+                          if (msg.brainEntryId) reportFeedback(msg.brainEntryId, 'thumbs_up');
+                          trackSuccess('feedback', 'thumbs_up');
+                        }}
+                        className={`flex items-center gap-0.5 text-[10px] transition-colors select-none ${
+                          feedbackGiven === 'up' ? 'text-emerald-400' : 'text-slate-600 hover:text-emerald-400'
+                        }`}
+                        title="Good response"
+                        disabled={feedbackGiven !== null}
+                      >
+                        <ThumbsUp size={10} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFeedbackGiven('down');
+                          if (msg.brainEntryId) reportFeedback(msg.brainEntryId, 'thumbs_down');
+                          trackError('feedback', 'thumbs_down', msg.content?.slice(0, 100));
+                        }}
+                        className={`flex items-center gap-0.5 text-[10px] transition-colors select-none ${
+                          feedbackGiven === 'down' ? 'text-red-400' : 'text-slate-600 hover:text-red-400'
+                        }`}
+                        title="Bad response"
+                        disabled={feedbackGiven !== null}
+                      >
+                        <ThumbsDown size={10} />
+                      </button>
+                    </>
                   )}
                 </div>
               )}

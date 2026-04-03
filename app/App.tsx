@@ -92,6 +92,7 @@ interface Message {
   generatedImage?: string;
   /** Which agent pipeline created this message */
   agent?: 'chat' | 'browser';
+  brainEntryId?: string;
 }
 
 interface OrbitConfig {
@@ -403,7 +404,7 @@ export default function App() {
   const [tier, setTier] = useState<SubscriptionTier>(() => SubscriptionService.getTier());
   const [dailyUsage, setDailyUsage] = useState(() => SubscriptionService.getDailyUsage());
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [upgradeReason, setUpgradeReason] = useState<'limit' | 'browser_agent'>('limit');
+  const [upgradeReason, setUpgradeReason] = useState<'limit' | 'browser_agent' | 'voice_chat' | 'web_designer' | 'code_lab' | 'trading' | 'vision' | 'web_search' | 'image_gen' | 'all_models'>('limit');
   const [updateReady, setUpdateReady] = useState(false);
 
   // Hide WebContentsView when ANY full-screen overlay is open.
@@ -806,9 +807,15 @@ export default function App() {
       ]);
       setTimeout(() => {
         if (isOpenScheduler) setShowScheduler(true);
-        else if (isOpenVoice) setShowVoiceChat(true);
+        else if (isOpenVoice) {
+          if (!SubscriptionService.canUseVoiceChat()) { setUpgradeReason('voice_chat'); setShowUpgradeModal(true); }
+          else setShowVoiceChat(true);
+        }
         else if (isOpenWorkspace) setShowWorkspace(true);
-        else if (isOpenTrading) setShowTrading(true);
+        else if (isOpenTrading) {
+          if (!SubscriptionService.canUseTrading()) { setUpgradeReason('trading'); setShowUpgradeModal(true); }
+          else setShowTrading(true);
+        }
         else if (isOpenSettings) setShowSettings(true);
       }, 200);
       return;
@@ -2575,7 +2582,10 @@ export default function App() {
             onOpenSettings={() => setShowSettings(true)}
             onOpenScheduler={() => setShowScheduler(true)}
             onOpenWorkspace={() => setShowWorkspace(true)}
-            onOpenVoiceChat={() => setShowVoiceChat(true)}
+            onOpenVoiceChat={() => {
+              if (!SubscriptionService.canUseVoiceChat()) { setUpgradeReason('voice_chat'); setShowUpgradeModal(true); return; }
+              setShowVoiceChat(true);
+            }}
             onOpenApps={() => setShowApps(true)}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
@@ -3241,14 +3251,23 @@ export default function App() {
                 {/* Text */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-white/90 leading-snug">
-                    {upgradeReason === 'browser_agent'
-                      ? 'Browser Agent requires STELLUR'
+                    {upgradeReason === 'browser_agent' ? 'Browser Agent requires STELLUR'
+                      : upgradeReason === 'trading' ? 'Trading requires STELLUR'
+                      : upgradeReason === 'voice_chat' ? 'Voice Chat requires PRO'
+                      : upgradeReason === 'web_designer' ? 'Web Designer requires PRO'
+                      : upgradeReason === 'code_lab' ? 'Code Lab requires PRO'
+                      : upgradeReason === 'vision' ? 'Vision requires PRO'
+                      : upgradeReason === 'web_search' ? 'Web Search requires PRO'
+                      : upgradeReason === 'image_gen' ? 'Image Generation requires PRO'
+                      : upgradeReason === 'all_models' ? 'Advanced Models require PRO'
                       : "You've used all your energy"}
                   </p>
                   <p className="text-[11px] text-white/40 mt-0.5 leading-snug">
-                    {upgradeReason === 'browser_agent'
-                      ? 'Upgrade to automate the web with JUMARI.'
-                      : 'Upgrade your plan for more usage.'}
+                    {upgradeReason === 'browser_agent' || upgradeReason === 'trading'
+                      ? 'Upgrade to STELLUR to unlock this feature.'
+                      : upgradeReason === 'limit'
+                      ? 'Upgrade your plan for more usage.'
+                      : 'Upgrade to PRO to unlock this feature.'}
                   </p>
                 </div>
 
@@ -3399,9 +3418,18 @@ export default function App() {
         >
           <AppsPage
             onClose={() => setShowApps(false)}
-            onOpenCoding={() => { setShowApps(false); setShowCoding(true); }}
-            onOpenTrading={() => { setShowApps(false); setShowTrading(true); }}
-            onOpenWebDesigner={() => { setShowApps(false); setShowWebDesigner(true); }}
+            onOpenCoding={() => {
+              if (!SubscriptionService.canUseCodeLab()) { setShowApps(false); setUpgradeReason('code_lab'); setShowUpgradeModal(true); return; }
+              setShowApps(false); setShowCoding(true);
+            }}
+            onOpenTrading={() => {
+              if (!SubscriptionService.canUseTrading()) { setShowApps(false); setUpgradeReason('trading'); setShowUpgradeModal(true); return; }
+              setShowApps(false); setShowTrading(true);
+            }}
+            onOpenWebDesigner={() => {
+              if (!SubscriptionService.canUseWebDesigner()) { setShowApps(false); setUpgradeReason('web_designer'); setShowUpgradeModal(true); return; }
+              setShowApps(false); setShowWebDesigner(true);
+            }}
           />
         </motion.div>
       )}
