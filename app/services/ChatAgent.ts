@@ -533,65 +533,51 @@ async function streamFromGroq(
 
     let hasContentTokens = false;
     let fullText = '';
-    const seenLines = new Set<string>(); // track every line for instant dedup
-    const HARD_CHAR_CAP = 8000; // hard kill — safety net for truly runaway responses
+    const HARD_CHAR_CAP = 12000; // safety net — 12K chars is ~2000 words, enough for any response
+    // After SOFT_CAP, we allow the model to finish its current sentence before stopping
+    const SOFT_CAP = 10000;
+    let softCapReached = false;
 
-    // When a loop is detected, find where the repetition starts and truncate there
-    const truncateAtRepeat = (text: string): string => {
-      const t = text.toLowerCase();
-      // Find a 60-char phrase that appears twice — must be long enough to avoid false positives
-      for (let start = 0; start < Math.min(t.length, 2000); start += 8) {
-        const phrase = t.slice(start, start + 60);
-        if (phrase.length < 60) break;
-        const secondIdx = t.indexOf(phrase, start + 60);
-        if (secondIdx !== -1 && secondIdx - start > 80) {
-          // Cut at the last sentence boundary before the repeat
-          const cutRegion = text.slice(0, secondIdx);
-          const lastSentenceEnd = cutRegion.search(/[.!?]\s*$/);
-          const cutPoint = lastSentenceEnd !== -1 ? lastSentenceEnd + 1 : secondIdx;
-          return text.slice(0, cutPoint).trim();
-        }
-      }
+    /** Cut text at the last clean sentence boundary */
+    const cutAtSentence = (text: string): string => {
+      // Find last sentence-ending punctuation followed by space or newline
+      const match = text.match(/.*[.!?]\s/s);
+      if (match) return match[0].trim();
+      // Fallback: cut at last newline
+      const lastNl = text.lastIndexOf('\n');
+      if (lastNl > text.length * 0.7) return text.slice(0, lastNl).trim();
       return text.trim();
     };
 
-    // Repetition detector — catches real loops without false positives on normal text
-    const detectLoop = (text: string): boolean => {
-      if (text.length < 300) return false; // don't even check short responses
+    /**
+     * REAL loop detection — only catches actual runaway repetition.
+     * A "runaway loop" = the model outputting the same 100+ char block verbatim.
+     * This does NOT trigger on lists with similar items, or normal text.
+     * Runs only after 2000 chars to avoid checking short responses.
+     */
+    const detectRunawayLoop = (text: string): boolean => {
+      if (text.length < 2000) return false;
       const t = text.toLowerCase();
 
-      // Strategy 1: 60+ char phrase appearing twice — real paragraph-level repetition
-      const window = t.slice(-3000);
-      const wLen = window.length;
-      for (let start = 0; start < wLen - 150; start += 12) {
-        const phrase = window.slice(start, start + 60);
-        if (phrase.length < 60) break;
-        const secondIdx = window.indexOf(phrase, start + 80);
-        if (secondIdx !== -1 && secondIdx - start > 100) return true;
+      // Check: is a 120-char block repeated verbatim? That's a real loop.
+      const tail = t.slice(-2500);
+      for (let start = 0; start < tail.length - 300; start += 20) {
+        const block = tail.slice(start, start + 120);
+        if (block.length < 120) break;
+        const secondIdx = tail.indexOf(block, start + 120);
+        if (secondIdx !== -1 && secondIdx - start > 150) return true;
       }
 
-      // Strategy 2: duplicate headings (markdown ## or ** headers)
-      const headers = text.match(/(?:^|\n)\s*(?:#{1,3}\s+|(?:\*\*)).{5,60}/g);
+      // Check: exact same markdown heading repeated (## Same Title appearing twice)
+      const headers = text.match(/(?:^|\n)\s*#{1,3}\s+.{5,80}/g);
       if (headers && headers.length >= 2) {
         const seen = new Set<string>();
         for (const h of headers) {
-          const key = h.trim().toLowerCase().replace(/[#*\s]+/g, ' ').trim();
+          const key = h.trim().toLowerCase().replace(/[#\s]+/g, ' ').trim();
           if (seen.has(key)) return true;
           seen.add(key);
         }
       }
-
-      // Strategy 3: duplicate sentences — catch full sentences >50 chars repeated
-      const sentences = t.split(/(?<=[.!?\n])\s+/).map(s => s.trim().replace(/\s+/g, ' ')).filter(s => s.length > 50);
-      const sentenceSet = new Set<string>();
-      for (const s of sentences) {
-        if (sentenceSet.has(s)) return true;
-        sentenceSet.add(s);
-      }
-
-      // Strategy 4: bullet spam — more than 20 bullets is excessive
-      const bulletCount = (text.match(/^[\s]*[-•*]\s/gm) || []).length;
-      if (bulletCount > 20) return true;
 
       return false;
     };
@@ -614,36 +600,31 @@ async function streamFromGroq(
           if (delta.content) {
             fullText += delta.content;
 
-            // Hard character cap — force stop if response is way too long
-            if (fullText.length > HARD_CHAR_CAP) {
+            // Soft cap — let the model finish its sentence, then stop gracefully
+            if (!softCapReached && fullText.length > SOFT_CAP) {
+              softCapReached = true;
+              // Don't cut yet — wait for a sentence boundary
+            }
+            if (softCapReached && /[.!?]\s*$/.test(fullText)) {
+              // Hit soft cap AND we're at a sentence boundary — clean stop
               reader.cancel();
-              const cleaned = truncateAtRepeat(fullText);
-              onToken(cleaned, true);
+              onToken(fullText.trim(), true);
               onDone();
               return;
             }
 
-            // Line-level instant dedup — catch repeated lines aggressively
-            const newLines = fullText.split('\n');
-            for (const ln of newLines.slice(0, -1)) { // skip last (incomplete) line
-              const key = ln.trim().toLowerCase().replace(/\s+/g, ' ');
-              if (key.length > 80) { // only flag truly repeated full lines (not short common phrases)
-                if (seenLines.has(key)) {
-                  reader.cancel();
-                  const cleaned = truncateAtRepeat(fullText);
-                  onToken(cleaned, true);
-                  onDone();
-                  return;
-                }
-                seenLines.add(key);
-              }
+            // Hard cap — absolute max, cut at nearest sentence
+            if (fullText.length > HARD_CHAR_CAP) {
+              reader.cancel();
+              onToken(cutAtSentence(fullText), true);
+              onDone();
+              return;
             }
 
-            // Kill stream if repetition loop detected; emit cleaned text before stopping
-            if (fullText.length > 80 && detectLoop(fullText)) {
+            // Only check for runaway loops on longer responses (not lists, not normal content)
+            if (fullText.length > 2000 && detectRunawayLoop(fullText)) {
               reader.cancel();
-              const cleaned = truncateAtRepeat(fullText);
-              if (cleaned !== fullText) onToken(cleaned, true);
+              onToken(cutAtSentence(fullText), true);
               onDone();
               return;
             }
