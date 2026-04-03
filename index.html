@@ -17,14 +17,16 @@
     <div id="root" style="background:#0a0a0a;min-height:100vh;min-height:100dvh;"></div>
     <script type="module" src="/main.tsx"></script>
     <script>
-      // ── PWA Cache Nuclear Bust ──
-      // Bump this version to force ALL clients to wipe caches and reload
+      // ── PWA Auto-Update System ──
+      // Bump this on every meaningful deploy to force cache bust on ALL devices (including mobile)
       var APP_CACHE_VERSION = 'v1.4.0';
       var CACHE_VER_KEY = 'bleumr_app_ver';
+
       if ('serviceWorker' in navigator) {
         var storedVer = localStorage.getItem(CACHE_VER_KEY);
         if (storedVer !== APP_CACHE_VERSION) {
           // Version mismatch — nuke everything and reload clean
+          console.log('[Bleumr] Version changed ' + storedVer + ' → ' + APP_CACHE_VERSION + ' — busting cache');
           localStorage.setItem(CACHE_VER_KEY, APP_CACHE_VERSION);
           caches.keys().then(function(names) {
             return Promise.all(names.map(function(n) { return caches.delete(n); }));
@@ -40,20 +42,26 @@
         } else {
           window.addEventListener('load', function() {
             navigator.serviceWorker.register('/sw.js').then(function(reg) {
+              // Check for SW updates immediately + every 10 seconds (mobile-friendly)
               reg.update().catch(function() {});
-              setInterval(function() { reg.update().catch(function() {}); }, 60000);
+              setInterval(function() { reg.update().catch(function() {}); }, 10000);
+
               reg.addEventListener('updatefound', function() {
                 var newWorker = reg.installing;
                 if (!newWorker) return;
                 newWorker.addEventListener('statechange', function() {
                   if (newWorker.state === 'activated') {
+                    console.log('[Bleumr] New SW activated — reloading');
                     window.location.reload();
                   }
                 });
               });
             }).catch(function() {});
+
+            // Listen for SW telling us to reload
             navigator.serviceWorker.addEventListener('message', function(event) {
               if (event.data && event.data.type === 'SW_UPDATED') {
+                console.log('[Bleumr] SW_UPDATED message — reloading');
                 window.location.reload();
               }
             });
