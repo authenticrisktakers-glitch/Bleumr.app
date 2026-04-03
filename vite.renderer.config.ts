@@ -100,6 +100,9 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    chunkSizeWarningLimit: 3000, // suppress warning — single-page app, code-splitting later
+  },
   optimizeDeps: {
     // harper.js ships a large inline WASM binary that breaks esbuild pre-bundling
     exclude: ['harper.js', '@mlc-ai/web-llm'],
