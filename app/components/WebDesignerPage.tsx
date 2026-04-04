@@ -1109,13 +1109,13 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
     : consoleLogs.filter(l => l.level === consoleFilter);
 
   return (
-    <div className="fixed inset-0 z-[10000] flex flex-col sm:flex-row bg-[#0a0a0a] text-white" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div className="fixed inset-0 z-[10000] flex flex-col sm:flex-row text-white" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', background: 'rgba(6,5,12,0.45)', backdropFilter: 'blur(48px) saturate(180%)', WebkitBackdropFilter: 'blur(48px) saturate(180%)' }}>
 
       {/* ── Left Panel: Projects + Chat ── */}
-      <div className="w-full sm:w-[340px] h-[45vh] sm:h-auto flex flex-col border-b sm:border-b-0 sm:border-r border-white/[0.06] bg-[#0d0d0d] shrink-0">
+      <div className="w-full sm:w-[360px] h-[45vh] sm:h-auto flex flex-col border-b sm:border-b-0 sm:border-r border-violet-500/[0.08] shrink-0" style={{ background: 'rgba(10,8,20,0.4)', backdropFilter: 'blur(32px) saturate(150%)', WebkitBackdropFilter: 'blur(32px) saturate(150%)' }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-violet-500/[0.08]" style={{ background: 'rgba(99,102,241,0.04)' }}>
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-violet-400" />
             <span className="text-sm font-semibold text-white">Web Designer</span>
@@ -1123,14 +1123,14 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
           <div className="flex items-center gap-1">
             <button
               onClick={() => createNewProject()}
-              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg hover:bg-violet-500/10 text-slate-400 hover:text-violet-300 transition-colors"
               title="New Project"
             >
               <Plus className="w-4 h-4" />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg hover:bg-violet-500/10 text-slate-400 hover:text-white transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1138,7 +1138,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
         </div>
 
         {/* Project List / File Tree */}
-        <div className="h-[140px] overflow-y-auto border-b border-white/[0.06] scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="h-[140px] overflow-y-auto border-b border-violet-500/[0.08] scrollbar-thin scrollbar-thumb-violet-900/40">
           {!activeProject ? (
             <div className="p-2 space-y-1">
               {projects.length === 0 && (
@@ -1224,7 +1224,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
                   <button
                     key={i}
                     onClick={() => setInput(suggestion)}
-                    className="w-full text-left text-[11px] text-slate-500 hover:text-white px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.06] hover:border-white/[0.08] transition-all"
+                    className="w-full text-left text-[11px] text-slate-400 hover:text-white px-3 py-2 rounded-lg bg-violet-500/[0.04] border border-violet-500/[0.08] hover:bg-violet-500/[0.10] hover:border-violet-500/[0.15] transition-all"
                   >
                     {suggestion}
                   </button>
@@ -1235,12 +1235,12 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
 
           {messages.map(msg => (
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[90%] px-3 py-2 rounded-xl text-xs leading-relaxed ${
+              <div className={`max-w-[90%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed ${
                 msg.role === 'user'
-                  ? 'bg-violet-600 text-white rounded-tr-sm'
+                  ? 'bg-violet-600/90 text-white rounded-tr-md shadow-lg shadow-violet-600/10'
                   : msg.role === 'system'
                     ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                    : 'bg-white/[0.04] text-slate-300 border border-white/[0.06]'
+                    : 'bg-violet-500/[0.06] text-slate-200 border border-violet-500/[0.10]'
               }`}>
                 {msg.content}
               </div>
@@ -1299,7 +1299,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
         </div>
 
         {/* Input */}
-        <div className="p-3 border-t border-white/[0.06]">
+        <div className="p-3 border-t border-violet-500/[0.08]">
           {/* Quick action bar */}
           {activeProject && activeProject.files.length > 0 && !isGenerating && (
             <div className="flex items-center gap-1.5 mb-2">
@@ -1315,7 +1315,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
                 className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border ${
                   errorCount > 0
                     ? 'bg-red-500/10 text-red-300 hover:bg-red-500/20 border-red-500/20'
-                    : 'bg-white/[0.03] text-slate-500 hover:bg-white/[0.06] border-white/[0.06]'
+                    : 'bg-violet-500/[0.05] text-slate-400 hover:bg-violet-500/[0.10] border-violet-500/[0.10]'
                 }`}
                 title="Send console errors to AI for debugging"
               >
@@ -1326,7 +1326,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
                 className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border ${
                   showConsole
                     ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                    : 'bg-white/[0.03] text-slate-500 hover:bg-white/[0.06] border-white/[0.06]'
+                    : 'bg-violet-500/[0.05] text-slate-400 hover:bg-violet-500/[0.10] border-violet-500/[0.10]'
                 }`}
                 title="Toggle console panel"
               >
@@ -1408,7 +1408,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
               onPaste={handlePaste}
               placeholder={activeProject ? 'Describe changes... (paste or drop images/code)' : 'Describe your website... (paste or drop images/code)'}
               rows={2}
-              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2.5 pr-20 text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:border-violet-500/40 transition-colors"
+              className="w-full bg-violet-500/[0.04] border border-violet-500/[0.10] rounded-xl px-3 py-2.5 pr-20 text-[13px] text-white placeholder-slate-500 resize-none focus:outline-none focus:border-violet-500/30 focus:bg-violet-500/[0.06] transition-colors"
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
               {!isGenerating && (
@@ -1457,12 +1457,12 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0d0d0d]">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-violet-500/[0.08]" style={{ background: 'rgba(15,12,25,0.95)' }}>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setRightPanel('preview')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                rightPanel === 'preview' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-500 hover:text-white hover:bg-white/[0.04]'
+                rightPanel === 'preview' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-500 hover:text-white hover:bg-violet-500/[0.06]'
               }`}
             >
               <Eye className="w-3.5 h-3.5" /> Preview
@@ -1470,7 +1470,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
             <button
               onClick={() => setRightPanel('code')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                rightPanel === 'code' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-500 hover:text-white hover:bg-white/[0.04]'
+                rightPanel === 'code' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-500 hover:text-white hover:bg-violet-500/[0.06]'
               }`}
             >
               <Code2 className="w-3.5 h-3.5" /> Code
@@ -1478,7 +1478,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
             <button
               onClick={() => setRightPanel('console')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                rightPanel === 'console' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-500 hover:text-white hover:bg-white/[0.04]'
+                rightPanel === 'console' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-500 hover:text-white hover:bg-violet-500/[0.06]'
               }`}
             >
               <Terminal className="w-3.5 h-3.5" /> Console
@@ -1490,24 +1490,24 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
 
           {/* Viewport size — only in preview mode */}
           {rightPanel === 'preview' && (
-            <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5">
+            <div className="flex items-center gap-1 bg-violet-500/[0.06] rounded-lg p-0.5">
               <button
                 onClick={() => setViewport('desktop')}
-                className={`p-1.5 rounded-md transition-colors ${viewport === 'desktop' ? 'bg-white/[0.08] text-white' : 'text-slate-600 hover:text-slate-300'}`}
+                className={`p-1.5 rounded-md transition-colors ${viewport === 'desktop' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-600 hover:text-slate-300'}`}
                 title="Desktop"
               >
                 <Monitor className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setViewport('tablet')}
-                className={`p-1.5 rounded-md transition-colors ${viewport === 'tablet' ? 'bg-white/[0.08] text-white' : 'text-slate-600 hover:text-slate-300'}`}
+                className={`p-1.5 rounded-md transition-colors ${viewport === 'tablet' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-600 hover:text-slate-300'}`}
                 title="Tablet"
               >
                 <Tablet className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setViewport('mobile')}
-                className={`p-1.5 rounded-md transition-colors ${viewport === 'mobile' ? 'bg-white/[0.08] text-white' : 'text-slate-600 hover:text-slate-300'}`}
+                className={`p-1.5 rounded-md transition-colors ${viewport === 'mobile' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-600 hover:text-slate-300'}`}
                 title="Mobile"
               >
                 <Smartphone className="w-3.5 h-3.5" />
@@ -1520,7 +1520,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
             {activeProject && activeProject.files.length > 0 && (
               <button
                 onClick={() => exportAsZip(activeProject)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.04] transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-violet-500/[0.06] transition-colors"
               >
                 <Download className="w-3.5 h-3.5" /> Export
               </button>
@@ -1529,14 +1529,14 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 relative overflow-hidden bg-[#111] flex flex-col">
+        <div className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'rgba(12,10,20,0.95)' }}>
           {/* Main content */}
           <div className="flex-1 overflow-hidden">
             {rightPanel === 'preview' && (
               <div className="h-full flex flex-col overflow-hidden">
                 {/* Page tabs — show when multiple HTML files exist */}
                 {htmlPages.length > 1 && (
-                  <div className="flex items-center gap-0.5 px-3 py-1.5 bg-[#0d0d0d] border-b border-white/[0.06] overflow-x-auto scrollbar-thin">
+                  <div className="flex items-center gap-0.5 px-3 py-1.5 border-b border-violet-500/[0.08] overflow-x-auto scrollbar-thin" style={{ background: 'rgba(15,12,25,0.9)' }}>
                     {htmlPages.map(f => (
                       <button
                         key={f.path}
@@ -1544,7 +1544,7 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
                         className={`px-3 py-1 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap ${
                           activePage === f.path
                             ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-violet-500/[0.06]'
                         }`}
                       >
                         {f.path.replace('.html', '')}
@@ -1586,15 +1586,15 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
               <div className="h-full flex">
                 {activeProject && activeProject.files.length > 0 ? (
                   <div className="w-full flex flex-col">
-                    <div className="flex items-center border-b border-white/[0.06] bg-[#0d0d0d] overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800">
+                    <div className="flex items-center border-b border-violet-500/[0.08] overflow-x-auto scrollbar-thin scrollbar-thumb-violet-900/40" style={{ background: 'rgba(15,12,25,0.9)' }}>
                       {activeProject.files.map(f => (
                         <button
                           key={f.path}
                           onClick={() => setSelectedFile(f.path)}
-                          className={`flex items-center gap-1.5 px-3 py-2 text-xs border-r border-white/[0.04] whitespace-nowrap transition-colors ${
+                          className={`flex items-center gap-1.5 px-3 py-2 text-xs border-r border-violet-500/[0.06] whitespace-nowrap transition-colors ${
                             selectedFile === f.path
-                              ? 'bg-[#111] text-white border-b-2 border-b-violet-500'
-                              : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.02]'
+                              ? 'bg-violet-500/10 text-white border-b-2 border-b-violet-500'
+                              : 'text-slate-500 hover:text-slate-300 hover:bg-violet-500/[0.04]'
                           }`}
                         >
                           {getFileIcon(f.path)}
@@ -1621,9 +1621,9 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
             )}
 
             {rightPanel === 'console' && (
-              <div className="h-full flex flex-col bg-[#0a0a0a]">
+              <div className="h-full flex flex-col" style={{ background: 'rgba(10,8,18,0.98)' }}>
                 {/* Console toolbar */}
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-[#0d0d0d]">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-violet-500/[0.08]" style={{ background: 'rgba(15,12,25,0.9)' }}>
                   <div className="flex items-center gap-1">
                     {(['all', 'error', 'warn', 'log'] as const).map(f => (
                       <button
@@ -1633,8 +1633,8 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
                           consoleFilter === f
                             ? f === 'error' ? 'bg-red-500/20 text-red-300'
                               : f === 'warn' ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-white/[0.08] text-white'
-                            : 'text-slate-500 hover:text-white hover:bg-white/[0.04]'
+                              : 'bg-violet-500/20 text-violet-200'
+                            : 'text-slate-500 hover:text-white hover:bg-violet-500/[0.06]'
                         }`}
                       >
                         {f === 'all' ? `All (${consoleLogs.length})` : f === 'error' ? `Errors (${errorCount})` : f === 'warn' ? `Warnings (${warnCount})` : `Logs (${consoleLogs.filter(l => l.level === 'log' || l.level === 'info').length})`}
@@ -1696,8 +1696,8 @@ export function WebDesignerPage({ onClose }: WebDesignerPageProps) {
 
           {/* Inline console drawer (when toggled from left panel) — shows below preview/code */}
           {showConsole && rightPanel !== 'console' && (
-            <div className="h-[180px] border-t border-white/[0.06] bg-[#0a0a0a] flex flex-col shrink-0">
-              <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] bg-[#0d0d0d]">
+            <div className="h-[180px] border-t border-violet-500/[0.08] flex flex-col shrink-0" style={{ background: 'rgba(10,8,18,0.98)' }}>
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-violet-500/[0.08]" style={{ background: 'rgba(15,12,25,0.9)' }}>
                 <div className="flex items-center gap-1.5">
                   <Terminal className="w-3 h-3 text-emerald-400" />
                   <span className="text-[10px] font-medium text-slate-300">Console</span>

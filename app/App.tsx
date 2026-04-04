@@ -28,6 +28,8 @@ import SubscriptionService, { SubscriptionTier } from './services/SubscriptionSe
 import { runChatAgent, generateFollowUps } from './services/ChatAgent';
 import { CodePlayground } from './components/CodePlayground';
 import { AppsPage } from './components/AppsPage';
+import { OrbitPanel } from './components/OrbitPanel';
+import { orbitService } from './services/OrbitService';
 import { WebDesignerPage } from './components/WebDesignerPage';
 import { SettingsModal } from './components/SettingsModal';
 import { FormulaModule, detectFormulas } from './components/FormulaModule';
@@ -93,6 +95,7 @@ interface Message {
   /** Which agent pipeline created this message */
   agent?: 'chat' | 'browser';
   brainEntryId?: string;
+  pdfDownload?: { url: string; filename: string };
 }
 
 interface OrbitConfig {
@@ -122,6 +125,7 @@ import { CodingPage } from './components/CodingPage';
 import { TradingDashboard } from './components/TradingDashboard';
 import { initTrading } from './services/trading';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
+
 
 // Detect if running as installed PWA (standalone) vs regular browser tab
 // Lightweight starfield for PWA install gate (no sphere barrier, no cursor lines — just drifting stars)
@@ -225,6 +229,7 @@ export default function App() {
       // handled separately by handleAddNewProfile
     });
   }, []);
+
 
   const handleOnboardingComplete = useCallback((profile: UserProfile) => {
     setUserProfile(profile);
@@ -337,6 +342,9 @@ export default function App() {
   const [showTrading, setShowTrading] = useState(false);
   const [showWebDesigner, setShowWebDesigner] = useState(false);
   const [showApps, setShowApps] = useState(false);
+  const [showOrbits, setShowOrbits] = useState(false);
+  const [orbitUnreadCount, setOrbitUnreadCount] = useState(() => orbitService.getUnreadCount());
+  const [orbitThreadIds, setOrbitThreadIds] = useState<Set<string>>(() => orbitService.getActiveThreadIds());
   const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
@@ -372,6 +380,58 @@ export default function App() {
     SafetyMiddleware.bypassAll = approveAll;
     try { localStorage.setItem('orbit_approve_all', String(approveAll)); } catch {}
   }, [approveAll]);
+
+  // Subscribe to orbit changes — keep unread badge + active threads updated
+  useEffect(() => {
+    const unsub = orbitService.subscribe(() => {
+      setOrbitUnreadCount(orbitService.getUnreadCount());
+      setOrbitThreadIds(orbitService.getActiveThreadIds());
+    });
+    return unsub;
+  }, []);
+
+  // ── Orbit Background Executor ─────────────────────────────────────────
+  // Runs active orbits on a 60-second check cycle. When an orbit is due,
+  // sends its goal to the chat agent and stores the response as a finding.
+  const orbitCronRef = useRef<any>(null);
+  useEffect(() => {
+    // Check every 60 seconds for orbits that need execution
+    orbitCronRef.current = new Cron('* * * * *', async () => {
+      const due = orbitService.getOrbitsDueForCheck();
+      if (due.length === 0 || !secureApiKey) return;
+
+      for (const orbit of due) {
+        try {
+          // Build a simple prompt for the orbit check
+          const checkPrompt = `You are JUMARI Orbit — a background autonomous agent. The user asked you to: "${orbit.goal}". This is check #${orbit.checksPerformed + 1}. Provide a concise, useful update. If you have no new information, say so briefly. Keep response under 200 words. Focus on actionable findings.`;
+
+          // Use runChatAgent with a simple collector
+          let response = '';
+          await runChatAgent(checkPrompt, [], {
+            apiKey: secureApiKey,
+            onToken: (token) => { response += token; },
+            onDone: () => {},
+            onError: (err) => { console.warn('[Orbit] Check failed for', orbit.title, err); },
+          });
+
+          // Only store non-empty findings
+          const cleaned = response.replace(/<[^>]+>/g, '').trim();
+          if (cleaned.length > 10) {
+            orbitService.addFinding(orbit.id, cleaned);
+          }
+
+          // Schedule next check
+          const next = new Date(Date.now() + orbit.intervalMinutes * 60000).toISOString();
+          orbitService.setNextCheck(orbit.id, next);
+        } catch (err) {
+          console.warn('[Orbit] Background check error:', err);
+        }
+      }
+    });
+
+    return () => { orbitCronRef.current?.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secureApiKey]);
 
   // Refresh Solar Energy + tier whenever settings opens (picks up localStorage changes)
   // Also hide/restore the native WebContentsView — it sits above all renderer z-index
@@ -412,7 +472,7 @@ export default function App() {
   // render behind it unless we explicitly push it off-screen first.
   useEffect(() => {
     const orbitBrowser = (window as any).orbit?.browser;
-    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showWebDesigner || showVoiceChat || showUpgradeModal;
+    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showWebDesigner || showVoiceChat || showUpgradeModal || showOrbits;
     if (anyOverlayOpen) {
       orbitBrowser?.hideAll?.();
     } else if (appMode === 'browser' && activeTabId) {
@@ -422,7 +482,7 @@ export default function App() {
       }, 180);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showWebDesigner, showVoiceChat, showUpgradeModal]);
+  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showWebDesigner, showVoiceChat, showUpgradeModal, showOrbits]);
 
   // Code Editor Panel
   const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
@@ -822,6 +882,35 @@ export default function App() {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Orbit detection — natural language triggers ─────────────────────────
+    const orbitIntent = detectIntent(text.trim());
+    if (orbitIntent === 'ORBIT_WATCH') {
+      // Create or get thread for this orbit
+      let threadId = currentThreadIdRef.current;
+      if (!threadId) {
+        threadId = createThreadId();
+        currentThreadIdRef.current = threadId;
+        setCurrentThreadId(threadId);
+      }
+
+      // Check if this thread already has an orbit
+      const existingOrbit = orbitService.getByThreadId(threadId);
+      if (!existingOrbit) {
+        // Create a new orbit linked to this chat thread
+        const orbitTitle = text.trim().length > 50 ? text.trim().slice(0, 47) + '...' : text.trim();
+        orbitService.create({
+          title: orbitTitle,
+          goal: text.trim(),
+          priority: 'medium',
+          intervalMinutes: 60,
+          threadId,
+        });
+        // Update thread IDs so sidebar shows the orbit badge immediately
+        setOrbitThreadIds(orbitService.getActiveThreadIds());
+      }
+      // Don't return — let the message flow through to the chat agent so JUMARI responds
+    }
+
     let processedInput = text;
 
     // --- Harper Integration for Chat Grammar Correction ---
@@ -991,15 +1080,17 @@ export default function App() {
           .replace(/<open>[\s\S]*?<\/open>/gi, '')
           .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
           .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
+          .replace(/<orbit>[\s\S]*?<\/orbit>/gi, '')
           .replace(/<followups>[\s\S]*?<\/followups>/gi, '')
           // Catch orphaned closing tags (model sometimes forgets opening tag)
           .replace(/<\/followups>/gi, '')
           .replace(/<\/schedule>/gi, '')
           .replace(/<\/open>/gi, '')
           .replace(/<\/workspace>/gi, '')
-          .replace(/<\/activate_key>/gi, '');
+          .replace(/<\/activate_key>/gi, '')
+          .replace(/<\/orbit>/gi, '');
         // Hide partial opening tags still mid-stream
-        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '').replace(/<activate_key[\s\S]*$/i, '');
+        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '').replace(/<activate_key[\s\S]*$/i, '').replace(/<orbit[\s\S]*$/i, '');
         return s.trimEnd();
       };
 
@@ -1197,6 +1288,44 @@ export default function App() {
            }
 
            parseWorkspaceFromRaw(rawContent);
+
+           // ── Orbit: store first response as a finding if this thread has an orbit ──
+           if (activeThreadId) {
+             const threadOrbit = orbitService.getByThreadId(activeThreadId);
+             if (threadOrbit && threadOrbit.status === 'active') {
+               const cleanedResponse = rawContent.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim();
+               if (cleanedResponse.length > 15) {
+                 orbitService.addFinding(threadOrbit.id, cleanedResponse);
+                 // Set next check time
+                 const next = new Date(Date.now() + threadOrbit.intervalMinutes * 60000).toISOString();
+                 orbitService.setNextCheck(threadOrbit.id, next);
+               }
+             }
+           }
+
+           // ── PDF generation via <pdf> tag ──
+           const parsePdfFromRaw = (raw: string) => {
+             const pdfMatch = raw.match(/<pdf>([\s\S]*?)<\/pdf>/i);
+             if (!pdfMatch) return;
+             try {
+               // Dynamic import to avoid loading jsPDF until needed
+               import('./services/PdfService').then(({ parsePdfTag }) => {
+                 const result = parsePdfTag(pdfMatch[1].trim());
+                 if (result) {
+                   // Inject a download link message into the chat
+                   setMessages(prev => [...prev, {
+                     id: `pdf_${Date.now()}`,
+                     role: 'assistant' as const,
+                     content: `📄 Your PDF is ready`,
+                     pdfDownload: { url: result.url, filename: result.filename },
+                   } as any]);
+                 }
+               });
+             } catch (err) {
+               console.warn('[PDF] Failed to generate PDF:', err);
+             }
+           };
+           parsePdfFromRaw(rawContent);
 
            // ── License key activation via <activate_key> tag ──
            const keyMatch = rawContent.match(/<activate_key>([\s\S]*?)<\/activate_key>/i);
@@ -2582,11 +2711,11 @@ export default function App() {
             onOpenSettings={() => setShowSettings(true)}
             onOpenScheduler={() => setShowScheduler(true)}
             onOpenWorkspace={() => setShowWorkspace(true)}
-            onOpenVoiceChat={() => {
-              if (!SubscriptionService.canUseVoiceChat()) { setUpgradeReason('voice_chat'); setShowUpgradeModal(true); return; }
-              setShowVoiceChat(true);
-            }}
+            onOpenVoiceChat={() => setShowVoiceChat(true)}
             onOpenApps={() => setShowApps(true)}
+            onOpenOrbits={() => setShowOrbits(true)}
+            orbitUnreadCount={orbitUnreadCount}
+            orbitThreadIds={orbitThreadIds}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
             agentTotalSteps={agentTotalSteps}
@@ -3206,6 +3335,7 @@ export default function App() {
             setApproveAll={setApproveAll}
             scheduledJobs={scheduledJobs}
             onOpenStripe={(url) => { setShowSettings(false); createTab(url); setAppMode('browser'); }}
+
             onLicenseActivated={() => {
               SubscriptionService.getStoredApiKeys().then(keys => {
                 if (keys.groq) setSecureApiKey(keys.groq);
@@ -3436,6 +3566,28 @@ export default function App() {
     </AnimatePresence>
 
 
+    {/* JUMARI Orbit Panel */}
+    <AnimatePresence>
+      {showOrbits && (
+        <motion.div
+          key="orbits"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10001 }}
+        >
+          <OrbitPanel
+            onClose={() => setShowOrbits(false)}
+            onNavigateToThread={(threadId) => {
+              setShowOrbits(false);
+              handleSelectThread(threadId);
+            }}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
     {/* Voice Chat */}
     <AnimatePresence>
       {showVoiceChat && (
@@ -3455,6 +3607,8 @@ export default function App() {
         </motion.div>
       )}
     </AnimatePresence>
+
+
 
     </AgentErrorBoundary>
   );

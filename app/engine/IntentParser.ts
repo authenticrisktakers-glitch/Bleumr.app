@@ -50,6 +50,10 @@ export function detectIntent(text: string): string | null {
               ['track', 'monitor', 'watch', 'alert', 'notify', 'keep an eye on'],
               ['price', 'cost', 'drop', 'sale', 'discount', 'cheaper']
           ],
+          ORBIT_WATCH: [
+              ['watch', 'track', 'monitor', 'keep an eye on', 'follow', 'alert me', 'notify me', 'let me know', 'stay on top of', 'keep tabs on', 'keep watching', 'check on', 'look out for'],
+              ['for me', 'for us', 'price', 'daily', 'regularly', 'apartment', 'listings', 'news', 'updates', 'stock', 'bitcoin', 'btc', 'eth', 'crypto', 'job', 'jobs', 'flights', 'deals', 'availability', 'score', 'results', 'weather', 'papers', 'research']
+          ],
           FORM_FILLER: [
               ['fill', 'complete', 'populate', 'submit', 'enter', 'type'],
               ['form', 'application', 'details', 'survey', 'questionnaire', 'fields', 'blanks']

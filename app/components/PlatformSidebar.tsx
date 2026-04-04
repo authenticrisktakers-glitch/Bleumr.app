@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle } from 'lucide-react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle, Orbit } from 'lucide-react';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
 import { IS_ELECTRON } from '../services/Platform';
@@ -21,6 +21,9 @@ interface PlatformSidebarProps {
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
   onOpenApps?: () => void;
+  onOpenOrbits?: () => void;
+  orbitUnreadCount?: number;
+  orbitThreadIds?: Set<string>;
   onSchedule?: (dateStr: string) => void;
 }
 
@@ -61,6 +64,9 @@ export function PlatformSidebar({
   onOpenWorkspace,
   onOpenVoiceChat,
   onOpenApps,
+  onOpenOrbits,
+  orbitUnreadCount = 0,
+  orbitThreadIds,
   onSchedule,
 }: PlatformSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,6 +112,7 @@ export function PlatformSidebar({
   const ThreadItem = ({ thread }: { thread: ChatThreadMeta }) => {
     const isActive = thread.id === currentThreadId;
     const isHovered = hoveredThread === thread.id;
+    const hasOrbit = orbitThreadIds?.has(thread.id);
 
     return (
       <div
@@ -121,6 +128,12 @@ export function PlatformSidebar({
         onMouseEnter={() => setHoveredThread(thread.id)}
         onMouseLeave={() => setHoveredThread(null)}
       >
+        {/* Orbit status indicator */}
+        {hasOrbit && (
+          <div className="shrink-0 mr-2 flex items-center" title="Orbit active">
+            <Orbit className="w-3.5 h-3.5 text-indigo-400" style={{ filter: 'drop-shadow(0 0 4px rgba(99,102,241,0.5))' }} />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-medium truncate leading-snug">
             {thread.title}
@@ -201,11 +214,12 @@ export function PlatformSidebar({
         {/* Quick-action tabs */}
         <div className="flex flex-col gap-px px-2 py-2">
           {([
-            ...(IS_ELECTRON ? [{ label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); } }] : []),
-            { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); } },
-            { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); } },
-            ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); } }] : []),
-          ] as const).map(item => (
+            ...(IS_ELECTRON ? [{ label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); }, badge: 0 }] : []),
+            { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); }, badge: 0 },
+            { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); }, badge: 0 },
+            { label: 'Orbits',        icon: <Orbit className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount },
+            ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); }, badge: 0 }] : []),
+          ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number}[]).map(item => (
             <button
               key={item.label}
               onClick={item.action}
@@ -218,6 +232,17 @@ export function PlatformSidebar({
             >
               {item.icon}
               {item.label}
+              {item.badge > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    boxShadow: '0 0 8px rgba(99,102,241,0.4)',
+                    minWidth: 18,
+                    textAlign: 'center',
+                  }}>
+                  {item.badge > 9 ? '9+' : item.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>

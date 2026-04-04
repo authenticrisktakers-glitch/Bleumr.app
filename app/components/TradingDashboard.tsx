@@ -162,10 +162,12 @@ export function TradingDashboard({ onClose }: Props) {
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-[#0a0a0f] text-white flex flex-col overflow-hidden"
+      className="fixed inset-0 z-50 text-white flex flex-col overflow-hidden"
+      style={{ background: 'rgba(6,6,14,0.45)', backdropFilter: 'blur(48px) saturate(180%)', WebkitBackdropFilter: 'blur(48px) saturate(180%)' }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-800/60 bg-[#0d0d14]/90 backdrop-blur-xl"
+      <div className="flex items-center justify-between px-6 py-3"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
         style={{ paddingLeft: 90, WebkitAppRegion: 'drag' } as React.CSSProperties}>
         <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <BarChart3 className="w-5 h-5 text-indigo-400" />
@@ -401,7 +403,8 @@ export function TradingDashboard({ onClose }: Props) {
                   onClick={() => setConfirmOrder(null)}>
                   <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
                     onClick={e => e.stopPropagation()}
-                    className="bg-[#151520] border border-slate-700/50 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+                    className="p-6 max-w-sm w-full shadow-2xl space-y-4"
+                    style={{ borderRadius: '4px', background: 'rgba(12,12,24,0.6)', backdropFilter: 'blur(48px) saturate(180%)', WebkitBackdropFilter: 'blur(48px) saturate(180%)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 8px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)' }}>
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-yellow-400" />
                       <h3 className="text-sm font-bold">Confirm Trade</h3>

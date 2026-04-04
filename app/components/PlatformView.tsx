@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { shimmerDuration } from '../services/CPUAccelerator';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Send, Mic, MicOff, ChevronDown, CheckCircle2, Menu, ImagePlus, ExternalLink, X, ThumbsUp, ThumbsDown, FileText, Download, Bell } from 'lucide-react';
 import { reportFeedback } from '../services/BrainService';
 import { trackSuccess, trackError } from '../services/Analytics';
 import { IS_ELECTRON } from '../services/Platform';
@@ -32,6 +32,7 @@ interface Message {
   followUps?: string[];
   generatedImage?: string;
   brainEntryId?: string;
+  pdfDownload?: { url: string; filename: string };
 }
 
 interface PlatformViewProps {
@@ -57,6 +58,9 @@ interface PlatformViewProps {
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
   onOpenApps?: () => void;
+  onOpenOrbits?: () => void;
+  orbitUnreadCount?: number;
+  orbitThreadIds?: Set<string>;
   onSchedule?: (text: string) => void;
   agentStep?: number;
   agentTotalSteps?: number;
@@ -110,6 +114,8 @@ const MessageRow = memo(function MessageRow({
   }
   if (!displayContent) return null;
   displayContent = displayContent.replace(/```json\s*[\s\S]*?\s*```/, '').trim();
+  // Strip PDF tags so raw JSON isn't shown in chat
+  displayContent = displayContent.replace(/<pdf>[\s\S]*?<\/pdf>/gi, '').trim();
   if (!displayContent) return null;
 
   return (
@@ -239,6 +245,23 @@ const MessageRow = memo(function MessageRow({
                   alt="Generated image"
                   className="rounded-xl max-w-full max-h-[512px] object-contain border border-white/10 shadow-lg mt-2"
                 />
+              )}
+              {/* PDF Download Link */}
+              {msg.pdfDownload && (
+                <a
+                  href={msg.pdfDownload.url}
+                  download={msg.pdfDownload.filename}
+                  className="flex items-center gap-3 mt-2 px-4 py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition-all duration-200 group cursor-pointer no-underline"
+                >
+                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-500/20 group-hover:bg-indigo-500/30 transition-colors">
+                    <FileText className="w-5 h-5 text-indigo-400" />
+                  </div>
+                  <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                    <span className="text-sm font-medium text-white truncate">{msg.pdfDownload.filename}</span>
+                    <span className="text-[10px] text-slate-500">PDF Document — tap to download</span>
+                  </div>
+                  <Download className="w-4 h-4 text-indigo-400 group-hover:text-indigo-300 transition-colors" />
+                </a>
               )}
               {msg.responseTimeMs != null && (
                 <div className="flex items-center gap-3 mt-0.5">
@@ -391,6 +414,9 @@ export const PlatformView = memo(function PlatformView({
   onOpenWorkspace,
   onOpenVoiceChat,
   onOpenApps,
+  onOpenOrbits,
+  orbitUnreadCount = 0,
+  orbitThreadIds,
   onSchedule,
   agentStep = 0,
   agentTotalSteps = 50,
@@ -593,6 +619,9 @@ export const PlatformView = memo(function PlatformView({
         onOpenWorkspace={onOpenWorkspace}
         onOpenVoiceChat={onOpenVoiceChat}
         onOpenApps={onOpenApps}
+        onOpenOrbits={onOpenOrbits}
+        orbitUnreadCount={orbitUnreadCount}
+        orbitThreadIds={orbitThreadIds}
         onSchedule={(text) => { onSchedule?.(text); }}
       />
 
