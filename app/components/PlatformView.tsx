@@ -58,6 +58,7 @@ interface PlatformViewProps {
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
   onOpenApps?: () => void;
+  onOpenGameGen?: () => void;
   onOpenOrbits?: () => void;
   orbitUnreadCount?: number;
   orbitThreadIds?: Set<string>;
@@ -415,6 +416,7 @@ export const PlatformView = memo(function PlatformView({
   onOpenWorkspace,
   onOpenVoiceChat,
   onOpenApps,
+  onOpenGameGen,
   onOpenOrbits,
   orbitUnreadCount = 0,
   orbitThreadIds,
@@ -621,6 +623,7 @@ export const PlatformView = memo(function PlatformView({
         onOpenWorkspace={onOpenWorkspace}
         onOpenVoiceChat={onOpenVoiceChat}
         onOpenApps={onOpenApps}
+        onOpenGameGen={onOpenGameGen}
         onOpenOrbits={onOpenOrbits}
         orbitUnreadCount={orbitUnreadCount}
         orbitThreadIds={orbitThreadIds}

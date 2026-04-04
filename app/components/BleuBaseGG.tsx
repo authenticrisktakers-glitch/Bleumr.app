@@ -28,7 +28,7 @@ import {
   Eye, Crosshair, Video, Sun, Moon, CloudRain, Zap, Mountain,
   Building2, Trees, Waves, Send
 } from 'lucide-react';
-import { runChatAgent } from '../services/ChatAgent';
+// Direct Groq API call — bypasses runChatAgent to get clean JSON output
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -167,28 +167,55 @@ Rules:
 - Output ONLY the JSON object, nothing else`;
 
 async function parsePromptToScene(prompt: string, apiKey: string): Promise<SceneConfig> {
-  let response = '';
+  // Call Groq directly — bypasses runChatAgent's personality/memory layer
+  // which interferes with structured JSON output
+  const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
-  await runChatAgent(
-    prompt,
-    [{ role: 'system', content: SCENE_SYSTEM_PROMPT }],
-    {
-      apiKey,
-      onToken: (token) => { response += token; },
-      onDone: () => {},
-      onError: (err) => { console.error('[BleuBase] Parse error:', err); },
-    }
-  );
+  const res = await fetch(GROQ_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SCENE_SYSTEM_PROMPT },
+        { role: 'user', content: `Generate a 3D world for: "${prompt}"` },
+      ],
+      temperature: 0.7,
+      max_completion_tokens: 4096,
+      response_format: { type: 'json_object' },
+    }),
+  });
 
-  // Extract JSON from response (handle markdown code blocks)
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No valid JSON in response');
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error('[BleuBase] Groq API error:', res.status, errText);
+    throw new Error(`AI generation failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content || '';
+
+  // Extract JSON from response
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    console.error('[BleuBase] No JSON in response:', content.slice(0, 200));
+    throw new Error('No valid scene data returned');
+  }
 
   try {
     const parsed = JSON.parse(jsonMatch[0]);
+    // Validate essential fields exist
+    if (!parsed.biome) parsed.biome = 'cyberpunk';
+    if (!parsed.structures || !Array.isArray(parsed.structures)) parsed.structures = [];
+    if (!parsed.lighting) parsed.lighting = DEFAULT_SCENE.lighting;
+    if (!parsed.terrain) parsed.terrain = DEFAULT_SCENE.terrain;
+    if (!parsed.neonColors || !Array.isArray(parsed.neonColors)) parsed.neonColors = DEFAULT_SCENE.neonColors;
     return { ...DEFAULT_SCENE, ...parsed };
   } catch (e) {
-    console.error('[BleuBase] JSON parse failed:', e);
+    console.error('[BleuBase] JSON parse failed:', e, content.slice(0, 300));
     throw new Error('Failed to parse scene configuration');
   }
 }

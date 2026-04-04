@@ -2728,6 +2728,7 @@ export default function App() {
             onOpenWorkspace={() => setShowWorkspace(true)}
             onOpenVoiceChat={() => setShowVoiceChat(true)}
             onOpenApps={() => setShowApps(true)}
+            onOpenGameGen={() => setShowGameGen(true)}
             onOpenOrbits={() => setShowOrbits(true)}
             orbitUnreadCount={orbitUnreadCount}
             orbitThreadIds={orbitThreadIds}

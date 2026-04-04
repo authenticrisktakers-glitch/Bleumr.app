@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle } from 'lucide-react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle, Gamepad2 } from 'lucide-react';
 import { JumariOrbitIcon } from './OrbitIcon';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
@@ -22,6 +22,7 @@ interface PlatformSidebarProps {
   onOpenWorkspace?: () => void;
   onOpenVoiceChat?: () => void;
   onOpenApps?: () => void;
+  onOpenGameGen?: () => void;
   onOpenOrbits?: () => void;
   orbitUnreadCount?: number;
   orbitThreadIds?: Set<string>;
@@ -66,6 +67,7 @@ export function PlatformSidebar({
   onOpenWorkspace,
   onOpenVoiceChat,
   onOpenApps,
+  onOpenGameGen,
   onOpenOrbits,
   orbitUnreadCount = 0,
   orbitThreadIds,
@@ -221,6 +223,7 @@ export function PlatformSidebar({
             { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); }, badge: 0 },
             { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); }, badge: 0 },
             { label: 'Orbits',        icon: <JumariOrbitIcon size={16} className="shrink-0" animated />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount, count: orbitTotalCount },
+            { label: 'BLEU BASE GG', icon: <Gamepad2 className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenGameGen?.(); onClose(); }, badge: 0 },
             ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); }, badge: 0 }] : []),
           ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number; count?:number}[]).map(item => (
             <button
