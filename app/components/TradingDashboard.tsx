@@ -167,8 +167,7 @@ export function TradingDashboard({ onClose }: Props) {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
-        style={{ paddingLeft: 90, WebkitAppRegion: 'drag' } as React.CSSProperties}>
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', paddingLeft: 90, WebkitAppRegion: 'drag' } as React.CSSProperties}>
         <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <BarChart3 className="w-5 h-5 text-indigo-400" />
           <h1 className="text-sm font-bold tracking-tight">Trading</h1>
