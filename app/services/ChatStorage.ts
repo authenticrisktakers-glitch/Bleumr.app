@@ -97,6 +97,29 @@ export function derivePreview(lastMessage: string): string {
   return cleaned.length > 60 ? cleaned.slice(0, 60).trimEnd() + '…' : cleaned;
 }
 
+// --- Export for JUMARI 2.0 Training ---
+
+export interface ExportedThread {
+  id: string;
+  title: string;
+  messages: { role: string; content: string }[];
+}
+
+export function exportConversationsForTraining(): ExportedThread[] {
+  const threads = loadThreadsMeta();
+  return threads
+    .map(t => {
+      const msgs = loadThreadMessages(t.id);
+      if (msgs.length === 0) return null;
+      return {
+        id: t.id,
+        title: t.title,
+        messages: msgs.map(m => ({ role: m.role, content: m.content })),
+      };
+    })
+    .filter((t): t is ExportedThread => t !== null);
+}
+
 // Upsert a thread's metadata
 export function upsertThreadMeta(
   threadId: string,

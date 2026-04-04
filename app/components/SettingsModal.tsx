@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { Settings, X, ShieldAlert, ShieldCheck, Mic, Zap, Database, Globe, CheckCircle2, MicOff, RefreshCw, Smartphone } from 'lucide-react';
+import { Settings, X, ShieldAlert, ShieldCheck, Mic, Zap, Database, Globe, CheckCircle2, MicOff, RefreshCw, Smartphone, Download } from 'lucide-react';
 import { motion } from 'motion/react';
 import SubscriptionService, { SubscriptionTier } from '../services/SubscriptionService';
 import { SecureStorage } from '../services/SecureStorage';
 import { createSyncToken, pullSyncData, revokeSyncToken, getActiveSyncToken } from '../services/SyncService';
+import { exportConversationsForTraining } from '../services/ChatStorage';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -22,6 +23,7 @@ interface SettingsModalProps {
   initialTab?: 'engine' | 'mdm' | 'plan' | 'sync';
   /** Called after successful license activation so App can refresh API keys from SecureStorage */
   onLicenseActivated?: () => void;
+
 }
 
 export function SettingsModal({
@@ -120,6 +122,7 @@ export function SettingsModal({
               licenseKeyError={licenseKeyError}
               setLicenseKeyError={setLicenseKeyError}
               onOpenStripe={onOpenStripe}
+
             />
           ) : activeTab === 'engine' ? (
             <EngineTab
@@ -335,8 +338,83 @@ function PlanTab({
           </button>
         </div>
       )}
+
+      {/* Export to JUMARI 2.0 */}
+      <ExportBrainButton />
+
     </div>
   );
+}
+
+// ─── Export to JUMARI 2.0 Button ──────────────────────────────────────────────
+
+function ExportBrainButton() {
+  const [status, setStatus] = useState<'idle' | 'exporting' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+
+  const handleExport = async () => {
+    setStatus('exporting');
+    setMessage('');
+
+    const threads = exportConversationsForTraining();
+    if (threads.length === 0) {
+      setStatus('error');
+      setMessage('No conversations to export.');
+      return;
+    }
+
+    // Try sending to the brain server first
+    try {
+      const res = await fetch('http://127.0.0.1:7420/import/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(threads),
+      });
+      if (res.ok) {
+        setStatus('success');
+        setMessage(`Sent ${threads.length} conversations to JUMARI 2.0 brain.`);
+        return;
+      }
+      throw new Error(`Server responded ${res.status}`);
+    } catch {
+      // Brain server offline — fall back to file download
+      downloadAsJson(threads);
+      setStatus('success');
+      setMessage(`Brain offline — downloaded ${threads.length} conversations as JSON.`);
+    }
+  };
+
+  return (
+    <div className="space-y-2 pt-4 border-t border-slate-800">
+      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">JUMARI 2.0 Brain</label>
+      <button
+        onClick={handleExport}
+        disabled={status === 'exporting'}
+        className="w-full py-2.5 rounded-sm text-[13px] font-medium text-violet-300 transition-all hover:bg-violet-500/10 flex items-center justify-center gap-2"
+        style={{ border: '1px solid rgba(139,92,246,0.2)', background: 'rgba(139,92,246,0.05)' }}
+      >
+        <Download className="w-3.5 h-3.5" />
+        {status === 'exporting' ? 'Exporting...' : 'Export Conversations to JUMARI 2.0'}
+      </button>
+      {message && (
+        <p className={`text-[11px] text-center py-1.5 rounded-lg ${status === 'error' ? 'text-red-400 bg-red-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function downloadAsJson(data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `jumari-conversations-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ─── Engine Tab ─────────────────────────────────────────────────────────────

@@ -489,9 +489,9 @@ class SubscriptionService {
 
   // ── Feature Gates ─────────────────────────────────────────────────────────
 
-  /** Voice chat — Pro and Stellur only */
+  /** Voice chat — available to all tiers */
   canUseVoiceChat(): boolean {
-    return this.getTier() !== 'free';
+    return true;
   }
 
   /** Web search in chat — Pro and Stellur only */
@@ -514,7 +514,7 @@ class SubscriptionService {
     return this.getTier() !== 'free';
   }
 
-  /** Code Lab app — Pro and Stellur only */
+  /** CODE Bleu app — Pro and Stellur only */
   canUseCodeLab(): boolean {
     return this.getTier() !== 'free';
   }

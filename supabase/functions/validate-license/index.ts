@@ -96,56 +96,40 @@ Deno.serve(async (req) => {
     // ── Device fingerprint tracking ──
     // If client sends a device fingerprint, check if this device already
     // activated this key. Same device = no extra activation consumed.
+    // Fully fault-tolerant: if device_activations table doesn't exist,
+    // we skip device tracking entirely and just validate the key.
     const deviceFp = url.searchParams.get('device_fp') || ''
 
-    // Auto-create device_activations table if it doesn't exist
-    let deviceTableReady = true
-    if (deviceFp) {
-      const { error: tableCheck } = await supabase.from('device_activations').select('id').limit(0)
-      if (tableCheck && (tableCheck.code === '42P01' || tableCheck.message?.includes('device_activations'))) {
-        // Table doesn't exist — create it via raw SQL
-        try {
-          await supabase.rpc('exec_sql', { query: `
-            CREATE TABLE IF NOT EXISTS device_activations (
-              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-              license_key_id uuid NOT NULL REFERENCES license_keys(id) ON DELETE CASCADE,
-              device_fingerprint text NOT NULL,
-              platform text DEFAULT 'unknown',
-              first_seen_at timestamptz DEFAULT now(),
-              last_seen_at timestamptz DEFAULT now(),
-              UNIQUE(license_key_id, device_fingerprint)
-            );
-            CREATE INDEX IF NOT EXISTS idx_device_activations_lookup ON device_activations(license_key_id, device_fingerprint);
-            ALTER TABLE device_activations ENABLE ROW LEVEL SECURITY;
-            CREATE POLICY IF NOT EXISTS "service_full" ON device_activations FOR ALL USING (true) WITH CHECK (true);
-          `})
-        } catch {
-          // exec_sql rpc might not exist — fall back to individual table creation
-          // via supabase-js (won't work for DDL, but at least we tried)
-          deviceTableReady = false
-        }
-      }
-    }
-
     let isKnownDevice = false
-    if (deviceFp && deviceTableReady) {
-      // Check if this fingerprint already activated this license
-      const { data: existing } = await supabase
-        .from('device_activations')
-        .select('id')
-        .eq('license_key_id', license.id)
-        .eq('device_fingerprint', deviceFp)
-        .limit(1)
+    let deviceTableReady = false
 
-      if (existing && existing.length > 0) {
-        // Known device — don't count as new activation
-        isKnownDevice = true
-        // Update last seen
-        await supabase
+    // Try to use device_activations table — if it doesn't exist, skip gracefully
+    if (deviceFp) {
+      try {
+        const { data: existing, error: lookupErr } = await supabase
           .from('device_activations')
-          .update({ last_seen_at: new Date().toISOString() })
+          .select('id')
           .eq('license_key_id', license.id)
           .eq('device_fingerprint', deviceFp)
+          .limit(1)
+
+        if (!lookupErr) {
+          deviceTableReady = true
+          if (existing && existing.length > 0) {
+            isKnownDevice = true
+            // Update last seen (fire and forget)
+            supabase
+              .from('device_activations')
+              .update({ last_seen_at: new Date().toISOString() })
+              .eq('license_key_id', license.id)
+              .eq('device_fingerprint', deviceFp)
+              .then(() => {})
+          }
+        }
+        // If lookupErr exists, table probably doesn't exist — that's fine
+      } catch {
+        // Table doesn't exist or other error — skip device tracking
+        deviceTableReady = false
       }
     }
 
@@ -165,18 +149,21 @@ Deno.serve(async (req) => {
         .update({ current_activations: license.current_activations + 1 })
         .eq('id', license.id)
 
-      // Record the device fingerprint so it won't count again
+      // Record the device fingerprint (if table exists)
       if (deviceFp && deviceTableReady) {
-        await supabase
-          .from('device_activations')
-          .insert({
-            license_key_id: license.id,
-            device_fingerprint: deviceFp,
-            platform: url.searchParams.get('platform') || 'unknown',
-            first_seen_at: new Date().toISOString(),
-            last_seen_at: new Date().toISOString(),
-          })
-          .catch(() => {}) // don't fail if table doesn't exist yet
+        try {
+          await supabase
+            .from('device_activations')
+            .insert({
+              license_key_id: license.id,
+              device_fingerprint: deviceFp,
+              platform: url.searchParams.get('platform') || 'unknown',
+              first_seen_at: new Date().toISOString(),
+              last_seen_at: new Date().toISOString(),
+            })
+        } catch {
+          // Ignore — device tracking is optional
+        }
       }
     }
 
@@ -191,6 +178,9 @@ Deno.serve(async (req) => {
       JSON.stringify({
         tier: license.tier,
         apiKeys,
+        expires_at: license.expires_at || null,
+        activations_used: license.current_activations + (isKnownDevice ? 0 : 1),
+        max_activations: license.max_activations,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

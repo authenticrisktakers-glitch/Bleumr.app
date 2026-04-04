@@ -29,6 +29,7 @@ import { runChatAgent, generateFollowUps } from './services/ChatAgent';
 import { CodePlayground } from './components/CodePlayground';
 import { AppsPage } from './components/AppsPage';
 import { OrbitPanel } from './components/OrbitPanel';
+import { OrbitToastContainer } from './components/OrbitToast';
 import { orbitService } from './services/OrbitService';
 import { WebDesignerPage } from './components/WebDesignerPage';
 import { SettingsModal } from './components/SettingsModal';
@@ -389,7 +390,12 @@ export default function App() {
       setOrbitThreadIds(orbitService.getActiveThreadIds());
       setOrbitTotalCount(orbitService.getActive().length);
     });
-    return unsub;
+    // Subscribe to new findings — push to live toast
+    const unsubFinding = orbitService.onFinding((finding) => {
+      const toastFn = (window as any).__orbitToast;
+      if (toastFn) toastFn(finding);
+    });
+    return () => { unsub(); unsubFinding(); };
   }, []);
 
   // ── Orbit Background Executor ─────────────────────────────────────────
@@ -3616,7 +3622,12 @@ export default function App() {
       )}
     </AnimatePresence>
 
-
+    {/* Live Orbit Finding Toasts — always rendered, slides in from bottom-right */}
+    <OrbitToastContainer
+      onNavigateToThread={(threadId) => {
+        handleSelectThread(threadId);
+      }}
+    />
 
     </AgentErrorBoundary>
   );

@@ -116,6 +116,7 @@
     "electron-updater": "^6.8.3",
     "harper.js": "^0.20.0",
     "input-otp": "^1.4.0",
+    "jspdf": "^4.2.1",
     "localforage": "^1.10.0",
     "lucide-react": "^0.469.0",
     "motion": "^11.0.0",

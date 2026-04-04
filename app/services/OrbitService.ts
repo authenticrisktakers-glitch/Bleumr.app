@@ -59,6 +59,7 @@ function generateFindingId(): string {
 class OrbitServiceClass {
   private orbits: Orbit[] = [];
   private listeners: Set<() => void> = new Set();
+  private findingListeners: Set<(finding: OrbitFinding & { orbitId: string; orbitTitle: string; threadId?: string }) => void> = new Set();
 
   constructor() {
     this.load();
@@ -93,6 +94,17 @@ class OrbitServiceClass {
 
   private notify(): void {
     this.listeners.forEach(fn => fn());
+  }
+
+  /** Subscribe to new findings — fires each time a finding is added */
+  onFinding(listener: (finding: OrbitFinding & { orbitId: string; orbitTitle: string; threadId?: string }) => void): () => void {
+    this.findingListeners.add(listener);
+    return () => this.findingListeners.delete(listener);
+  }
+
+  private notifyFinding(finding: OrbitFinding, orbit: Orbit): void {
+    const enriched = { ...finding, orbitId: orbit.id, orbitTitle: orbit.title, threadId: orbit.threadId };
+    this.findingListeners.forEach(fn => fn(enriched));
   }
 
   // ── CRUD ─────────────────────────────────────────────────────
@@ -219,6 +231,9 @@ class OrbitServiceClass {
 
     // Update unread count
     this.persistUnreadCount();
+
+    // Notify finding listeners (for live toast)
+    this.notifyFinding(finding, orbit);
 
     return finding;
   }

@@ -84,7 +84,7 @@ const apps = [
   },
   {
     id: 'code',
-    label: 'Code Lab',
+    label: 'CODE Bleu',
     Icon: CodeLabIcon,
     color: 'text-emerald-400',
     iconBg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',

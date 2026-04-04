@@ -370,7 +370,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const [liveText, setLiveText]     = useState('');
   const [muted, setMuted]           = useState(false);
   const [volume, setVolume]         = useState(0); // 0–1, from analyser
-  const [showTranscript, setShowTranscript] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(true);
   const [micError, setMicError] = useState<'denied' | 'unavailable' | null>(null);
 
   const voiceStateRef = useRef<VoiceState>('idle');
@@ -525,8 +525,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       const voice = pickFemaleVoice();
       const utter = new SpeechSynthesisUtterance(text);
       if (voice) utter.voice = voice;
-      utter.rate = 1.05;
-      utter.pitch = 1.1;
+      utter.rate = 1.2;
+      utter.pitch = 1.08;
 
       // Fake volume animation while speaking
       const fakeTick = () => {
@@ -565,8 +565,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const key = apiKeyRef.current;
     const sp = systemPromptRef.current;
     const sysPrompt = sp
-      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 2–4 sentences max. No markdown. Speak naturally. Perfect spelling and grammar always.`
-      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: Respond in 2–4 sentences max. No markdown, no bullet points, no formatting. Speak naturally like a real person talking. Be warm and direct. Perfect spelling and grammar always — never misspell a word.`;
+      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 1–3 sentences max. Be DIRECT — answer first, elaborate second. No markdown. No filler. Speak naturally but get to the point. Perfect spelling and grammar always.`
+      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 1–3 sentences max. Be DIRECT and concise — answer the question immediately, no preamble, no filler phrases. Speak naturally like a real person talking but always get to the point fast. Never say "that's a great question" or "I'd be happy to help." Just answer. Perfect spelling and grammar always — never misspell a word.`;
 
     try {
       console.log('[Voice] Requesting AI response...');
@@ -576,8 +576,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role: 'system', content: sysPrompt }, ...history],
-          max_tokens: 280,
-          temperature: 0.75,
+          max_tokens: 180,
+          temperature: 0.65,
         }),
       }, 15000);
       if (!res.ok) throw new Error(`AI HTTP ${res.status}`);
@@ -603,7 +603,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (closedRef.current) return;
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     console.log('[Voice] Recording stopped, blob size:', blob.size);
-    if (blob.size < 500) { console.log('[Voice] Blob too small'); setVS('idle'); return; }
+    // Minimum 2KB — Whisper hallucinates on tiny blobs (produces phantom words like "thank")
+    if (blob.size < 2000) { console.log('[Voice] Blob too small, likely silence — ignoring'); setVS('idle'); return; }
 
     let userText = '';
     try {
@@ -646,8 +647,17 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       trackError('groq', 'stt', (e as any)?.message || 'Whisper fetch failed');
     }
 
-    if (!userText) {
-      console.log('[Voice] No transcription — returning to idle');
+    // Filter Whisper hallucinations — these are common phantom words from silence/noise
+    const HALLUCINATION_PHRASES = [
+      'thank', 'thanks', 'thank you', 'thanks for watching', 'bye', 'you',
+      'the end', 'okay', 'ok', 'so', 'um', 'uh', 'hmm', 'huh',
+      'subscribe', 'like and subscribe', 'please subscribe',
+      'music', 'applause', 'laughter', 'silence',
+      'foreign', 'inaudible', 'mhm',
+    ];
+    const trimmedLower = userText.toLowerCase().replace(/[.,!?]/g, '').trim();
+    if (!userText || trimmedLower.length < 2 || HALLUCINATION_PHRASES.includes(trimmedLower)) {
+      console.log('[Voice] No real transcription (hallucination or empty):', userText, '— returning to idle');
       setVS('idle');
       return;
     }
@@ -872,60 +882,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           </div>
         </div>
 
-        {/* ── Transcript (toggled via header button) ──────────────────────── */}
-        <AnimatePresence>
-          {showTranscript && (
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              ref={scrollRef}
-              className="absolute left-4 overflow-y-auto flex flex-col gap-2 px-1 z-10"
-              style={{ top: 72, bottom: 24, width: 320, maxWidth: '40vw', scrollbarWidth: 'none',
-                background: 'rgba(10,10,16,0.75)', backdropFilter: 'blur(16px)',
-                borderRadius: 16, border: '1px solid rgba(255,255,255,0.06)', padding: 12 }}>
-              <p className="text-[9px] font-bold uppercase tracking-[0.2em] mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>Transcript</p>
-              <AnimatePresence initial={false}>
-                {turns.map(turn => (
-                  <motion.div key={turn.id}
-                    initial={{ opacity: 0, y: 10, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className={`max-w-[95%] rounded-2xl px-3.5 py-2.5 ${turn.role === 'user' ? 'self-end' : 'self-start'}`}
-                    style={turn.role === 'user' ? {
-                      background: 'rgba(99,102,241,0.18)',
-                      border: '1px solid rgba(99,102,241,0.28)',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)',
-                    } : {
-                      background: 'rgba(255,255,255,0.055)',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
-                    }}>
-                    {turn.role === 'assistant' && (
-                      <p className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: '#34d399' }}>JUMARI</p>
-                    )}
-                    <p className="text-[13px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.75)' }}>
-                      {turn.text}
-                    </p>
-                  </motion.div>
-                ))}
-                {voiceState === 'processing' && liveText && (
-                  <motion.div key="live"
-                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                    className="self-end max-w-[85%] rounded-2xl px-3.5 py-2.5"
-                    style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                    <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>{liveText}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Mercury sphere — centered in the void ─────────────────────────── */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
+        {/* ── Mercury sphere — upper area ─────────────────────────── */}
+        <div className="flex flex-col items-center gap-3 pointer-events-none" style={{ paddingTop: turns.length > 0 ? '8vh' : '20vh', transition: 'padding-top 0.5s ease' }}>
 
           {/* Status */}
           <AnimatePresence mode="wait">
@@ -1060,6 +1018,72 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             : 'click anywhere outside to exit · tap to speak'}
           </p>
         </div>
+
+        {/* ── Transcript — below sphere, full-width chat thread with fade-to-top ── */}
+        <AnimatePresence>
+          {showTranscript && turns.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              transition={{ duration: 0.3 }}
+              className="relative flex-1 min-h-0 w-full max-w-lg mx-auto px-4"
+              style={{ marginTop: -8 }}
+            >
+              {/* Fade-to-top gradient overlay */}
+              <div className="absolute top-0 left-0 right-0 h-12 z-10 pointer-events-none"
+                style={{ background: 'linear-gradient(to bottom, rgba(10,10,14,1) 0%, rgba(10,10,14,0.6) 50%, transparent 100%)' }} />
+
+              {/* Scrollable message thread */}
+              <div
+                ref={scrollRef}
+                className="h-full overflow-y-auto flex flex-col gap-3 pt-10 pb-4"
+                style={{ scrollbarWidth: 'none', maskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 100%)' }}
+              >
+                <AnimatePresence initial={false}>
+                  {turns.map(turn => (
+                    <motion.div key={turn.id}
+                      initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.25 }}
+                      className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[80%] rounded-2xl px-4 py-3 ${turn.role === 'user' ? 'rounded-tr-md' : 'rounded-tl-md'}`}
+                        style={turn.role === 'user' ? {
+                          background: 'rgba(99,102,241,0.18)',
+                          border: '1px solid rgba(99,102,241,0.25)',
+                        } : {
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                        }}
+                      >
+                        {turn.role === 'assistant' && (
+                          <p className="text-[9px] font-semibold uppercase tracking-[0.15em] mb-1.5" style={{ color: 'rgba(52,211,153,0.8)' }}>JUMARI</p>
+                        )}
+                        <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.78)' }}>
+                          {turn.text}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {voiceState === 'processing' && liveText && (
+                    <motion.div key="live"
+                      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                      className="flex justify-end"
+                    >
+                      <div className="max-w-[80%] rounded-2xl rounded-tr-md px-4 py-3"
+                        style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                        <p className="text-[14px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>{liveText}</p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );

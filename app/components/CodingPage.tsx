@@ -40,7 +40,7 @@ const QUICK_ACTIONS = [
   { id:'optimize', label:'Optimize',  icon:Sparkles,     prompt:'Optimize for performance — reduce complexity, eliminate unnecessary work.' },
 ];
 
-const PLACEHOLDER_CODE = `// Bleumr Code — powered by JUMARI
+const PLACEHOLDER_CODE = `// CODE Bleu — powered by JUMARI
 // Your AI pair programmer is ready.
 //
 //  1. Connect GitHub to browse your repos
@@ -434,7 +434,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   const [githubFileTree, setGithubFileTree] = useState<FileNode[]>([]);
 
   // JUMARI
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role:'system', content:'JUMARI Code is ready. Open a file or paste code, then use the actions above or ask me anything.' }]);
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role:'system', content:'CODE Bleu is ready. Open a file or paste code, then use the actions above or ask me anything.' }]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number|null>(null);
@@ -712,7 +712,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     const ctx=activeFile?.content?.trim()??'';
     const lang=activeFile?.language??'code';
     const fname=activeFile?.name??'untitled';
-    const sys=`You are JUMARI Code — a world-class coding assistant in Bleumr. File: "${fname}" (${lang}). Be direct. No preamble. Wrap code in \`\`\`${lang}\\n...\\n\`\`\`. Just do it. Perfect spelling and grammar in all explanations — never misspell a word.`;
+    const sys=`You are CODE Bleu — JUMARI's world-class coding assistant inside Bleumr. File: "${fname}" (${lang}). Be direct. No preamble. Wrap code in \`\`\`${lang}\\n...\\n\`\`\`. Just do it. Perfect spelling and grammar in all explanations — never misspell a word.`;
     const userContent=ctx?`${userMessage}\n\n\`\`\`${lang}\n${ctx}\n\`\`\``:userMessage;
     const msgs:ChatMessage[]=[...messages,{role:'user',content:userMessage}];
     setMessages(msgs);
