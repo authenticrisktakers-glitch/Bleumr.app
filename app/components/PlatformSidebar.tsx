@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle, Orbit } from 'lucide-react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle } from 'lucide-react';
+import { JumariOrbitIcon } from './OrbitIcon';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
 import { IS_ELECTRON } from '../services/Platform';
@@ -131,7 +132,7 @@ export function PlatformSidebar({
         {/* Orbit status indicator */}
         {hasOrbit && (
           <div className="shrink-0 mr-2 flex items-center" title="Orbit active">
-            <Orbit className="w-3.5 h-3.5 text-indigo-400" style={{ filter: 'drop-shadow(0 0 4px rgba(99,102,241,0.5))' }} />
+            <JumariOrbitIcon size={14} className="text-indigo-400" animated style={{ filter: 'drop-shadow(0 0 4px rgba(99,102,241,0.5))' }} />
           </div>
         )}
         <div className="flex-1 min-w-0">
@@ -217,7 +218,7 @@ export function PlatformSidebar({
             ...(IS_ELECTRON ? [{ label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); }, badge: 0 }] : []),
             { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); }, badge: 0 },
             { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); }, badge: 0 },
-            { label: 'Orbits',        icon: <Orbit className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount },
+            { label: 'Orbits',        icon: <JumariOrbitIcon size={16} className="shrink-0" animated />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount },
             ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); }, badge: 0 }] : []),
           ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number}[]).map(item => (
             <button

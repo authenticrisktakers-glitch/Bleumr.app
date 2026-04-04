@@ -13,9 +13,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  X, Orbit as OrbitIcon, Clock, Zap, Sparkles, Bell,
+  X, Clock, Zap, Sparkles, Bell,
   ChevronRight, MessageSquare, ExternalLink, CheckCheck
 } from 'lucide-react';
+import { JumariOrbitIcon } from './OrbitIcon';
 import { orbitService, Orbit, OrbitFinding } from '../services/OrbitService';
 
 interface OrbitPanelProps {
@@ -214,10 +215,10 @@ export function OrbitPanel({ onClose, onNavigateToThread }: OrbitPanelProps) {
               background: 'rgba(99,102,241,0.1)',
               border: `1px solid ${G.borderLit}`,
             }}>
-              <Bell className="w-4 h-4 text-indigo-400" />
+              <JumariOrbitIcon size={18} className="text-indigo-400" animated />
             </div>
             <div>
-              <h2 className="text-[14px] font-semibold text-white tracking-tight">Notifications</h2>
+              <h2 className="text-[14px] font-semibold text-white tracking-tight">JUMARI Orbit</h2>
               <p className="text-[10px] text-slate-500">
                 {unreadCount > 0 ? `${unreadCount} new finding${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
               </p>
@@ -269,7 +270,7 @@ export function OrbitPanel({ onClose, onNavigateToThread }: OrbitPanelProps) {
                 background: 'rgba(99,102,241,0.06)',
                 border: `1px solid ${G.borderLit}`,
               }}>
-                <OrbitIcon className="w-7 h-7 text-indigo-400/40" />
+                <JumariOrbitIcon size={28} className="text-indigo-400/40" />
               </div>
               <div className="text-[13px] text-slate-400 font-medium mb-1 text-center">No notifications yet</div>
               <div className="text-[11px] text-slate-600 text-center max-w-[240px] leading-relaxed">
