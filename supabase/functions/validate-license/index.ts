@@ -58,6 +58,19 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Stellur founder key — full access
+    if (licenseKey === 'STELLUR-FOUNDER-2025') {
+      const apiKeys: Record<string, string> = {
+        groq: Deno.env.get('GROQ_API_KEY') || '',
+        deepgram: Deno.env.get('DEEPGRAM_API_KEY') || '',
+        gemini: Deno.env.get('GEMINI_API_KEY') || '',
+      }
+      return new Response(
+        JSON.stringify({ tier: 'stellur', apiKeys }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Connect to Supabase with service role (bypasses RLS)
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
