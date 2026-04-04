@@ -1,11 +1,13 @@
 import React from 'react';
 import { X } from 'lucide-react';
+import { BleuBaseIcon } from './BleuBaseGG';
 
 interface AppsPageProps {
   onClose: () => void;
   onOpenCoding: () => void;
   onOpenTrading: () => void;
   onOpenWebDesigner: () => void;
+  onOpenGameGen: () => void;
 }
 
 // ─── Custom App Icons (unique, not generic) ────────────────────────────────
@@ -98,10 +100,18 @@ const apps = [
     iconBg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
     action: 'onOpenTrading' as const,
   },
+  {
+    id: 'gamegen',
+    label: 'BLEU BASE GG',
+    Icon: ({ className }: { className?: string }) => <BleuBaseIcon className={className} />,
+    color: 'text-indigo-400',
+    iconBg: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+    action: 'onOpenGameGen' as const,
+  },
 ];
 
-export function AppsPage({ onClose, onOpenCoding, onOpenTrading, onOpenWebDesigner }: AppsPageProps) {
-  const handlers = { onOpenCoding, onOpenTrading, onOpenWebDesigner };
+export function AppsPage({ onClose, onOpenCoding, onOpenTrading, onOpenWebDesigner, onOpenGameGen }: AppsPageProps) {
+  const handlers = { onOpenCoding, onOpenTrading, onOpenWebDesigner, onOpenGameGen };
 
   return (
     <div

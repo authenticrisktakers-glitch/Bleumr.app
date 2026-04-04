@@ -30,6 +30,7 @@ import { CodePlayground } from './components/CodePlayground';
 import { AppsPage } from './components/AppsPage';
 import { OrbitPanel } from './components/OrbitPanel';
 import { OrbitToastContainer } from './components/OrbitToast';
+import { BleuBaseGG } from './components/BleuBaseGG';
 import { orbitService } from './services/OrbitService';
 import { WebDesignerPage } from './components/WebDesignerPage';
 import { SettingsModal } from './components/SettingsModal';
@@ -343,6 +344,7 @@ export default function App() {
   const [showTrading, setShowTrading] = useState(false);
   const [showWebDesigner, setShowWebDesigner] = useState(false);
   const [showApps, setShowApps] = useState(false);
+  const [showGameGen, setShowGameGen] = useState(false);
   const [showOrbits, setShowOrbits] = useState(false);
   const [orbitUnreadCount, setOrbitUnreadCount] = useState(() => orbitService.getUnreadCount());
   const [orbitThreadIds, setOrbitThreadIds] = useState<Set<string>>(() => orbitService.getActiveThreadIds());
@@ -480,7 +482,7 @@ export default function App() {
   // render behind it unless we explicitly push it off-screen first.
   useEffect(() => {
     const orbitBrowser = (window as any).orbit?.browser;
-    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showWebDesigner || showVoiceChat || showUpgradeModal || showOrbits;
+    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showGameGen || showWebDesigner || showVoiceChat || showUpgradeModal || showOrbits;
     if (anyOverlayOpen) {
       orbitBrowser?.hideAll?.();
     } else if (appMode === 'browser' && activeTabId) {
@@ -490,7 +492,7 @@ export default function App() {
       }, 180);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showWebDesigner, showVoiceChat, showUpgradeModal, showOrbits]);
+  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showGameGen, showWebDesigner, showVoiceChat, showUpgradeModal, showOrbits]);
 
   // Code Editor Panel
   const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
@@ -3549,6 +3551,22 @@ export default function App() {
       )}
     </AnimatePresence>
 
+    {/* BLEU BASE GG — 3D Game Generator */}
+    <AnimatePresence>
+      {showGameGen && (
+        <motion.div
+          key="gamegen"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000 }}
+        >
+          <BleuBaseGG onClose={() => setShowGameGen(false)} apiKey={secureApiKey} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
     {/* Apps Page */}
     <AnimatePresence>
       {showApps && (
@@ -3573,6 +3591,10 @@ export default function App() {
             onOpenWebDesigner={() => {
               if (!SubscriptionService.canUseWebDesigner()) { setShowApps(false); setUpgradeReason('web_designer'); setShowUpgradeModal(true); return; }
               setShowApps(false); setShowWebDesigner(true);
+            }}
+            onOpenGameGen={() => {
+              if (!SubscriptionService.canUseGameGen()) { setShowApps(false); setUpgradeReason('game_gen' as any); setShowUpgradeModal(true); return; }
+              setShowApps(false); setShowGameGen(true);
             }}
           />
         </motion.div>

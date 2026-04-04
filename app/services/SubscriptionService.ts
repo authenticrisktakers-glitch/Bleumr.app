@@ -524,6 +524,11 @@ class SubscriptionService {
     return this.getTier() === 'stellur';
   }
 
+  /** BLEU BASE GG — Pro and Stellur */
+  canUseGameGen(): boolean {
+    return this.getTier() !== 'free';
+  }
+
   /** Calendar — all tiers */
   canUseCalendar(): boolean {
     return true;
@@ -558,6 +563,7 @@ class SubscriptionService {
       case 'web_designer': return this.canUseWebDesigner();
       case 'code_lab': return this.canUseCodeLab();
       case 'trading': return this.canUseTrading();
+      case 'game_gen': return this.canUseGameGen();
       case 'calendar': return this.canUseCalendar();
       case 'browser_agent': return this.canUseBrowserAgent();
       case 'all_models': return this.canUseAllModels();
@@ -578,6 +584,7 @@ class SubscriptionService {
       case 'image_gen':
       case 'web_designer':
       case 'code_lab':
+      case 'game_gen':
       case 'all_models':
       case 'sync':
         return 'pro';
