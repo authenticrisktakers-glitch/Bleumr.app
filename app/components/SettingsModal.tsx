@@ -228,10 +228,12 @@ function PlanTab({
         );
       })()}
 
-      {/* License key activation */}
-      {tier === 'free' && (
+      {/* License key activation — always visible so users can upgrade tiers */}
+      {(tier === 'free' || tier === 'pro') && (
         <div className="space-y-2 pt-2 border-t border-slate-800">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Have a license key?</label>
+          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+            {tier === 'free' ? 'Have a license key?' : 'Upgrade to Stellur?'}
+          </label>
           <div className="flex gap-2">
             <input
               type="text"
