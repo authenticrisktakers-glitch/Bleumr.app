@@ -61,6 +61,7 @@ interface PlatformViewProps {
   onOpenOrbits?: () => void;
   orbitUnreadCount?: number;
   orbitThreadIds?: Set<string>;
+  orbitTotalCount?: number;
   onSchedule?: (text: string) => void;
   agentStep?: number;
   agentTotalSteps?: number;
@@ -417,6 +418,7 @@ export const PlatformView = memo(function PlatformView({
   onOpenOrbits,
   orbitUnreadCount = 0,
   orbitThreadIds,
+  orbitTotalCount = 0,
   onSchedule,
   agentStep = 0,
   agentTotalSteps = 50,
@@ -622,6 +624,7 @@ export const PlatformView = memo(function PlatformView({
         onOpenOrbits={onOpenOrbits}
         orbitUnreadCount={orbitUnreadCount}
         orbitThreadIds={orbitThreadIds}
+        orbitTotalCount={orbitTotalCount}
         onSchedule={(text) => { onSchedule?.(text); }}
       />
 

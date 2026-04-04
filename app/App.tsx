@@ -345,6 +345,7 @@ export default function App() {
   const [showOrbits, setShowOrbits] = useState(false);
   const [orbitUnreadCount, setOrbitUnreadCount] = useState(() => orbitService.getUnreadCount());
   const [orbitThreadIds, setOrbitThreadIds] = useState<Set<string>>(() => orbitService.getActiveThreadIds());
+  const [orbitTotalCount, setOrbitTotalCount] = useState(() => orbitService.getActive().length);
   const [workspaceAutoTask, setWorkspaceAutoTask] = useState<string | null>(null);
   const [schedulerJumpDate, setSchedulerJumpDate] = useState<Date | null>(null);
   const [schedulingToast, setSchedulingToast] = useState<{ title: string; date: string; startHour: number; endHour: number } | null>(null);
@@ -386,6 +387,7 @@ export default function App() {
     const unsub = orbitService.subscribe(() => {
       setOrbitUnreadCount(orbitService.getUnreadCount());
       setOrbitThreadIds(orbitService.getActiveThreadIds());
+      setOrbitTotalCount(orbitService.getActive().length);
     });
     return unsub;
   }, []);
@@ -2721,6 +2723,7 @@ export default function App() {
             onOpenOrbits={() => setShowOrbits(true)}
             orbitUnreadCount={orbitUnreadCount}
             orbitThreadIds={orbitThreadIds}
+            orbitTotalCount={orbitTotalCount}
             onSchedule={(text) => handleUserSubmit(text)}
             agentStep={agentStep}
             agentTotalSteps={agentTotalSteps}

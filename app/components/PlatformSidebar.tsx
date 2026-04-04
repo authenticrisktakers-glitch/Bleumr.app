@@ -25,6 +25,7 @@ interface PlatformSidebarProps {
   onOpenOrbits?: () => void;
   orbitUnreadCount?: number;
   orbitThreadIds?: Set<string>;
+  orbitTotalCount?: number;
   onSchedule?: (dateStr: string) => void;
 }
 
@@ -68,6 +69,7 @@ export function PlatformSidebar({
   onOpenOrbits,
   orbitUnreadCount = 0,
   orbitThreadIds,
+  orbitTotalCount = 0,
   onSchedule,
 }: PlatformSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -218,9 +220,9 @@ export function PlatformSidebar({
             ...(IS_ELECTRON ? [{ label: 'Open Browser',  icon: <Globe className="w-4 h-4 shrink-0" />, color: 'text-slate-300',   hoverBg: 'rgba(255,255,255,0.08)', action: () => { onOpenBrowser(); onClose(); }, badge: 0 }] : []),
             { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); }, badge: 0 },
             { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); }, badge: 0 },
-            { label: 'Orbits',        icon: <JumariOrbitIcon size={16} className="shrink-0" animated />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount },
+            { label: 'Orbits',        icon: <JumariOrbitIcon size={16} className="shrink-0" animated />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount, count: orbitTotalCount },
             ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); }, badge: 0 }] : []),
-          ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number}[]).map(item => (
+          ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number; count?:number}[]).map(item => (
             <button
               key={item.label}
               onClick={item.action}
@@ -233,6 +235,9 @@ export function PlatformSidebar({
             >
               {item.icon}
               {item.label}
+              {item.count != null && item.count > 0 && (
+                <span className="text-[11px] font-normal text-slate-500/40">{item.count}</span>
+              )}
               {item.badge > 0 && (
                 <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white"
                   style={{

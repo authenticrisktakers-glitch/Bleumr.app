@@ -72,53 +72,37 @@ function NotificationItem({
 
   return (
     <motion.button
-      initial={{ opacity: 0, x: 12 }}
+      initial={{ opacity: 0, x: 8 }}
       animate={{ opacity: 1, x: 0 }}
       onClick={onNavigate}
-      className="w-full text-left group relative"
+      className="w-full text-left group"
       style={{
-        borderRadius: G.radius,
-        background: finding.read ? 'transparent' : 'rgba(99,102,241,0.04)',
-        border: `1px solid ${finding.read ? 'transparent' : G.borderLit}`,
-        transition: 'background 150ms ease, border-color 150ms ease',
+        borderRadius: G.radiusSm,
+        background: 'transparent',
+        transition: 'background 120ms ease',
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = G.cardHover; e.currentTarget.style.borderColor = G.border; }}
-      onMouseLeave={e => { e.currentTarget.style.background = finding.read ? 'transparent' : 'rgba(99,102,241,0.04)'; e.currentTarget.style.borderColor = finding.read ? 'transparent' : G.borderLit; }}
+      onMouseEnter={e => { e.currentTarget.style.background = G.cardHover; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
     >
-      <div className="px-4 py-3.5 flex gap-3">
-        {/* Unread indicator */}
-        <div className="shrink-0 pt-1.5">
-          {!finding.read ? (
-            <div className="w-2 h-2 rounded-full bg-indigo-500" style={{ boxShadow: '0 0 6px rgba(99,102,241,0.6)' }} />
-          ) : (
-            <div className="w-2 h-2 rounded-full bg-white/[0.08]" />
-          )}
+      <div className="px-4 py-2 flex items-center gap-2.5">
+        {/* Unread dot */}
+        {!finding.read ? (
+          <div className="w-1.5 h-1.5 shrink-0 rounded-full bg-indigo-500" style={{ boxShadow: '0 0 4px rgba(99,102,241,0.5)' }} />
+        ) : (
+          <div className="w-1.5 h-1.5 shrink-0 rounded-full bg-white/[0.06]" />
+        )}
+
+        {/* Compact content */}
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-indigo-400/70 font-medium shrink-0">{finding.orbitTitle}</span>
+          <span className={`text-[12px] truncate ${finding.read ? 'text-slate-500' : 'text-slate-300'}`}>
+            {finding.content.replace(/[\n\r]+/g, ' ').slice(0, 80)}
+          </span>
         </div>
 
-        <div className="flex-1 min-w-0">
-          {/* Orbit source label */}
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] uppercase tracking-widest text-indigo-400/80 font-medium">{finding.orbitTitle}</span>
-            <span className="text-[10px] text-slate-600 flex items-center gap-1">
-              <Clock className="w-2.5 h-2.5" />
-              {timeAgo(finding.timestamp)}
-            </span>
-          </div>
-
-          {/* Finding content */}
-          <div className={`text-[13px] leading-relaxed line-clamp-3 ${finding.read ? 'text-slate-400' : 'text-slate-200'}`}>
-            {finding.content}
-          </div>
-
-          {/* Action hint */}
-          {finding.threadId && (
-            <div className="flex items-center gap-1 mt-2 text-[10px] text-slate-600 group-hover:text-indigo-400 transition-colors">
-              <MessageSquare className="w-3 h-3" />
-              Go to conversation
-              <ChevronRight className="w-3 h-3" />
-            </div>
-          )}
-        </div>
+        {/* Time + arrow */}
+        <span className="text-[9px] text-slate-600 shrink-0">{timeAgo(finding.timestamp)}</span>
+        <ChevronRight className="w-3 h-3 text-slate-700 group-hover:text-indigo-400 shrink-0 transition-colors" />
       </div>
     </motion.button>
   );
