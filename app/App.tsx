@@ -883,8 +883,13 @@ export default function App() {
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Orbit detection — natural language triggers ─────────────────────────
-    const orbitIntent = detectIntent(text.trim());
-    if (orbitIntent === 'ORBIT_WATCH') {
+    // Direct regex — doesn't compete with the intent parser's other intents.
+    // Catches: "watch X for me", "track bitcoin", "monitor apartment listings",
+    // "keep an eye on ETH price", "alert me when...", "notify me about..."
+    const orbitRegex = /\b(watch|track|monitor|keep\s+(an\s+)?eye\s+on|keep\s+tabs?\s+on|alert\s+me|notify\s+me|follow|stay\s+on\s+top\s+of|look\s+out\s+for|keep\s+watch(ing)?|check\s+on)\b/i;
+    const isOrbitTrigger = orbitRegex.test(text.trim()) && text.trim().split(/\s+/).length >= 3;
+
+    if (isOrbitTrigger) {
       // Create or get thread for this orbit
       let threadId = currentThreadIdRef.current;
       if (!threadId) {
