@@ -587,6 +587,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     }
 
     // If we have a frame, modify the last user message to include the image
+    // Groq vision API: text content FIRST, then image
     if (hasVision && messages.length > 1) {
       const lastIdx = messages.length - 1;
       const lastMsg = messages[lastIdx];
@@ -595,17 +596,18 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         messages[lastIdx] = {
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}` } },
             { type: 'text', text: textContent || 'What do you see? Describe what I\'m showing you and help me with it.' },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}` } },
           ],
         };
       }
     }
 
-    // Vision model when camera is active, text model otherwise
-    const model = hasVision ? 'llama-3.2-90b-vision-preview' : 'llama-3.3-70b-versatile';
+    // Vision models to try (11b is faster and more reliable on Groq)
+    const VISION_MODELS = ['llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview'];
+    const TEXT_MODEL = 'llama-3.3-70b-versatile';
 
-    try {
+    const callAI = async (model: string, timeoutMs: number) => {
       console.log(`[Voice] Requesting AI response (vision: ${hasVision}, model: ${model})...`);
       const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -613,13 +615,38 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         body: JSON.stringify({
           model,
           messages,
-          max_tokens: hasVision ? 300 : 180, // Vision needs more room to describe
+          max_tokens: hasVision ? 300 : 180,
           temperature: 0.65,
         }),
-      }, hasVision ? 20000 : 15000); // Vision takes longer
-      if (!res.ok) throw new Error(`AI HTTP ${res.status}`);
+      }, timeoutMs);
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`AI HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+      }
       const d = await res.json();
-      const reply = d.choices?.[0]?.message?.content?.trim() ?? 'Hmm, I couldn\'t get that. Try again?';
+      return d.choices?.[0]?.message?.content?.trim() ?? '';
+    };
+
+    try {
+      let reply = '';
+
+      if (hasVision) {
+        // Try vision models with fallback
+        for (const vm of VISION_MODELS) {
+          try {
+            reply = await callAI(vm, 25000);
+            if (reply) break;
+          } catch (err) {
+            console.warn(`[Voice] Vision model ${vm} failed:`, err);
+            // Continue to next model
+          }
+        }
+        if (!reply) throw new Error('All vision models failed');
+      } else {
+        reply = await callAI(TEXT_MODEL, 15000);
+      }
+
+      if (!reply) reply = 'Hmm, I couldn\'t get that. Try again?';
       console.log('[Voice] AI reply:', reply.slice(0, 100));
 
       // Store as text-only in history (don't accumulate base64 images in memory)
