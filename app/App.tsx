@@ -1550,7 +1550,15 @@ export default function App() {
            if (followUps.length === 0 && rawContent.length > 30 && secureApiKey) {
              generateFollowUps(processedInput, rawContent.slice(0, 500), secureApiKey).then(fups => {
                if (fups.length > 0) {
-                 setMessages(prev => prev.map(m => m.id === messageId ? { ...m, followUps: fups } : m));
+                 setMessages(prev => {
+                   const updated = prev.map(m => m.id === messageId ? { ...m, followUps: fups } : m);
+                   // Re-save so follow-ups persist across navigation
+                   const chatMsgs = updated.filter(
+                     (m: any) => (m.role === 'user' || m.role === 'assistant') && !m.isBrowserFeedback && m.content?.trim()
+                   );
+                   if (chatMsgs.length > 0) saveThreadMessages(activeThreadId, chatMsgs);
+                   return updated;
+                 });
                }
              });
            }
