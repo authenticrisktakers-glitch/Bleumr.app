@@ -935,9 +935,18 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           }
           stopSpeaking();
 
-          setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: '[Camera activated]' }]);
-          historyRef.current = [...historyRef.current, { role: 'user', content: 'I just turned on my camera. Describe what you see.' }];
-          await getAIResponse(historyRef.current, frame);
+          // Casual greeting instead of describing — user will ask when ready
+          const greetings = [
+            'What\'s good? What are we looking at?',
+            'Alright, I can see. What do you need help with?',
+            'I\'m here. Show me what you\'re working on.',
+            'Camera\'s on — what are we doing?',
+            'Got it. What can I help you with?',
+          ];
+          const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+          setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: greeting }]);
+          historyRef.current = [...historyRef.current, { role: 'assistant', content: greeting }];
+          if (!mutedRef.current) await speakText(greeting);
         }
       }
     } catch (err) {
@@ -1035,50 +1044,30 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       >
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
-          <div>
-            {/* LIVE badge — only in vision mode */}
-            {visionEnabled && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)' }}>
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span style={{ fontSize: 10, color: 'rgba(52,211,153,0.95)', fontWeight: 600, letterSpacing: '0.08em' }}>LIVE</span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2" style={visionEnabled ? { background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(12px)', borderRadius: 16, padding: '4px 8px' } : {}}>
+          <div />
+          <div className="flex items-center gap-1">
             {/* Vision toggle */}
             <button onClick={toggleCamera}
-              className="p-2 rounded-xl transition-colors hover:bg-white/8"
-              style={{ color: visionEnabled ? '#34d399' : '#475569' }} title={visionEnabled ? 'Turn off camera' : 'Turn on camera'}>
-              {visionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              className="p-2.5 rounded-full transition-all"
+              style={{ color: visionEnabled ? '#34d399' : 'rgba(255,255,255,0.35)' }}>
+              {visionEnabled ? <Eye className="w-[18px] h-[18px]" /> : <EyeOff className="w-[18px] h-[18px]" />}
             </button>
-            {/* Flip camera — only visible when camera is on */}
             {visionEnabled && (
               <button onClick={handleFlipCamera}
-                className="p-2 rounded-xl transition-colors hover:bg-white/8"
-                style={{ color: '#94a3b8' }} title="Flip camera">
-                <SwitchCamera className="w-4 h-4" />
+                className="p-2.5 rounded-full transition-all"
+                style={{ color: 'rgba(255,255,255,0.35)' }}>
+                <SwitchCamera className="w-[18px] h-[18px]" />
               </button>
             )}
-            <div className="w-px h-4 bg-white/10" />
-            <button onClick={() => setShowTranscript(v => !v)}
-              className="p-2 rounded-xl transition-colors hover:bg-white/8"
-              style={{ color: showTranscript ? '#818cf8' : '#475569' }} title={showTranscript ? 'Hide transcript' : 'Show transcript'}>
-              <MessageSquareText className="w-4 h-4" />
-            </button>
-            <button onClick={clearConversation}
-              className="p-2 rounded-xl transition-colors hover:bg-white/8"
-              style={{ color: '#475569' }} title="Clear conversation">
-              <RotateCcw className="w-4 h-4" />
-            </button>
             <button onClick={toggleMute}
-              className="p-2 rounded-xl transition-colors hover:bg-white/8"
-              style={{ color: muted ? '#ef4444' : '#475569' }} title={muted ? 'Unmute' : 'Mute'}>
-              {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              className="p-2.5 rounded-full transition-all"
+              style={{ color: muted ? '#ef4444' : 'rgba(255,255,255,0.35)' }}>
+              {muted ? <VolumeX className="w-[18px] h-[18px]" /> : <Volume2 className="w-[18px] h-[18px]" />}
             </button>
             <button onClick={handleClose}
-              className="p-2 rounded-xl transition-colors hover:bg-white/8"
-              style={{ color: '#475569' }}>
-              <X className="w-4 h-4" />
+              className="p-2.5 rounded-full transition-all"
+              style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <X className="w-[18px] h-[18px]" />
             </button>
           </div>
         </div>
@@ -1220,49 +1209,48 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         </div>
         )}
 
-        {/* ── Vision mode: invisible center tap-to-talk + status ──────────── */}
+        {/* ── Vision mode: full-screen tap area + minimal status ──────────── */}
         {visionEnabled && (
-          <div className="flex-1 flex flex-col items-center justify-center pointer-events-none">
-            {/* Status pill */}
+          <motion.div
+            className="flex-1 flex flex-col items-center justify-end pointer-events-none"
+            style={{ paddingBottom: turns.length > 0 ? '48vh' : '40vh' }}
+          >
+            {/* Listening — subtle pulsing ring */}
             <AnimatePresence mode="wait">
-              <motion.div
-                key={voiceState}
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="px-4 py-2 rounded-full mb-6"
-                style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)' }}
-              >
-                <p className="text-[11px] font-medium tracking-[0.18em] uppercase" style={{ color: voiceState === 'listening' ? '#ef4444' : voiceState === 'speaking' ? '#34d399' : 'rgba(255,255,255,0.5)' }}>
-                  {STATUS[voiceState]}
-                </p>
-              </motion.div>
+              {voiceState === 'listening' && (
+                <motion.div key="v-listen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex flex-col items-center gap-3">
+                  <motion.div className="w-14 h-14 rounded-full"
+                    style={{ border: '2px solid rgba(239,68,68,0.5)' }}
+                    animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }}
+                    transition={{ duration: 1.5, repeat: Infinity }} />
+                </motion.div>
+              )}
+              {voiceState === 'speaking' && (
+                <motion.div key="v-speak" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <motion.div className="w-3 h-3 rounded-full"
+                    style={{ background: '#34d399', boxShadow: '0 0 12px rgba(52,211,153,0.6)' }}
+                    animate={{ scale: [1, 1.4, 1] }}
+                    transition={{ duration: 0.8, repeat: Infinity }} />
+                </motion.div>
+              )}
+              {voiceState === 'processing' && (
+                <motion.div key="v-proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <motion.div className="w-3 h-3 rounded-full"
+                    style={{ background: '#f59e0b', boxShadow: '0 0 12px rgba(245,158,11,0.6)' }}
+                    animate={{ opacity: [0.4, 1, 0.4] }}
+                    transition={{ duration: 1.2, repeat: Infinity }} />
+                </motion.div>
+              )}
             </AnimatePresence>
 
-            {/* Invisible tap-to-talk button — large center hit area */}
+            {/* Full-screen invisible tap target */}
             <motion.div
               onClick={handleOrbClick}
-              className="pointer-events-auto cursor-pointer select-none flex items-center justify-center"
-              style={{ width: 200, height: 200, borderRadius: '50%' }}
-              whileTap={{ scale: 0.95 }}
-            >
-              {/* Subtle listening indicator */}
-              {voiceState === 'listening' && (
-                <motion.div
-                  className="w-16 h-16 rounded-full"
-                  style={{ background: 'rgba(239,68,68,0.25)', border: '2px solid rgba(239,68,68,0.5)', backdropFilter: 'blur(8px)' }}
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 1.2, repeat: Infinity }}
-                />
-              )}
-              {voiceState === 'idle' && (
-                <div className="w-16 h-16 rounded-full flex items-center justify-center"
-                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                  <p className="text-[9px] font-medium tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.4)' }}>TAP</p>
-                </div>
-              )}
-            </motion.div>
-          </div>
+              className="absolute inset-0 pointer-events-auto cursor-pointer"
+              whileTap={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
+            />
+          </motion.div>
         )}
 
         {/* ── Transcript ── */}
@@ -1273,19 +1261,18 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.3 }}
-              className={`relative min-h-0 w-full max-w-lg mx-auto px-4 ${visionEnabled ? 'absolute bottom-0 left-0 right-0 max-h-[45vh]' : 'flex-1'}`}
-              style={{ marginTop: visionEnabled ? 0 : -8 }}
+              className={`relative min-h-0 w-full max-w-lg mx-auto px-4 ${visionEnabled ? 'absolute bottom-0 left-0 right-0 max-h-[40vh]' : 'flex-1'}`}
+              style={{ marginTop: visionEnabled ? 0 : -8, paddingBottom: visionEnabled ? 'calc(env(safe-area-inset-bottom, 0px) + 12px)' : 0 }}
             >
-              {/* Fade-to-top gradient overlay */}
-              <div className="absolute top-0 left-0 right-0 h-12 z-10 pointer-events-none"
-                style={{ background: visionEnabled
-                  ? 'linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%)'
-                  : 'linear-gradient(to bottom, rgba(10,10,14,1) 0%, rgba(10,10,14,0.6) 50%, transparent 100%)' }} />
+              {/* Fade-to-top */}
+              {!visionEnabled && (
+                <div className="absolute top-0 left-0 right-0 h-12 z-10 pointer-events-none"
+                  style={{ background: 'linear-gradient(to bottom, rgba(10,10,14,1) 0%, rgba(10,10,14,0.6) 50%, transparent 100%)' }} />
+              )}
 
-              {/* Scrollable message thread */}
               <div
                 ref={scrollRef}
-                className="h-full overflow-y-auto flex flex-col gap-3 pt-10 pb-4"
+                className="h-full overflow-y-auto flex flex-col gap-2 pt-6 pb-4"
                 style={{ scrollbarWidth: 'none', maskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 100%)' }}
               >
                 <AnimatePresence initial={false}>
@@ -1297,25 +1284,37 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                       transition={{ duration: 0.25 }}
                       className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div
-                        className={`max-w-[80%] rounded-2xl px-4 py-3 ${turn.role === 'user' ? 'rounded-tr-md' : 'rounded-tl-md'}`}
-                        style={turn.role === 'user' ? {
-                          background: visionEnabled ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.18)',
-                          border: '1px solid rgba(99,102,241,0.25)',
-                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
-                        } : {
-                          background: visionEnabled ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.05)',
-                          border: visionEnabled ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.08)',
-                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
-                        }}
-                      >
-                        {turn.role === 'assistant' && (
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.15em] mb-1.5" style={{ color: 'rgba(52,211,153,0.8)' }}>JUMARI</p>
-                        )}
-                        <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.9)' }}>
-                          {turn.text}
-                        </p>
-                      </div>
+                      {visionEnabled ? (
+                        /* Vision mode — containerless, floating text with text shadow */
+                        <div className={`max-w-[85%] px-1 py-1 ${turn.role === 'user' ? 'text-right' : 'text-left'}`}>
+                          <p className="text-[14px] leading-relaxed font-medium"
+                            style={{
+                              color: turn.role === 'user' ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.95)',
+                              textShadow: '0 1px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9)',
+                            }}>
+                            {turn.text}
+                          </p>
+                        </div>
+                      ) : (
+                        /* Normal mode — bubble containers */
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-4 py-3 ${turn.role === 'user' ? 'rounded-tr-md' : 'rounded-tl-md'}`}
+                          style={turn.role === 'user' ? {
+                            background: 'rgba(99,102,241,0.18)',
+                            border: '1px solid rgba(99,102,241,0.25)',
+                          } : {
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                          }}
+                        >
+                          {turn.role === 'assistant' && (
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.15em] mb-1.5" style={{ color: 'rgba(52,211,153,0.8)' }}>JUMARI</p>
+                          )}
+                          <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.78)' }}>
+                            {turn.text}
+                          </p>
+                        </div>
+                      )}
                     </motion.div>
                   ))}
                   {voiceState === 'processing' && liveText && (
@@ -1323,13 +1322,15 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       className="flex justify-end"
                     >
-                      <div className="max-w-[80%] rounded-2xl rounded-tr-md px-4 py-3"
-                        style={{
-                          background: visionEnabled ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.12)',
+                      <div className={`max-w-[80%] px-4 py-3 ${visionEnabled ? '' : 'rounded-2xl rounded-tr-md'}`}
+                        style={visionEnabled ? {} : {
+                          background: 'rgba(99,102,241,0.12)',
                           border: '1px solid rgba(99,102,241,0.18)',
-                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
                         }}>
-                        <p className="text-[14px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>{liveText}</p>
+                        <p className="text-[14px] leading-relaxed" style={{
+                          color: 'rgba(255,255,255,0.45)',
+                          textShadow: visionEnabled ? '0 1px 8px rgba(0,0,0,0.8)' : 'none',
+                        }}>{liveText}</p>
                       </div>
                     </motion.div>
                   )}
