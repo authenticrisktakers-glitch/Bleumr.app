@@ -990,33 +990,54 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       transition={{ duration: 0.22 }}
       className="fixed inset-0 z-[99999] flex flex-col items-center justify-center"
       style={{
-        background: 'radial-gradient(ellipse at 50% 40%, rgba(22,22,32,0.98) 0%, rgba(10,10,14,0.99) 55%, rgba(4,4,6,1) 100%)',
-        backdropFilter: 'blur(48px)',
+        background: visionEnabled ? 'transparent' : 'radial-gradient(ellipse at 50% 40%, rgba(22,22,32,0.98) 0%, rgba(10,10,14,0.99) 55%, rgba(4,4,6,1) 100%)',
+        backdropFilter: visionEnabled ? 'none' : 'blur(48px)',
       }}
-      /* Click outside the inner panel → close */
       onClick={handleClose}
     >
-      {/* Ambient glows — two color-reactive orbs */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full"
-          animate={{ scale: [1, 1.18, 1], opacity: [0.14, 0.26, 0.14] }}
-          transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
-          style={{ background: `radial-gradient(circle, hsla(${theme.hue},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
-        <motion.div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full"
-          animate={{ scale: [1, 1.22, 1], opacity: [0.10, 0.20, 0.10] }}
-          transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 2.5 }}
-          style={{ background: `radial-gradient(circle, hsla(${(theme.hue + 30) % 360},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
-      </div>
+      {/* ── Fullscreen camera background (only when vision is on) ──────── */}
+      {visionEnabled && (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="absolute inset-0 w-full h-full z-0"
+          style={{ objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none' }}
+        />
+      )}
+
+      {/* Ambient glows — only in normal (non-vision) mode */}
+      {!visionEnabled && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full"
+            animate={{ scale: [1, 1.18, 1], opacity: [0.14, 0.26, 0.14] }}
+            transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+            style={{ background: `radial-gradient(circle, hsla(${theme.hue},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
+          <motion.div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full"
+            animate={{ scale: [1, 1.22, 1], opacity: [0.10, 0.20, 0.10] }}
+            transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 2.5 }}
+            style={{ background: `radial-gradient(circle, hsla(${(theme.hue + 30) % 360},${theme.sat},${theme.light},1) 0%, transparent 70%)`, filter: 'blur(90px)' }} />
+        </div>
+      )}
 
       {/* Inner panel — clicks don't bubble up to backdrop */}
       <div
-        className="relative flex flex-col w-full h-full"
+        className="relative flex flex-col w-full h-full z-10"
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
-          <div />
-          <div className="flex items-center gap-2">
+          <div>
+            {/* LIVE badge — only in vision mode */}
+            {visionEnabled && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)' }}>
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span style={{ fontSize: 10, color: 'rgba(52,211,153,0.95)', fontWeight: 600, letterSpacing: '0.08em' }}>LIVE</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2" style={visionEnabled ? { background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(12px)', borderRadius: 16, padding: '4px 8px' } : {}}>
             {/* Vision toggle */}
             <button onClick={toggleCamera}
               className="p-2 rounded-xl transition-colors hover:bg-white/8"
@@ -1027,7 +1048,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             {visionEnabled && (
               <button onClick={handleFlipCamera}
                 className="p-2 rounded-xl transition-colors hover:bg-white/8"
-                style={{ color: '#475569' }} title="Flip camera">
+                style={{ color: '#94a3b8' }} title="Flip camera">
                 <SwitchCamera className="w-4 h-4" />
               </button>
             )}
@@ -1055,7 +1076,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           </div>
         </div>
 
-        {/* ── Mercury sphere — upper area ─────────────────────────── */}
+        {/* ── Mercury sphere — only in normal (non-vision) mode ─────────── */}
+        {!visionEnabled && (
         <div className="flex flex-col items-center gap-3 pointer-events-none" style={{ paddingTop: turns.length > 0 ? '8vh' : '20vh', transition: 'padding-top 0.5s ease' }}>
 
           {/* Status */}
@@ -1120,8 +1142,6 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                 boxShadow: `0 0 ${40 + volume * 60}px ${20 + volume * 40}px hsla(${theme.hue},${theme.sat},${theme.light},${0.15 + volume * 0.25})`,
               }}
             />
-
-            {/* No orbit ring — state communicated by sphere displacement only */}
 
             {/* Listening ripples */}
             <AnimatePresence>
@@ -1191,44 +1211,54 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             : 'click anywhere outside to exit · tap to speak'}
           </p>
         </div>
+        )}
 
-        {/* ── Camera preview — small corner pip when vision is active ──────── */}
-        <AnimatePresence>
-          {visionEnabled && (
+        {/* ── Vision mode: invisible center tap-to-talk + status ──────────── */}
+        {visionEnabled && (
+          <div className="flex-1 flex flex-col items-center justify-center pointer-events-none">
+            {/* Status pill */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={voiceState}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="px-4 py-2 rounded-full mb-6"
+                style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)' }}
+              >
+                <p className="text-[11px] font-medium tracking-[0.18em] uppercase" style={{ color: voiceState === 'listening' ? '#ef4444' : voiceState === 'speaking' ? '#34d399' : 'rgba(255,255,255,0.5)' }}>
+                  {STATUS[voiceState]}
+                </p>
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Invisible tap-to-talk button — large center hit area */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.25 }}
-              className="absolute z-20"
-              style={{
-                bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-                right: 24,
-                width: 120,
-                height: 160,
-                borderRadius: 16,
-                overflow: 'hidden',
-                border: '2px solid rgba(52,211,153,0.4)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.3)',
-              }}
+              onClick={handleOrbClick}
+              className="pointer-events-auto cursor-pointer select-none flex items-center justify-center"
+              style={{ width: 200, height: 200, borderRadius: '50%' }}
+              whileTap={{ scale: 0.95 }}
             >
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none' }}
-              />
-              {/* Live indicator dot */}
-              <div className="absolute top-2 right-2 flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span style={{ fontSize: 9, color: 'rgba(52,211,153,0.9)', fontWeight: 600, letterSpacing: '0.05em' }}>LIVE</span>
-              </div>
+              {/* Subtle listening indicator */}
+              {voiceState === 'listening' && (
+                <motion.div
+                  className="w-16 h-16 rounded-full"
+                  style={{ background: 'rgba(239,68,68,0.25)', border: '2px solid rgba(239,68,68,0.5)', backdropFilter: 'blur(8px)' }}
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 1.2, repeat: Infinity }}
+                />
+              )}
+              {voiceState === 'idle' && (
+                <div className="w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
+                  <p className="text-[9px] font-medium tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.4)' }}>TAP</p>
+                </div>
+              )}
             </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
 
-        {/* ── Transcript — below sphere, full-width chat thread with fade-to-top ── */}
+        {/* ── Transcript ── */}
         <AnimatePresence>
           {showTranscript && turns.length > 0 && (
             <motion.div
@@ -1236,12 +1266,14 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.3 }}
-              className="relative flex-1 min-h-0 w-full max-w-lg mx-auto px-4"
-              style={{ marginTop: -8 }}
+              className={`relative min-h-0 w-full max-w-lg mx-auto px-4 ${visionEnabled ? 'absolute bottom-0 left-0 right-0 max-h-[45vh]' : 'flex-1'}`}
+              style={{ marginTop: visionEnabled ? 0 : -8 }}
             >
               {/* Fade-to-top gradient overlay */}
               <div className="absolute top-0 left-0 right-0 h-12 z-10 pointer-events-none"
-                style={{ background: 'linear-gradient(to bottom, rgba(10,10,14,1) 0%, rgba(10,10,14,0.6) 50%, transparent 100%)' }} />
+                style={{ background: visionEnabled
+                  ? 'linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%)'
+                  : 'linear-gradient(to bottom, rgba(10,10,14,1) 0%, rgba(10,10,14,0.6) 50%, transparent 100%)' }} />
 
               {/* Scrollable message thread */}
               <div
@@ -1261,17 +1293,19 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                       <div
                         className={`max-w-[80%] rounded-2xl px-4 py-3 ${turn.role === 'user' ? 'rounded-tr-md' : 'rounded-tl-md'}`}
                         style={turn.role === 'user' ? {
-                          background: 'rgba(99,102,241,0.18)',
+                          background: visionEnabled ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.18)',
                           border: '1px solid rgba(99,102,241,0.25)',
+                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
                         } : {
-                          background: 'rgba(255,255,255,0.05)',
-                          border: '1px solid rgba(255,255,255,0.08)',
+                          background: visionEnabled ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.05)',
+                          border: visionEnabled ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.08)',
+                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
                         }}
                       >
                         {turn.role === 'assistant' && (
                           <p className="text-[9px] font-semibold uppercase tracking-[0.15em] mb-1.5" style={{ color: 'rgba(52,211,153,0.8)' }}>JUMARI</p>
                         )}
-                        <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.78)' }}>
+                        <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.9)' }}>
                           {turn.text}
                         </p>
                       </div>
@@ -1283,7 +1317,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                       className="flex justify-end"
                     >
                       <div className="max-w-[80%] rounded-2xl rounded-tr-md px-4 py-3"
-                        style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                        style={{
+                          background: visionEnabled ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.12)',
+                          border: '1px solid rgba(99,102,241,0.18)',
+                          backdropFilter: visionEnabled ? 'blur(16px)' : 'none',
+                        }}>
                         <p className="text-[14px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>{liveText}</p>
                       </div>
                     </motion.div>
