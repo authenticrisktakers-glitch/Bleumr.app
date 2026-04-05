@@ -72,8 +72,20 @@ const SOURCE_FILES = [
   // ── Web Designer ──
   'app/components/WebDesignerPage.tsx',
 
-  // ── Code Lab ──
+  // ── Code Lab (Code Bleu) ──
   'app/components/CodingPage.tsx',
+  'app/components/coding/FileTreePanel.tsx',
+  'app/components/coding/ConsolePanel.tsx',
+  'app/components/coding/DiffView.tsx',
+  'app/services/CodeAgents/index.ts',
+  'app/services/Preacher.ts',
+  'app/services/UsageBudget.ts',
+  'app/services/CodeBleu/BleumrConfig.ts',
+  'app/services/CodeBleu/PlanMode.ts',
+  'app/services/CodeBleu/CodeSessionStorage.ts',
+  'app/services/CodeBleu/CodeMemory.ts',
+  'app/services/CodeBleu/HooksService.ts',
+  'app/services/CodeBleu/SkillsService.ts',
 
   // ── Trading Dashboard ──
   'app/components/TradingDashboard.tsx',
@@ -146,12 +158,45 @@ const CHANGELOG = `
 - CORS proxy: Hardened from 2 to 5 proxies with 6s timeouts + first-party Supabase edge function cors-proxy
 - Supabase keys: Centralized in SupabaseConfig.ts — removed hardcoded keys from 6 service files
 - Microphone: Replaced alert() with inline error UI, retry button, Permissions API pre-check
+- Code Bleu: Real token-by-token streaming via Groq SSE (replaced fake typewriter animation)
+- Code Bleu: streamGroqResponse() — SSE parser with tool_call accumulation by index, usage capture
+- Code Bleu: 3-tier 400 error fallback — full tools → core tools → text-only with anti-narration prompt
+- Code Bleu: pickTools() expanded — no-project gets 11 tools (was 3), ask_user removed from no-project
+- Code Bleu: forceToolUse — smart question detection, action requests like "make it better" force tool use
+- Code Bleu: Closing response safety net — post-loop API call if last message isn't from assistant
+- Code Bleu: Activity grouping — 3+ consecutive activities auto-collapse into "Wrote N files" summary bar
+- Code Bleu: Thinking indicator dedup — renderItems filters to only show the LAST thinking indicator
+- Code Bleu: CodeBleuAvatar — inline SVG diamond face with blinking eyes, swirl/breathe/idle animations
+- Code Bleu: Only ONE avatar at a time (last assistant message), all others get small white dots
+- Code Bleu: Sub-agents renamed — Diamond (search), Troy (lint), Dominic (refactor), colored name dots
+- Code Bleu: extractSuggestions() — requires ? mark to avoid false positives on closing statements
+- Code Bleu: System prompts rewritten — never say "Done.", never narrate tool calls, always explain changes
+- Preacher: File snapshot safety system — auto-backs up files before agent modifies them, rollback support
+- UsageBudget: Solar Energy token tracking — 1 SE = 1000 tokens, daily budgets by tier, real Groq token costs
+- CodeAgents: Sub-agent system — FileScout (Diamond), LintCheck (Troy), Refactor (Dominic), TestGen
+- New components: FileTreePanel (project file tree sidebar), ConsolePanel (terminal output), DiffView (unified diff)
+- Code Bleu: SHELL_CMD dead code fix — empty first branch silently swallowed ~35 tools (git, npm, build, file ops), now all tools reach real implementation
+- Code Bleu: 7 tool handlers fixed — list_directory, check_url, create_directory, file_exists, find_files, get_project_tree, get_project_info now show proper activity UI (removeThinking/addMessage/thinkingId)
+- Code Bleu: Race condition fix — agentRunningRef prevents concurrent sendToAgent calls when handleInterrupt fires mid-loop
+- Code Bleu: "Done." fallback replaced — empty model responses now produce activity-aware summary ("wrote N files and read M files") instead of lazy "Done."
+- Code Bleu: attachedImages stale closure fixed — added to sendToAgent dependency array
+- Code Bleu: framer-motion import fix — CodingPage.tsx and WorkspacePage.tsx changed from 'framer-motion' to 'motion/react'
+- Code Bleu: Shell injection hardened — shellSafe() strips backticks, $, backslash from all SHELL_CMD interpolations + search/find handlers
+- Code Bleu: stream_options added — streaming API calls now include stream_options.include_usage for real token tracking
+- Code Bleu: pickTools gaps closed — git_stash/merge/clone, stop_process, file_info, analyze_dependencies, check_url, import_image now reachable
+- Code Bleu: Dead code removed — unused abortRef (AbortController), redundant ternary, tool count corrected to 55
+- Code Bleu: BLEUMR.md — project-level instruction file loaded at session start (BLEUMR.md, .bleumr/config.md), injected into system prompt
+- Code Bleu: Plan Mode — toggle between Plan (read-only research) and Execute (full tool access), blocked destructive tools in plan mode
+- Code Bleu: Session Persistence — sessions saved to localStorage, survive page reloads, 20 session cap
+- Code Bleu: Auto-Memory — BrainMemory adapter extracts build commands, error fixes, user preferences across sessions
+- Code Bleu: Hooks — pre/post edit automation parsed from ## Hooks section in BLEUMR.md, runs after_write/before_command/on_error
+- Code Bleu: Skills — custom /commands parsed from ## Skills section in BLEUMR.md, expand to full prompts in agentic loop
 
 ## App Feature Map (JUMARI should know every feature she has)
 - Chat: Main conversational AI with web search, image gen, vision, memory, multi-model fallback
 - Voice Chat: Speech-to-text + Deepgram TTS, 3D animated sphere, female voice
 - Web Designer: AI text-to-website builder, 65 templates, live preview, responsive testing, ZIP export
-- Code Lab: Multi-language IDE, syntax highlighting, live execution, GitHub/SO/NPM/MDN integrations
+- Code Bleu: AI coding agent with 55 tools, real streaming, sub-agents (Diamond/Troy/Dominic), BLEUMR.md project config, Plan/Execute modes, persistent sessions, auto-memory, hooks (after_write/before_command), custom /skills, Preacher rollback, Solar Energy budget, animated diamond avatar, activity grouping, race-condition-safe interrupt
 - Trading Dashboard: Live crypto prices (Binance/Coinbase/Kraken), portfolio tracking, alerts, buy/sell execution
 - Calendar: Month/week/day/agenda views, drag-to-create, 7 colors, chat integration for scheduling
 - Projects: File browser (Electron), file preview, send-to-chat analysis

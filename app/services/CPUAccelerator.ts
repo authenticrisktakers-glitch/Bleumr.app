@@ -30,16 +30,16 @@ export const performanceTier: PerformanceTier =
 export const starCount =
   performanceTier === 'high' ? 120 : performanceTier === 'medium' ? 70 : 35;
 
-/** Target FPS — mobile caps at 30fps to save battery */
+/** Target FPS — mobile caps at 40fps (smooth enough, won't overheat) */
 export const targetFPS: number =
-  isMobileDevice ? 30 : (performanceTier === 'high' ? 60 : 45);
+  isMobileDevice ? 40 : (performanceTier === 'high' ? 60 : 45);
 
 /** Frame interval in ms for throttled animation loops */
 export const frameIntervalMs: number = 1000 / targetFPS;
 
 /** Animation frame budget in ms (lower = smoother on fast machines) */
 export const frameBudgetMs =
-  performanceTier === 'high' ? 16 : performanceTier === 'medium' ? 24 : 33;
+  performanceTier === 'high' ? 16 : performanceTier === 'medium' ? 22 : 28;
 
 /** Whether to enable blur-heavy glass effects */
 export const enableGlassBlur = performanceTier !== 'low';

@@ -165,12 +165,26 @@ contextBridge.exposeInMainWorld('orbit', {
   // ── Filesystem helpers (used by ElectronRPC) ─────────────────────────────
   readFile: (filePath: string) =>
     ipcRenderer.invoke('orbit:fs:readFile', filePath),
+  readFileBase64: (filePath: string) =>
+    ipcRenderer.invoke('orbit:fs:readFileBase64', filePath),
   writeFile: (filePath: string, content: string) =>
     ipcRenderer.invoke('orbit:fs:writeFile', filePath, content),
   listDir: (dirPath: string) =>
     ipcRenderer.invoke('orbit:fs:listDir', dirPath),
   checkFileExists: (filePath: string) =>
     ipcRenderer.invoke('orbit:fs:checkFileExists', filePath),
+  mkdir: (dirPath: string) =>
+    ipcRenderer.invoke('orbit:fs:mkdir', dirPath),
+  createProject: (projectName: string) =>
+    ipcRenderer.invoke('orbit:fs:createProject', projectName),
+
+  // ── Native dialog (folder picker, etc.) ───────────────────────────────────
+  showOpenDialog: (options?: Record<string, unknown>) =>
+    ipcRenderer.invoke('orbit:dialog:showOpenDialog', options || { properties: ['openDirectory'] }),
+
+  // ── Shell command execution (for Code Bleu agent) ─────────────────────────
+  shellExec: (command: string, cwd?: string) =>
+    ipcRenderer.invoke('orbit:shell:exec', command, cwd),
 
   // ── Auto-updater ─────────────────────────────────────────────────────────
   updater: {
@@ -191,6 +205,10 @@ contextBridge.exposeInMainWorld('orbit', {
   // ── CORS-free fetch (routes through main process, no CORS restrictions) ───
   proxyFetch: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) =>
     ipcRenderer.invoke('orbit:proxyFetch', url, options),
+
+  // ── Image fetch (returns base64 via main process, bypasses Cloudflare) ───
+  fetchImage: (imageUrl: string) =>
+    ipcRenderer.invoke('orbit:fetchImage', imageUrl),
 
   // ── Model invocation stubs ────────────────────────────────────────────────
   // These return empty values until a provider key is configured.

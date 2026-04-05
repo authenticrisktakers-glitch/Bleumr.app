@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Volume2, VolumeX, RotateCcw, MessageSquareText } from 'lucide-react';
-import { BLEUMR_VOICE_CONTEXT } from '../services/BleumrLore';
+import { X, Volume2, VolumeX, RotateCcw, MessageSquareText, Eye, EyeOff, SwitchCamera } from 'lucide-react';
+import { BLEUMR_VOICE_CONTEXT, BLEUMR_VISION_CONTEXT } from '../services/BleumrLore';
+import { startCamera, stopCamera, captureFrame, flipCamera, type VisionFrame } from '../services/VisionService';
 import * as THREE from 'three';
 import { trackError } from '../services/Analytics';
 
@@ -372,6 +373,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const [volume, setVolume]         = useState(0); // 0–1, from analyser
   const [showTranscript, setShowTranscript] = useState(true);
   const [micError, setMicError] = useState<'denied' | 'unavailable' | null>(null);
+  const [visionEnabled, setVisionEnabled] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('environment');
 
   const voiceStateRef = useRef<VoiceState>('idle');
   const mutedRef      = useRef(false);
@@ -389,12 +392,16 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const audioElemRef  = useRef<HTMLAudioElement | null>(null);
   const audioBlobUrlRef  = useRef<string | null>(null);
   const audioCtxSpkRef   = useRef<AudioContext | null>(null);
+  const videoRef       = useRef<HTMLVideoElement>(null);
+  const lastFrameRef   = useRef<VisionFrame | null>(null);
+  const visionEnabledRef = useRef(false);
   const apiKeyRef     = useRef(apiKey);
   const deepgramKeyRef = useRef(deepgramKey);
   const systemPromptRef = useRef(systemPrompt);
   apiKeyRef.current = apiKey;
   deepgramKeyRef.current = deepgramKey;
   systemPromptRef.current = systemPrompt;
+  visionEnabledRef.current = visionEnabled;
 
   const setVS = (s: VoiceState) => { voiceStateRef.current = s; setVoiceState(s); };
 
@@ -419,6 +426,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     closedRef.current = true;
     cancelAnimationFrame(animRef.current);
     stopSpeaking();
+    stopCamera(); // Release camera on close
     streamRef.current?.getTracks().forEach(t => t.stop());
     audioCtxRef.current?.close().catch(() => {});
     streamRef.current   = null;
@@ -556,36 +564,67 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     }
   }, [stopSpeaking]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Get AI response ────────────────────────────────────────────────────────
-  const getAIResponse = useCallback(async (history: { role: string; content: string }[]) => {
+  // ── Get AI response (supports vision when camera is active) ─────────────
+  const getAIResponse = useCallback(async (history: { role: string; content: any }[], frame?: VisionFrame | null) => {
     if (closedRef.current) return;
     setVS('processing');
     setLiveText('');
 
     const key = apiKeyRef.current;
     const sp = systemPromptRef.current;
+    const hasVision = !!frame;
+
+    const voiceRules = 'VOICE RULES: 1–3 sentences max. Be DIRECT — answer first, elaborate second. No markdown. No filler. Speak naturally but get to the point. Perfect spelling and grammar always.';
+    const visionBlock = hasVision ? `\n\n${BLEUMR_VISION_CONTEXT}` : '';
     const sysPrompt = sp
-      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 1–3 sentences max. Be DIRECT — answer first, elaborate second. No markdown. No filler. Speak naturally but get to the point. Perfect spelling and grammar always.`
-      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\nVOICE RULES: 1–3 sentences max. Be DIRECT and concise — answer the question immediately, no preamble, no filler phrases. Speak naturally like a real person talking but always get to the point fast. Never say "that's a great question" or "I'd be happy to help." Just answer. Perfect spelling and grammar always — never misspell a word.`;
+      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}${visionBlock}\n\n${voiceRules}`
+      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}${visionBlock}\n\n${voiceRules} Never say "that's a great question" or "I'd be happy to help." Just answer.`;
+
+    // Build messages — inject image into the last user message when vision is active
+    const messages: any[] = [{ role: 'system', content: sysPrompt }];
+    for (const msg of history) {
+      messages.push(msg);
+    }
+
+    // If we have a frame, modify the last user message to include the image
+    if (hasVision && messages.length > 1) {
+      const lastIdx = messages.length - 1;
+      const lastMsg = messages[lastIdx];
+      if (lastMsg.role === 'user') {
+        const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : '';
+        messages[lastIdx] = {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}` } },
+            { type: 'text', text: textContent || 'What do you see? Describe what I\'m showing you and help me with it.' },
+          ],
+        };
+      }
+    }
+
+    // Vision model when camera is active, text model otherwise
+    const model = hasVision ? 'llama-3.2-90b-vision-preview' : 'llama-3.3-70b-versatile';
 
     try {
-      console.log('[Voice] Requesting AI response...');
+      console.log(`[Voice] Requesting AI response (vision: ${hasVision}, model: ${model})...`);
       const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'system', content: sysPrompt }, ...history],
-          max_tokens: 180,
+          model,
+          messages,
+          max_tokens: hasVision ? 300 : 180, // Vision needs more room to describe
           temperature: 0.65,
         }),
-      }, 15000);
+      }, hasVision ? 20000 : 15000); // Vision takes longer
       if (!res.ok) throw new Error(`AI HTTP ${res.status}`);
       const d = await res.json();
       const reply = d.choices?.[0]?.message?.content?.trim() ?? 'Hmm, I couldn\'t get that. Try again?';
       console.log('[Voice] AI reply:', reply.slice(0, 100));
 
-      historyRef.current = [...history, { role: 'assistant', content: reply }];
+      // Store as text-only in history (don't accumulate base64 images in memory)
+      const lastUserText = history.length > 0 ? (typeof history[history.length - 1].content === 'string' ? history[history.length - 1].content : '[image + speech]') : '';
+      historyRef.current = [...history.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : lastUserText })), { role: 'assistant', content: reply }];
       setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: reply }]);
 
       if (!mutedRef.current) await speakText(reply);
@@ -665,7 +704,13 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     setLiveText(userText);
     setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
     historyRef.current = [...historyRef.current, { role: 'user', content: userText }];
-    await getAIResponse(historyRef.current);
+
+    // Capture a frame if camera is active — send vision + speech together
+    const frame = visionEnabledRef.current && videoRef.current
+      ? captureFrame(videoRef.current)
+      : null;
+
+    await getAIResponse(historyRef.current, frame);
   }, [getAIResponse]);
 
   // ── Ref-based callback for recorder.onstop (avoids stale closures) ────────
@@ -799,9 +844,87 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (next) stopSpeaking();
   };
 
+  // ── Camera toggle — starts camera, auto-describes scene on first activation ─
+  const toggleCamera = useCallback(async () => {
+    if (visionEnabled) {
+      // Turn off
+      stopCamera();
+      setVisionEnabled(false);
+      return;
+    }
+
+    try {
+      const stream = await startCamera(cameraFacing);
+      setVisionEnabled(true);
+
+      // Attach stream to video element — wait for it to be ready
+      const waitForVideo = () => new Promise<void>((resolve) => {
+        const check = () => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(() => {});
+            // Wait for video to have actual data before capturing
+            const onReady = () => {
+              videoRef.current?.removeEventListener('loadeddata', onReady);
+              resolve();
+            };
+            videoRef.current.addEventListener('loadeddata', onReady);
+            // Safety timeout in case event doesn't fire
+            setTimeout(resolve, 2000);
+          } else {
+            // videoRef not mounted yet (React render pending), retry
+            requestAnimationFrame(check);
+          }
+        };
+        check();
+      });
+
+      await waitForVideo();
+
+      // Auto-describe: capture first frame and send to vision model
+      if (videoRef.current) {
+        const frame = captureFrame(videoRef.current);
+        if (frame) {
+          // Stop any current listening/speaking so the describe doesn't conflict
+          if (voiceStateRef.current === 'listening') {
+            recorderRef.current?.stop();
+            streamRef.current?.getTracks().forEach(t => t.stop());
+            cancelAnimationFrame(animRef.current);
+          }
+          stopSpeaking();
+
+          setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: '[Camera activated]' }]);
+          historyRef.current = [...historyRef.current, { role: 'user', content: 'I just turned on my camera. Describe what you see.' }];
+          await getAIResponse(historyRef.current, frame);
+        }
+      }
+    } catch (err) {
+      console.warn('[Vision] Camera failed:', err);
+      setVisionEnabled(false);
+    }
+  }, [visionEnabled, cameraFacing, getAIResponse, stopSpeaking]);
+
+  // ── Camera flip — switch front/rear ───────────────────────────────────────
+  const handleFlipCamera = useCallback(async () => {
+    if (!visionEnabled) return;
+    try {
+      const newFacing = cameraFacing === 'user' ? 'environment' : 'user';
+      const stream = await flipCamera(cameraFacing);
+      setCameraFacing(newFacing);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[Vision] Flip camera failed:', err);
+    }
+  }, [visionEnabled, cameraFacing]);
+
   // ── Clear conversation ────────────────────────────────────────────────────
   const clearConversation = () => {
     stopSpeaking();
+    stopCamera();
+    setVisionEnabled(false);
     setTurns([]);
     historyRef.current = [];
     setLiveText('');
@@ -859,6 +982,21 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         <div className="flex items-center justify-between px-6 py-4" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
           <div />
           <div className="flex items-center gap-2">
+            {/* Vision toggle */}
+            <button onClick={toggleCamera}
+              className="p-2 rounded-xl transition-colors hover:bg-white/8"
+              style={{ color: visionEnabled ? '#34d399' : '#475569' }} title={visionEnabled ? 'Turn off camera' : 'Turn on camera'}>
+              {visionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            </button>
+            {/* Flip camera — only visible when camera is on */}
+            {visionEnabled && (
+              <button onClick={handleFlipCamera}
+                className="p-2 rounded-xl transition-colors hover:bg-white/8"
+                style={{ color: '#475569' }} title="Flip camera">
+                <SwitchCamera className="w-4 h-4" />
+              </button>
+            )}
+            <div className="w-px h-4 bg-white/10" />
             <button onClick={() => setShowTranscript(v => !v)}
               className="p-2 rounded-xl transition-colors hover:bg-white/8"
               style={{ color: showTranscript ? '#818cf8' : '#475569' }} title={showTranscript ? 'Hide transcript' : 'Show transcript'}>
@@ -1018,6 +1156,42 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             : 'click anywhere outside to exit · tap to speak'}
           </p>
         </div>
+
+        {/* ── Camera preview — small corner pip when vision is active ──────── */}
+        <AnimatePresence>
+          {visionEnabled && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.25 }}
+              className="absolute z-20"
+              style={{
+                bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+                right: 24,
+                width: 120,
+                height: 160,
+                borderRadius: 16,
+                overflow: 'hidden',
+                border: '2px solid rgba(52,211,153,0.4)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.3)',
+              }}
+            >
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none' }}
+              />
+              {/* Live indicator dot */}
+              <div className="absolute top-2 right-2 flex items-center gap-1">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span style={{ fontSize: 9, color: 'rgba(52,211,153,0.9)', fontWeight: 600, letterSpacing: '0.05em' }}>LIVE</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── Transcript — below sphere, full-width chat thread with fade-to-top ── */}
         <AnimatePresence>

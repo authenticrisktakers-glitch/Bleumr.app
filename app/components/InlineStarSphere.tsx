@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, memo } from 'react';
+import React, { useEffect, useRef, memo, useCallback } from 'react';
 import { cpuCores, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
 
 interface InlineStarSphereProps {
@@ -6,15 +6,15 @@ interface InlineStarSphereProps {
   size?: number;
   /** When false, renders a tiny static grey dot — no canvas, no RAF loop */
   active?: boolean;
+  /** Enable touch/pointer drag to spin the sphere (mobile PWA idle state) */
+  interactive?: boolean;
 }
 
-// Star count scales with rendered size AND cpu tier — no reason to run
-// 4000 stars for a 32px avatar. Formula: ~8 stars per CSS pixel of diameter,
-// capped by CPU tier.
+// Star count scales with rendered size AND cpu tier
 function starsForSize(size: number): number {
   const base = Math.round(size * size * 0.7);
   const tierCap = isMobileDevice
-    ? (cpuCores >= 6 ? 1000 : 500)
+    ? (cpuCores >= 6 ? 1250 : 650)
     : (cpuCores >= 8 ? 4000 : cpuCores >= 4 ? 2000 : 800);
   return Math.min(base, tierCap);
 }
@@ -23,9 +23,69 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
   className = '',
   size = 192,
   active = true,
+  interactive = false,
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Interactive drag state (refs survive re-renders, no reflow) ──────────
+  const dragActive = useRef(false);
+  const lastPointer = useRef({ x: 0, y: 0 });
+  const manualYaw = useRef(0);
+  const manualPitch = useRef(0);
+  const velocityYaw = useRef(0);
+  const velocityPitch = useRef(0);
+  const lastDragTime = useRef(0);
+  const interacting = useRef(false);
+  // Smoothed velocity (averages last few drags to prevent jitter)
+  const velSamplesY = useRef<number[]>([]);
+  const velSamplesP = useRef<number[]>([]);
+
+  // ── Pointer handlers ────────────────────────────────────────────────────
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!interactive) return;
+    dragActive.current = true;
+    interacting.current = true;
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    velocityYaw.current = 0;
+    velocityPitch.current = 0;
+    velSamplesY.current = [];
+    velSamplesP.current = [];
+    lastDragTime.current = performance.now();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [interactive]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragActive.current) return;
+    const dx = e.clientX - lastPointer.current.x;
+    const dy = e.clientY - lastPointer.current.y;
+    const now = performance.now();
+    const dt = Math.max(1, now - lastDragTime.current);
+
+    const sensitivity = 3.5 / size;
+    manualYaw.current += dx * sensitivity;
+    manualPitch.current += dy * sensitivity;
+    manualPitch.current = Math.max(-1.2, Math.min(1.2, manualPitch.current));
+
+    // Collect velocity samples for smooth momentum on release
+    const vy = (dx * sensitivity) / dt * 16;
+    const vp = (dy * sensitivity) / dt * 16;
+    velSamplesY.current.push(vy);
+    velSamplesP.current.push(vp);
+    if (velSamplesY.current.length > 4) velSamplesY.current.shift();
+    if (velSamplesP.current.length > 4) velSamplesP.current.shift();
+
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    lastDragTime.current = now;
+  }, [size]);
+
+  const onPointerUp = useCallback(() => {
+    dragActive.current = false;
+    // Average the last few velocity samples for smooth momentum
+    const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    velocityYaw.current = avg(velSamplesY.current);
+    velocityPitch.current = avg(velSamplesP.current);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,7 +134,7 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     setupCanvas();
 
     let animationFrameId: number;
-    let isVisible = true; // assume visible until observer says otherwise
+    let isVisible = true;
     let lastFrameTime = 0;
 
     const render = (timestamp: number) => {
@@ -83,8 +143,10 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
         return;
       }
 
-      // FPS throttle
-      if (timestamp - lastFrameTime < frameIntervalMs) {
+      // ── FPS strategy: full speed during interaction, throttled when idle ──
+      const isActive = interactive && interacting.current;
+      const throttleMs = isActive ? 0 : frameIntervalMs;
+      if (throttleMs > 0 && timestamp - lastFrameTime < throttleMs) {
         animationFrameId = requestAnimationFrame(render);
         return;
       }
@@ -92,6 +154,24 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
 
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;
+
+      // ── Momentum decay (smooth coasting after release) ────────────────
+      if (interactive && !dragActive.current && interacting.current) {
+        const friction = 0.965;          // longer coast than before
+        manualYaw.current += velocityYaw.current;
+        manualPitch.current += velocityPitch.current;
+        manualPitch.current = Math.max(-1.2, Math.min(1.2, manualPitch.current));
+        velocityYaw.current *= friction;
+        velocityPitch.current *= friction;
+
+        // Gently return pitch to upright when coasting
+        manualPitch.current *= 0.997;
+
+        // End interaction once momentum dies
+        if (Math.abs(velocityYaw.current) < 0.00003 && Math.abs(velocityPitch.current) < 0.00003) {
+          interacting.current = false;
+        }
+      }
 
       ctx.clearRect(0, 0, size, size);
 
@@ -103,21 +183,34 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
         ctx.globalCompositeOperation = 'lighter';
         const perspective = R * 2.5;
 
+        // Auto-rotation slows while user is interacting
+        const autoWeight = interacting.current ? 0.12 : 1;
+        const autoRot = elapsedMs * rotationSpeedPerMs * autoWeight;
+
+        const pitchAngle = interactive ? manualPitch.current : 0;
+        const cosPitch = Math.cos(pitchAngle);
+        const sinPitch = Math.sin(pitchAngle);
+
         for (let i = 0; i < numStars; i++) {
           const s = stars[i];
-          const currentTheta = s.theta - elapsedMs * rotationSpeedPerMs;
-          const x = R * s.sinPhi * Math.cos(currentTheta);
-          const y = R * s.cosPhi;
-          const z = R * s.sinPhi * Math.sin(currentTheta);
+          const currentTheta = s.theta - autoRot + (interactive ? manualYaw.current : 0);
+
+          const x0 = R * s.sinPhi * Math.cos(currentTheta);
+          const y0 = R * s.cosPhi;
+          const z0 = R * s.sinPhi * Math.sin(currentTheta);
+
+          const x = x0;
+          const y = y0 * cosPitch - z0 * sinPitch;
+          const z = y0 * sinPitch + z0 * cosPitch;
 
           if (z > -R * 0.15) {
             const scaleProjected = perspective / (perspective - z);
             const projectedX = centerX + x * scaleProjected;
             const projectedY = centerY + y * scaleProjected;
             const zRatio = z / R;
-            const dx = Math.abs(projectedX - centerX);
-            const dy = Math.abs(projectedY - centerY);
-            const edgeRatio = Math.min(1, (dx + dy) / (R * 1.2));
+            const edgeDx = Math.abs(projectedX - centerX);
+            const edgeDy = Math.abs(projectedY - centerY);
+            const edgeRatio = Math.min(1, (edgeDx + edgeDy) / (R * 1.2));
             let opacity = Math.min(1, Math.max(0, zRatio + 0.3));
             if (edgeRatio > 0.8) opacity = Math.min(1, opacity + (edgeRatio - 0.8) * 1.5);
             let finalSize = s.size * scaleProjected;
@@ -144,7 +237,6 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
       animationFrameId = requestAnimationFrame(render);
     };
 
-    // IntersectionObserver — pause RAF when scrolled out of view
     const observer = new IntersectionObserver(
       ([entry]) => { isVisible = entry.isIntersecting; },
       { threshold: 0 }
@@ -157,9 +249,8 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
       cancelAnimationFrame(animationFrameId);
       observer.disconnect();
     };
-  }, [size]);
+  }, [size, interactive]);
 
-  // Inactive — no canvas, no RAF. Just a tiny static grey dot.
   if (!active) {
     return (
       <div
@@ -177,8 +268,19 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     >
       <canvas
         ref={canvasRef}
-        style={{ width: size, height: size, willChange: 'contents', transform: 'translateZ(0)' }}
-        className="block pointer-events-none"
+        onPointerDown={interactive ? onPointerDown : undefined}
+        onPointerMove={interactive ? onPointerMove : undefined}
+        onPointerUp={interactive ? onPointerUp : undefined}
+        onPointerCancel={interactive ? onPointerUp : undefined}
+        style={{
+          width: size,
+          height: size,
+          willChange: 'contents',
+          transform: 'translateZ(0)',
+          touchAction: interactive ? 'none' : undefined,
+          cursor: interactive ? 'grab' : undefined,
+        }}
+        className={`block ${interactive ? '' : 'pointer-events-none'}`}
       />
     </div>
   );

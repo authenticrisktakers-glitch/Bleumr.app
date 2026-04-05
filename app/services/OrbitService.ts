@@ -198,6 +198,17 @@ class OrbitServiceClass {
     return false;
   }
 
+  /** Delete all orbits linked to a thread — used when thread is deleted */
+  deleteByThreadId(threadId: string): boolean {
+    const before = this.orbits.length;
+    this.orbits = this.orbits.filter(o => o.threadId !== threadId);
+    if (this.orbits.length !== before) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
   pause(id: string): Orbit | null {
     return this.update(id, { status: 'paused' });
   }
@@ -215,6 +226,21 @@ class OrbitServiceClass {
   addFinding(orbitId: string, content: string, meta?: Record<string, any>): OrbitFinding | null {
     const orbit = this.getById(orbitId);
     if (!orbit) return null;
+
+    // Deduplicate: skip if new content is too similar to the most recent finding
+    if (orbit.findings.length > 0) {
+      const lastContent = orbit.findings[0].content; // [0] is most recent (unshift'd)
+      const newPrefix = content.trim().slice(0, 100).toLowerCase();
+      const lastPrefix = lastContent.trim().slice(0, 100).toLowerCase();
+      if (newPrefix === lastPrefix) return null;
+      // Skip if >80% character overlap in first 100 chars
+      let matchCount = 0;
+      for (let i = 0; i < Math.min(newPrefix.length, lastPrefix.length); i++) {
+        if (newPrefix[i] === lastPrefix[i]) matchCount++;
+      }
+      const similarity = matchCount / Math.max(newPrefix.length, lastPrefix.length);
+      if (similarity > 0.8) return null;
+    }
 
     const finding: OrbitFinding = {
       id: generateFindingId(),

@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   safeStorage,
   WebContentsView,
@@ -10,6 +11,7 @@ import { join } from 'path'
 import {
   readFileSync,
   writeFileSync,
+  mkdirSync,
   existsSync,
   readdirSync,
 } from 'fs'
@@ -242,6 +244,12 @@ app.whenReady().then(() => {
   session.setPermissionCheckHandler((_webContents, permission) => {
     return ['media', 'audioCapture', 'mediaKeySystem'].includes(permission)
   })
+
+  // Override User-Agent — Electron's default UA contains "Electron/" which
+  // triggers Cloudflare bot-detection (403) on sites like Pollinations.ai
+  session.setUserAgent(
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  )
 
   // electron-vite sets ELECTRON_RENDERER_URL in dev mode
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -523,6 +531,27 @@ ipcMain.handle('orbit:fs:readFile', (_e, filePath: string) => {
   }
 })
 
+// Read a file as base64 (for images, binary files)
+ipcMain.handle('orbit:fs:readFileBase64', (_e, filePath: string) => {
+  if (!isPathAllowed(filePath)) {
+    console.warn('[FS] Blocked base64 read attempt:', filePath)
+    return null
+  }
+  try {
+    const buffer = readFileSync(filePath)
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+    const mimeMap: Record<string, string> = {
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+      ico: 'image/x-icon', bmp: 'image/bmp', pdf: 'application/pdf',
+    }
+    const contentType = mimeMap[ext] ?? 'application/octet-stream'
+    return { base64: buffer.toString('base64'), contentType, size: buffer.length }
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('orbit:fs:writeFile', (_e, filePath: string, content: string) => {
   if (!isPathAllowed(filePath)) {
     console.warn('[FS] Blocked write attempt:', filePath)
@@ -542,7 +571,12 @@ ipcMain.handle('orbit:fs:listDir', (_e, dirPath: string) => {
     return []
   }
   try {
-    return readdirSync(dirPath)
+    const entries = readdirSync(dirPath, { withFileTypes: true })
+    return entries.map(entry => ({
+      name: entry.name,
+      path: join(dirPath, entry.name),
+      isDir: entry.isDirectory(),
+    }))
   } catch {
     return []
   }
@@ -551,6 +585,72 @@ ipcMain.handle('orbit:fs:listDir', (_e, dirPath: string) => {
 ipcMain.handle('orbit:fs:checkFileExists', (_e, filePath: string) => {
   if (!isPathAllowed(filePath)) return false
   return existsSync(filePath)
+})
+
+ipcMain.handle('orbit:fs:mkdir', (_e, dirPath: string) => {
+  if (!isPathAllowed(dirPath)) {
+    console.warn('[FS] Blocked mkdir attempt:', dirPath)
+    return { success: false, reason: 'Path not permitted' }
+  }
+  try {
+    mkdirSync(dirPath, { recursive: true })
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, reason: err?.message ?? 'mkdir failed' }
+  }
+})
+
+ipcMain.handle('orbit:fs:createProject', (_e, projectName: string) => {
+  // Create project folder on user's Desktop
+  const desktopPath = join(app.getPath('desktop'), projectName)
+  if (existsSync(desktopPath)) {
+    return { success: true, path: desktopPath, existed: true }
+  }
+  try {
+    mkdirSync(desktopPath, { recursive: true })
+    return { success: true, path: desktopPath, existed: false }
+  } catch (err: any) {
+    return { success: false, path: '', reason: err?.message ?? 'Failed to create project folder' }
+  }
+})
+
+// Native folder / file picker dialog
+ipcMain.handle('orbit:dialog:showOpenDialog', async (_e, options: Record<string, unknown>) => {
+  if (!mainWindow) return { canceled: true, filePaths: [] }
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, options as any)
+    return result
+  } catch {
+    return { canceled: true, filePaths: [] }
+  }
+})
+
+// ── Shell command execution (for Code Bleu agent) ──────────────────────────
+ipcMain.handle('orbit:shell:exec', async (_e, command: string, cwd?: string) => {
+  // Safety: only allow execution within an opened project directory
+  if (cwd && !isPathAllowed(cwd)) {
+    return { success: false, stdout: '', stderr: 'Working directory not permitted', code: 1 }
+  }
+
+  const { exec } = await import('child_process')
+
+  return new Promise((resolve) => {
+    const opts: any = {
+      cwd: cwd || undefined,
+      timeout: 60000, // 60 second timeout
+      maxBuffer: 1024 * 1024, // 1MB output buffer
+      shell: true,
+    }
+
+    exec(command, opts, (error: any, stdout: string, stderr: string) => {
+      resolve({
+        success: !error,
+        stdout: stdout?.toString()?.slice(0, 50000) ?? '',
+        stderr: stderr?.toString()?.slice(0, 10000) ?? '',
+        code: error?.code ?? 0,
+      })
+    })
+  })
 })
 
 // Auto-update: install now and restart
@@ -592,6 +692,31 @@ ipcMain.handle(
       return { ok: res.ok, status: res.status, text }
     } catch (err: any) {
       return { ok: false, status: 0, text: err.message || 'Proxy fetch failed' }
+    }
+  },
+)
+
+// ── Fetch image as base64 (avoids Cloudflare bot-detection in renderer) ─────
+ipcMain.handle(
+  'orbit:fetchImage',
+  async (_e, imageUrl: string) => {
+    try {
+      const parsed = new URL(imageUrl)
+      if (parsed.protocol !== 'https:') {
+        return { ok: false, error: 'Only HTTPS allowed' }
+      }
+      const res = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      const buffer = await res.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString('base64')
+      const contentType = res.headers.get('content-type') || 'image/jpeg'
+      return { ok: true, base64, contentType }
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Image fetch failed' }
     }
   },
 )

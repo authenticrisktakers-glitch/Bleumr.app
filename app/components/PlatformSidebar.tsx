@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle, Gamepad2 } from 'lucide-react';
+import { Search, Edit3, Trash2, MessageSquare, Globe, X, UserPlus, Pencil, Settings, LayoutGrid, Layers3, Puzzle } from 'lucide-react';
 import { JumariOrbitIcon } from './OrbitIcon';
 import { ChatThreadMeta } from '../services/ChatStorage';
 import { UserProfile, getInitials, getFirstName } from '../services/UserProfile';
@@ -77,6 +77,7 @@ export function PlatformSidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredThread, setHoveredThread] = useState<string | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
@@ -121,11 +122,12 @@ export function PlatformSidebar({
 
     return (
       <div
-        className={`relative group flex items-center px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+        className={`relative group flex items-center px-3 py-2.5 rounded-lg cursor-pointer transition-colors active:scale-[0.98] ${
           isActive
             ? 'bg-white/10 text-white'
             : 'text-slate-400 hover:bg-white/5 hover:text-white'
         }`}
+        style={{ minHeight: 42 }}
         onClick={() => {
           onSelectThread(thread.id);
           onClose();
@@ -153,7 +155,11 @@ export function PlatformSidebar({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDeleteThread(thread.id);
+              if (orbitThreadIds?.has(thread.id)) {
+                setPendingDeleteId(thread.id);
+              } else {
+                onDeleteThread(thread.id);
+              }
             }}
             className="ml-2 p-1 rounded hover:bg-white/10 text-slate-600 hover:text-red-400 transition-colors shrink-0"
             title="Delete chat"
@@ -180,12 +186,13 @@ export function PlatformSidebar({
       />
 
       <div
-        className="fixed top-0 left-0 h-full w-[260px] z-40 flex flex-col text-slate-300 font-sans animate-in slide-in-from-left-8 duration-300 ease-out"
-        style={{ ...sidebarStyle, paddingTop: 'env(safe-area-inset-top)' }}
+        className="fixed top-0 left-0 h-full w-[280px] z-40 flex flex-col text-slate-300 font-sans animate-in slide-in-from-left-8 duration-300 ease-out"
+        style={{ ...sidebarStyle, paddingTop: 'env(safe-area-inset-top)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        onClick={e => e.stopPropagation()}
       >
 
       {/* Header: Search + New Chat + Close */}
-      <div className="p-3 flex items-center gap-2 border-b border-white/5">
+      <div className="px-3 pt-3 pb-2 flex items-center gap-2 border-b border-white/5">
         <div className="relative flex-1">
           <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600" />
           <input
@@ -193,23 +200,24 @@ export function PlatformSidebar({
             value={searchQuery}
             onChange={handleSearchChange}
             placeholder="Search chats"
-            className="w-full text-[13px] text-white placeholder-slate-600 py-2 pl-6 pr-2 outline-none bg-transparent border-none"
+            className="w-full text-[13px] text-white placeholder-slate-600 py-2.5 pl-6 pr-2 outline-none bg-transparent border-none"
           />
         </div>
         <button
-          onClick={() => { onNewChat(); onClose(); }}
-          className="p-2 rounded-full hover:bg-white/10 transition-colors shrink-0"
-          style={{ background: 'rgba(255,255,255,0.06)' }}
+          onClick={(e) => { e.stopPropagation(); onNewChat(); onClose(); }}
+          className="p-2.5 rounded-xl hover:bg-white/10 active:scale-95 transition-all shrink-0"
+          style={{ background: 'rgba(255,255,255,0.06)', minWidth: 40, minHeight: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           title="New chat"
         >
-          <Edit3 className="w-4 h-4 text-slate-300" />
+          <Edit3 className="w-[18px] h-[18px] text-slate-300" />
         </button>
         <button
-          onClick={onClose}
-          className="p-2 rounded-full hover:bg-white/10 transition-colors shrink-0 text-slate-500 hover:text-white"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          className="p-2.5 rounded-xl hover:bg-white/10 active:scale-95 transition-all shrink-0 text-slate-500 hover:text-white"
+          style={{ minWidth: 40, minHeight: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           title="Close sidebar"
         >
-          <X className="w-4 h-4" />
+          <X className="w-[18px] h-[18px]" />
         </button>
       </div>
 
@@ -223,18 +231,15 @@ export function PlatformSidebar({
             { label: 'Scheduler',     icon: <LayoutGrid className="w-4 h-4 shrink-0" />, color: 'text-blue-400',    hoverBg: 'rgba(96,165,250,0.12)',  action: () => { onOpenScheduler?.(); onClose(); }, badge: 0 },
             { label: 'Mission Team',  icon: <Layers3 className="w-4 h-4 shrink-0" />, color: 'text-violet-400',  hoverBg: 'rgba(139,92,246,0.12)',  action: () => { onOpenWorkspace?.(); onClose(); }, badge: 0 },
             { label: 'Orbits',        icon: <JumariOrbitIcon size={16} className="shrink-0" animated />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenOrbits?.(); onClose(); }, badge: orbitUnreadCount, count: orbitTotalCount },
-            { label: 'BLEU BASE GG', icon: <Gamepad2 className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenGameGen?.(); onClose(); }, badge: 0 },
             ...(IS_ELECTRON ? [{ label: 'Apps',          icon: <Puzzle className="w-4 h-4 shrink-0" />, color: 'text-indigo-400',  hoverBg: 'rgba(99,102,241,0.12)',  action: () => { onOpenApps?.(); onClose(); }, badge: 0 }] : []),
           ] as {label:string; icon:React.ReactNode; color:string; hoverBg:string; action:()=>void; badge:number; count?:number}[]).map(item => (
             <button
               key={item.label}
               onClick={item.action}
-              className={`flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium ${item.color} rounded-lg text-left w-full`}
-              style={{ transition: 'background 80ms ease, transform 80ms ease' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = item.hoverBg; (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
-              onMouseDown={e => { (e.currentTarget as HTMLElement).style.transform = 'scale(0.98)'; }}
-              onMouseUp={e => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
+              className={`flex items-center gap-2.5 px-3 py-3 text-[13px] font-medium ${item.color} rounded-lg text-left w-full active:scale-[0.98]`}
+              style={{ transition: 'background 80ms ease, transform 80ms ease', minHeight: 44 }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = item.hoverBg; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
             >
               {item.icon}
               {item.label}
@@ -305,7 +310,8 @@ export function PlatformSidebar({
         {/* Settings row */}
         <button
           onClick={() => { onOpenSettings(); onClose(); }}
-          className="w-full flex items-center gap-2.5 px-4 py-3 text-[13px] text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-left border-b border-white/5"
+          className="w-full flex items-center gap-2.5 px-4 py-3.5 text-[13px] text-slate-400 hover:text-white hover:bg-white/5 active:scale-[0.98] transition-all text-left border-b border-white/5"
+          style={{ minHeight: 46 }}
         >
           <Settings className="w-3.5 h-3.5 text-slate-500 shrink-0" />
           Settings
@@ -350,6 +356,44 @@ export function PlatformSidebar({
         </button>
       </div>
     </div>
+
+    {/* ── Orbit delete confirmation dialog ── */}
+    {pendingDeleteId && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        onClick={() => setPendingDeleteId(null)}
+      >
+        <div
+          className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-6 max-w-sm mx-4 shadow-2xl"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-3 mb-3">
+            <JumariOrbitIcon size={20} className="text-indigo-400" animated />
+            <h3 className="text-white text-sm font-semibold">Active Orbit</h3>
+          </div>
+          <p className="text-slate-400 text-[13px] leading-relaxed mb-5">
+            This thread has an active Orbit. Deleting will stop the orbit and all information will be lost.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setPendingDeleteId(null)}
+              className="px-4 py-2 rounded-lg text-[13px] text-slate-300 hover:bg-white/10 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onDeleteThread(pendingDeleteId);
+                setPendingDeleteId(null);
+              }}
+              className="px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors"
+            >
+              Delete Anyway
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

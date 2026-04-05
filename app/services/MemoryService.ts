@@ -6,13 +6,13 @@
 interface Memory {
   id: string;
   fact: string;
-  category: 'preference' | 'fact' | 'goal' | 'context' | 'skill';
+  category: 'preference' | 'fact' | 'goal' | 'context' | 'skill' | 'personality' | 'routine';
   timestamp: number;
   source: string; // short excerpt of what triggered this memory
 }
 
 const MEMORY_KEY = 'bleumr_memories_v2';
-const MAX_MEMORIES = 120;
+const MAX_MEMORIES = 200;
 
 class MemoryService {
   private _load(): Memory[] {
@@ -39,9 +39,20 @@ class MemoryService {
     const memories = this._load();
     // Deduplicate: skip if very similar fact already exists
     const normalized = fact.toLowerCase().trim();
+    const normalizedWords = new Set(normalized.split(/\s+/).filter(w => w.length > 3));
     const exists = memories.some(m => {
       const sim = m.fact.toLowerCase().trim();
-      return sim === normalized || (sim.includes(normalized.slice(0, 30)) && normalized.length > 20);
+      if (sim === normalized) return true;
+      if (sim.includes(normalized) || normalized.includes(sim)) return true;
+      // Word overlap: if >70% of significant words match, it's a duplicate
+      if (normalizedWords.size > 2) {
+        const existingWords = new Set(sim.split(/\s+/).filter(w => w.length > 3));
+        let overlap = 0;
+        for (const w of normalizedWords) { if (existingWords.has(w)) overlap++; }
+        const overlapRatio = overlap / Math.max(normalizedWords.size, existingWords.size);
+        if (overlapRatio > 0.7) return true;
+      }
+      return false;
     });
     if (exists) return;
 
@@ -54,6 +65,23 @@ class MemoryService {
     };
     memories.unshift(entry);
     this._save(memories);
+  }
+
+  /** Add a memory extracted from AI's <memory> tag output */
+  addFromAI(fact: string, category?: Memory['category']) {
+    const cat = category || this._inferCategory(fact);
+    this.add(fact, cat, 'AI-extracted');
+  }
+
+  /** Infer category from fact text */
+  private _inferCategory(fact: string): Memory['category'] {
+    const lower = fact.toLowerCase();
+    if (/\b(like|love|hate|prefer|enjoy|dislike|favorite)\b/.test(lower)) return 'preference';
+    if (/\b(goal|want to|trying to|plan to|working on|aim)\b/.test(lower)) return 'goal';
+    if (/\b(every day|always|usually|routine|morning|night|weekly)\b/.test(lower)) return 'routine';
+    if (/\b(personality|introvert|extrovert|shy|outgoing|humor|vibe)\b/.test(lower)) return 'personality';
+    if (/\b(know how|can |skill|proficient|experience with)\b/.test(lower)) return 'skill';
+    return 'fact';
   }
 
   delete(id: string) {
@@ -96,6 +124,23 @@ class MemoryService {
     if (relevant.length === 0) return '';
     const lines = relevant.map(m => `- ${m.fact}`).join('\n');
     return `\n\n## What I remember about you\n${lines}\n\nUse this context naturally — don't announce that you remember it, just use it.`;
+  }
+
+  /** Returns a categorized block of ALL memories for full context injection */
+  getFormattedSummary(): string {
+    const all = this._load();
+    if (all.length === 0) return '';
+    const grouped: Record<string, string[]> = {};
+    for (const m of all) {
+      const cat = m.category || 'fact';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(m.fact);
+    }
+    let block = '\n\n## Everything I remember about you\n';
+    for (const [cat, facts] of Object.entries(grouped)) {
+      block += `**${cat}:** ${facts.join('; ')}\n`;
+    }
+    return block;
   }
 
   /**

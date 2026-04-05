@@ -72,6 +72,70 @@ interface PlatformViewProps {
   onNavigateInternal?: (url: string) => void;
 }
 
+// ── Progressive reveal hook — reveals text with conversational pacing ───────
+function useProgressiveReveal(fullText: string, active: boolean) {
+  const [len, setLen] = useState(0);
+  const fullRef = useRef(fullText);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevId = useRef('');
+
+  fullRef.current = fullText;
+
+  useEffect(() => {
+    if (!active) { setLen(fullText.length); return; }
+    // Already caught up — snap to full length (new tokens will re-trigger)
+    if (len >= fullText.length) return;
+
+    const advance = () => {
+      setLen(prev => {
+        const target = fullRef.current;
+        const tLen = target.length;
+        if (prev >= tLen) { timerRef.current = null; return tLen; }
+
+        // Reveal a natural chunk (15–30 chars)
+        const chunk = target.slice(prev, Math.min(prev + 28, tLen));
+
+        // Look for pause points in this chunk
+        const sentEnd = chunk.search(/[.!?]\s/);
+        const newline = chunk.indexOf('\n');
+        const clause  = chunk.search(/[,;:]\s/);
+        const dash    = chunk.search(/—\s?/);
+
+        let nextEnd: number;
+        let delay: number;
+
+        if (sentEnd >= 0 && sentEnd < 26) {
+          // Sentence end — reveal up to it, then pause like taking a breath
+          nextEnd = prev + sentEnd + 2;
+          delay = 220;
+        } else if (newline >= 0 && newline < 26) {
+          nextEnd = prev + newline + 1;
+          delay = 160;
+        } else if (dash >= 0 && dash < 26) {
+          nextEnd = prev + dash + 2;
+          delay = 180;
+        } else if (clause >= 0 && clause < 26) {
+          nextEnd = prev + clause + 2;
+          delay = 70;
+        } else {
+          // No punctuation — just flow
+          nextEnd = Math.min(prev + 28, tLen);
+          delay = 25;
+        }
+
+        timerRef.current = setTimeout(advance, delay);
+        return nextEnd;
+      });
+    };
+
+    timerRef.current = setTimeout(advance, 25);
+    return () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
+  }, [fullText.length, active]); // re-run when new tokens arrive or active changes
+
+  // When fully caught up and more text arrives, it naturally continues
+  return active ? fullText.slice(0, len) : fullText;
+}
+
 // Memoised message row — only re-renders if its own content changes
 const MessageRow = memo(function MessageRow({
   msg,
@@ -92,33 +156,34 @@ const MessageRow = memo(function MessageRow({
   const [copied, setCopied] = React.useState(false);
   const [feedbackGiven, setFeedbackGiven] = React.useState<'up' | 'down' | null>(null);
 
+  // ── Compute display text (before hooks — never conditional) ────────────
+  let rawDisplay = msg.content;
+  if (msg.role === 'assistant' && msg.action) {
+    rawDisplay = msg.action?.action === 'reply' ? (msg.action.message ?? '') : '';
+  }
+  rawDisplay = (rawDisplay || '')
+    .replace(/```json\s*[\s\S]*?\s*```/, '')
+    .replace(/<pdf>[\s\S]*?<\/pdf>/gi, '')
+    .trim();
+
+  // Progressive reveal — called unconditionally (Rules of Hooks)
+  const isRevealing = isLatestAssistant && msg.role === 'assistant' && rawDisplay.length > 0;
+  const displayContent = useProgressiveReveal(rawDisplay, isRevealing);
+
   const handleCopy = () => {
     navigator.clipboard.writeText(msg.content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
-    }).catch(() => {
-      // Clipboard write denied (PWA without user gesture) — silent fail
-    });
+    }).catch(() => {});
   };
 
+  // ── Early-exit renders (after all hooks) ───────────────────────────────
   if (msg.role === 'system' && !msg.isBrowserFeedback) return null;
   if (msg.role === 'system') {
     if (!msg.content.includes('Result:') && !msg.content.includes('Auto-corrected')) return null;
   }
-
-  let displayContent = msg.content;
-  if (msg.role === 'assistant' && msg.action) {
-    if (msg.action.action === 'reply') {
-      displayContent = msg.action.message;
-    } else {
-      return null;
-    }
-  }
-  if (!displayContent) return null;
-  displayContent = displayContent.replace(/```json\s*[\s\S]*?\s*```/, '').trim();
-  // Strip PDF tags so raw JSON isn't shown in chat
-  displayContent = displayContent.replace(/<pdf>[\s\S]*?<\/pdf>/gi, '').trim();
-  if (!displayContent) return null;
+  if (!rawDisplay) return null;
+  if (msg.role === 'assistant' && msg.action && msg.action.action !== 'reply') return null;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -206,15 +271,18 @@ const MessageRow = memo(function MessageRow({
                         </a>
                       );
                     },
-                    code({ node, className, children, ...props }: any) {
-                      const language = /language-(\w+)/.exec(className || '')?.[1] ?? '';
-                      const isBlock = !props.inline;
-                      const code = String(children).replace(/\n$/, '');
-                      const isHtml = isBlock && (language === 'html' || (language === '' && code.trimStart().startsWith('<!DOCTYPE') || code.trimStart().startsWith('<html')));
+                    /* Block code is always rendered as <pre><code> by react-markdown.
+                       Override `pre` to style fenced blocks, and `code` only handles inline. */
+                    pre({ children, ...props }: any) {
+                      // Extract inner <code> element props
+                      const codeEl = (children as any)?.props;
+                      const codeStr = String(codeEl?.children ?? children).replace(/\n$/, '');
+                      const language = /language-(\w+)/.exec(codeEl?.className || '')?.[1] ?? '';
+                      const isHtml = language === 'html' || (language === '' && (codeStr.trimStart().startsWith('<!DOCTYPE') || codeStr.trimStart().startsWith('<html')));
                       if (isHtml) {
                         const openInBrowser = () => {
                           const tmpPath = `/tmp/orbit-preview-${Date.now()}.html`;
-                          (window as any).orbit?.writeFile?.(tmpPath, code).then(() => {
+                          (window as any).orbit?.writeFile?.(tmpPath, codeStr).then(() => {
                             (window as any).orbit?.browser?.open?.(`file://${tmpPath}`);
                           });
                         };
@@ -230,13 +298,16 @@ const MessageRow = memo(function MessageRow({
                                 Open in Browser
                               </button>
                             </div>
-                            <pre className="overflow-x-auto p-4 text-xs text-slate-300 font-mono leading-relaxed"><code>{code}</code></pre>
+                            <pre className="overflow-x-auto p-4 text-xs text-slate-300 font-mono leading-relaxed"><code>{codeStr}</code></pre>
                           </div>
                         );
                       }
-                      return isBlock
-                        ? <pre className="overflow-x-auto rounded-lg bg-white/5 border border-white/10 p-4"><code className={className} {...props}>{children}</code></pre>
-                        : <code className="text-indigo-300 bg-white/5 px-1 py-0.5 rounded text-sm" {...props}>{children}</code>;
+                      return <pre className="overflow-x-auto rounded-lg bg-white/5 border border-white/10 p-4" {...props}>{children}</pre>;
+                    },
+                    code({ className, children, ...props }: any) {
+                      /* In react-markdown v10 this component only receives inline <code>.
+                         Block code is handled by the `pre` override above. */
+                      return <code className="text-indigo-300 bg-white/5 px-1.5 py-0.5 rounded text-[0.85em]" {...props}>{children}</code>;
                     },
                   }}
                 >{displayContent}</ReactMarkdown>
@@ -637,11 +708,12 @@ export const PlatformView = memo(function PlatformView({
           paddingBottom: IS_ELECTRON ? undefined : 'env(safe-area-inset-bottom, 0px)',
         }}>
         {/* Top Header */}
-        <div className="flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: IS_ELECTRON ? 80 : 16, paddingTop: IS_ELECTRON ? 16 : 8, paddingBottom: 8, minHeight: IS_ELECTRON ? 64 : undefined }}>
+        <div className="flex items-center justify-between pr-4 shrink-0" style={{ paddingLeft: IS_ELECTRON ? 80 : 16, paddingTop: IS_ELECTRON ? 16 : 8, paddingBottom: 8, minHeight: IS_ELECTRON ? 64 : undefined, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <div className="flex items-center">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors z-50 text-slate-400 hover:text-white"
+              className="p-2.5 rounded-xl hover:bg-white/10 active:scale-95 transition-all z-50 text-slate-400 hover:text-white"
+              style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               title="Toggle Sidebar"
             >
               <Menu className="w-6 h-6" />
@@ -726,7 +798,7 @@ export const PlatformView = memo(function PlatformView({
                   onClick={IS_ELECTRON ? onOpenBrowser : undefined}
                   title={IS_ELECTRON ? "Open Browser Workspace" : "Bleumr AI"}
                 >
-                  <InlineStarSphere size={typeof window !== 'undefined' && window.innerWidth < 640 ? 140 : 220} />
+                  <InlineStarSphere size={typeof window !== 'undefined' && window.innerWidth < 640 ? 140 : 220} interactive={!IS_ELECTRON} />
                 </motion.div>
               </motion.div>
             )}
@@ -940,31 +1012,31 @@ export const PlatformView = memo(function PlatformView({
                     onChange={handleImageAttach}
                   />
 
-                  <div className="absolute right-2 z-10 flex items-center gap-1">
+                  <div className="absolute right-1.5 z-10 flex items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => imageInputRef.current?.click()}
                       disabled={isAgentWorking}
-                      className="p-1.5 rounded-full disabled:opacity-50 transition-colors text-white/30 hover:text-sky-300 hover:bg-white/5"
+                      className="p-2 rounded-full disabled:opacity-50 active:scale-90 transition-all text-white/30 hover:text-sky-300 hover:bg-white/5"
                       title="Attach image"
                     >
-                      <ImagePlus className="w-4 h-4" />
+                      <ImagePlus className="w-[18px] h-[18px]" />
                     </button>
                     <button
                       type="button"
                       onClick={() => onOpenVoiceChat?.()}
                       disabled={isAgentWorking}
-                      className="p-1.5 rounded-full disabled:opacity-50 transition-colors text-white/30 hover:text-indigo-400 hover:bg-indigo-400/10"
+                      className="p-2 rounded-full disabled:opacity-50 active:scale-90 transition-all text-white/30 hover:text-indigo-400 hover:bg-indigo-400/10"
                       title="Voice chat"
                     >
-                      <Mic className="w-4 h-4" />
+                      <Mic className="w-[18px] h-[18px]" />
                     </button>
                     <button
                       type="submit"
                       disabled={(!input.trim() && !attachedImage) || isAgentWorking}
-                      className="p-1.5 text-white/30 hover:text-sky-300 hover:bg-white/5 rounded-full disabled:opacity-25 transition-colors"
+                      className="p-2 text-white/30 hover:text-sky-300 hover:bg-white/5 rounded-full disabled:opacity-25 active:scale-90 transition-all"
                     >
-                      <Send className="w-4 h-4" />
+                      <Send className="w-[18px] h-[18px]" />
                     </button>
                   </div>
                 </form>
@@ -985,7 +1057,7 @@ export const PlatformView = memo(function PlatformView({
       {miniBrowserUrl && (
         <div className="fixed inset-0 z-[99999] flex flex-col" style={{ background: '#0a0a0a' }}>
           {/* Top bar */}
-          <div className="flex items-center gap-3 px-3 shrink-0" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingBottom: 8, background: '#111118', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="flex items-center gap-3 shrink-0" style={{ paddingTop: IS_ELECTRON ? 42 : 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingLeft: IS_ELECTRON ? 84 : 12, paddingRight: 12, paddingBottom: 8, background: '#111118', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             {/* Close button */}
             <button
               onClick={() => { setMiniBrowserUrl(null); setMiniBrowserLoading(false); }}

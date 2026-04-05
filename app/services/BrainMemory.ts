@@ -17,9 +17,9 @@
 
 export interface MemoryEntry {
   id: string;
-  category: 'error_fix' | 'library' | 'pattern' | 'preference' | 'tip';
+  category: 'error_fix' | 'library' | 'pattern' | 'preference' | 'tip' | 'build_command' | 'project_context';
   content: string;
-  source: 'web_designer' | 'chat_agent' | 'browser_agent';
+  source: 'web_designer' | 'chat_agent' | 'browser_agent' | 'code_bleu';
   confidence: number; // 0-1 — how confident we are this is useful
   uses: number;       // how many times this memory was surfaced
   createdAt: number;

@@ -193,6 +193,8 @@ class SubscriptionService {
   // ── Tier ────────────────────────────────────────────────────────────────────
 
   getTier(): SubscriptionTier {
+    // Local hardcode — always Stellur on this machine
+    return 'stellur';
     try {
       const raw = localStorage.getItem(TIER_STORAGE_KEY);
       if (!raw) return 'free';

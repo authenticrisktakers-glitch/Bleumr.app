@@ -1,6 +1,6 @@
 // Bleumr PWA Service Worker — auto-updating
 // IMPORTANT: Change this string on every deploy to force SW update on all devices
-const CACHE_VERSION = 'v1.4.0-' + '__BUILD_TIME__';
+const CACHE_VERSION = 'v1.5.0-' + '__BUILD_TIME__';
 const CACHE_NAME = `bleumr-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
@@ -52,6 +52,8 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('allorigins.win') ||
     url.hostname.includes('codetabs.com') ||
     url.hostname.includes('thingproxy.freeboard.io') ||
+    url.hostname.includes('validator.w3.org') ||
+    url.hostname.includes('jigsaw.w3.org') ||
     url.pathname.startsWith('/ddg') ||
     url.pathname.startsWith('/api/')
   ) {

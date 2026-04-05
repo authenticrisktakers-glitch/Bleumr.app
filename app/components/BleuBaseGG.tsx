@@ -1,34 +1,21 @@
 /**
- * BLEU BASE GG — AI-Powered 3D Game World Generator
+ * BLEU BASE GG — AI Playable 2D World Generator
  *
- * Text-to-game sandbox. User types a prompt → JUMARI generates a navigable
- * 3D world with real assets, cinematic camera, lighting, post-processing.
+ * Upload an image or describe a world → explore it as a playable 2D side-scroller.
+ * Every frame is AI-generated pixels from a diffusion model.
+ * Auto-advances through the world, generating new frames continuously.
+ * Controls: Arrow keys / WASD to steer direction, or let it auto-explore.
  *
- * Stack: React Three Fiber + Drei + Postprocessing
- * Pipeline: Prompt → LLM scene config → Procedural generation → Render
+ * Pipeline: Input → Groq world analysis → Pollinations frame render → auto-advance → Repeat
  */
 
-import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import {
-  Sky, Stars, Cloud, Environment, Float, Text3D, Center,
-  MeshReflectorMaterial, useTexture, Html, PointerLockControls,
-  Sparkles, Trail
-} from '@react-three/drei';
-import {
-  EffectComposer, Bloom, ChromaticAberration, Vignette,
-  ToneMapping, SSAO, Noise
-} from '@react-three/postprocessing';
-import { BlendFunction, ToneMappingMode } from 'postprocessing';
-import * as THREE from 'three';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  X, Play, Loader2, Camera, Maximize2, Minimize2,
-  RotateCcw, Sparkles as SparklesIcon, Gamepad2, ChevronDown,
-  Eye, Crosshair, Video, Sun, Moon, CloudRain, Zap, Mountain,
-  Building2, Trees, Waves, Send
+  X, Loader2, Gamepad2, Upload, ArrowLeft, ArrowRight, ArrowUp,
+  RotateCcw, ChevronLeft, Sparkles, Compass, Play, Pause
 } from 'lucide-react';
-// Direct Groq API call — bypasses runChatAgent to get clean JSON output
+import { guardedGroqFetch } from '../services/GroqGuard';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -37,902 +24,225 @@ interface BleuBaseProps {
   apiKey?: string;
 }
 
-interface SceneConfig {
-  biome: 'cyberpunk' | 'fantasy' | 'nature' | 'desert' | 'arctic' | 'ocean' | 'space' | 'medieval';
-  time: 'day' | 'night' | 'sunset' | 'dawn';
-  weather: 'clear' | 'rain' | 'fog' | 'storm' | 'snow';
-  terrain: {
-    type: 'flat' | 'hills' | 'mountains' | 'floating' | 'canyon';
-    size: number;
-    color: string;
-    roughness: number;
-  };
-  structures: Structure[];
-  vegetation: VegetationConfig;
-  lighting: LightingConfig;
-  water: boolean;
-  particles: ParticleConfig;
-  fog: { color: string; near: number; far: number } | null;
-  skyColor: string;
-  ambientColor: string;
-  neonColors: string[];
-  description: string;
+interface WorldState2D {
+  worldDescription: string;
+  artStyle: string;
+  colorPalette: string;
+  terrainType: string;
+  landmarks: string[];
+  currentPosition: { x: number; y: number };
+  currentFrameUrl: string | null;
+  currentFrameImg: HTMLImageElement | null;
+  frameHistory: FrameEntry[];
+  frameCache: Map<string, FrameEntry>;
+  sourcePrompt?: string;
+  seedBase: number;
 }
 
-interface Structure {
-  type: 'building' | 'tower' | 'wall' | 'bridge' | 'dome' | 'pyramid' | 'arch' | 'pillar' | 'house' | 'skyscraper';
-  position: [number, number, number];
-  scale: [number, number, number];
-  color: string;
-  emissive?: string;
-  emissiveIntensity?: number;
-  metalness?: number;
-  roughness?: number;
+interface FrameEntry {
+  position: { x: number; y: number };
+  url: string;
+  img: HTMLImageElement;
+  prompt: string;
 }
 
-interface VegetationConfig {
-  trees: number;
-  rocks: number;
-  grass: boolean;
-}
+type GamePhase = 'landing' | 'loading' | 'playing';
+type Direction = 'left' | 'right' | 'jump';
 
-interface LightingConfig {
-  sunPosition: [number, number, number];
-  sunIntensity: number;
-  ambientIntensity: number;
-  pointLights: { position: [number, number, number]; color: string; intensity: number }[];
-}
-
-interface ParticleConfig {
-  type: 'none' | 'rain' | 'snow' | 'fireflies' | 'embers' | 'sparkles' | 'dust';
-  density: number;
-}
-
-// ── Liquid Glass Tokens ──────────────────────────────────────────
+// ── Design Tokens ────────────────────────────────────────────────
 
 const G = {
-  panel:     'rgba(6,6,14,0.55)',
-  card:      'rgba(255,255,255,0.03)',
-  cardHover: 'rgba(255,255,255,0.07)',
-  border:    'rgba(255,255,255,0.07)',
-  borderLit: 'rgba(99,102,241,0.2)',
-  blur:      'blur(48px) saturate(180%)',
-  radius:    '4px',
-  radiusSm:  '2px',
-  glow:      '0 0 30px rgba(99,102,241,0.15)',
+  panel: 'rgba(6,6,14,0.97)', card: 'rgba(255,255,255,0.03)', cardHover: 'rgba(255,255,255,0.07)',
+  border: 'rgba(255,255,255,0.07)', borderLit: 'rgba(99,102,241,0.2)',
 };
 
-// ── Default Scene ────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────
 
-const DEFAULT_SCENE: SceneConfig = {
-  biome: 'cyberpunk',
-  time: 'night',
-  weather: 'rain',
-  terrain: { type: 'flat', size: 200, color: '#1a1a2e', roughness: 0.2 },
-  structures: [],
-  vegetation: { trees: 0, rocks: 5, grass: false },
-  lighting: {
-    sunPosition: [50, 10, -50],
-    sunIntensity: 0.1,
-    ambientIntensity: 0.15,
-    pointLights: [],
-  },
-  water: false,
-  particles: { type: 'rain', density: 0.8 },
-  fog: { color: '#0a0a1a', near: 10, far: 120 },
-  skyColor: '#050510',
-  ambientColor: '#1a1a3e',
-  neonColors: ['#ff00ff', '#00ffff', '#ff3366', '#6366f1', '#00ff88'],
-  description: '',
-};
+const FRAME_WIDTH = 384;      // smaller viewport — dreamy low-res
+const FRAME_HEIGHT = 216;
+const RENDER_WIDTH = 384;     // low res for fast generation
+const RENDER_HEIGHT = 216;
 
-// ── Scene Prompt Parser ──────────────────────────────────────────
+// ── 2D World Presets ─────────────────────────────────────────────
 
-const SCENE_SYSTEM_PROMPT = `You are BLEU BASE GG — an AI 3D world generator. Given a user's description, output ONLY a valid JSON scene configuration. No explanation, no markdown, just raw JSON.
+const WORLD_PRESETS: { label: string; prompt: string; color: string; emoji: string }[] = [
+  { label: 'Pixel Forest', prompt: 'A lush pixel art forest with tall pine trees, mossy rocks, glowing mushrooms, a dirt path winding through ferns, sunlight filtering through the canopy, 16-bit retro game style with dithering', color: 'text-emerald-400', emoji: '🌲' },
+  { label: 'Dungeon Crawl', prompt: 'A dark stone dungeon with torch-lit corridors, crumbling brick walls, iron gates, scattered bones, cobwebs, mysterious glowing runes on the floor, dark fantasy pixel art style', color: 'text-purple-400', emoji: '🏰' },
+  { label: 'Watercolor Mountains', prompt: 'A serene mountain landscape with snow-capped peaks, a wooden bridge over a rushing stream, wildflowers, pine trees, soft watercolor painting style with visible brush strokes and paper texture', color: 'text-sky-400', emoji: '⛰️' },
+  { label: 'Anime City', prompt: 'A vibrant anime-style Japanese city street at twilight, neon signs, vending machines, cherry blossom petals falling, wet pavement reflecting lights, Studio Ghibli inspired warm color palette', color: 'text-pink-400', emoji: '🌸' },
+  { label: 'Retro Space', prompt: 'An alien planet surface with two moons in a purple sky, glowing crystal formations, strange alien flora, a crashed spaceship in the distance, retro sci-fi illustration style with bold outlines', color: 'text-indigo-400', emoji: '🚀' },
+  { label: 'Hand-drawn Village', prompt: 'A cozy hand-drawn village with thatched-roof cottages, a stone well, garden plots, a winding cobblestone road, rolling green hills in background, storybook illustration style with ink outlines', color: 'text-amber-400', emoji: '🏘️' },
+  { label: 'Cyberpunk Alley', prompt: 'A rain-soaked cyberpunk back alley with holographic advertisements, steam vents, neon-lit food stalls, cables overhead, puddles reflecting magenta and cyan lights, gritty detailed pixel art', color: 'text-cyan-400', emoji: '🌃' },
+  { label: 'Underwater Reef', prompt: 'A vibrant underwater coral reef scene with colorful tropical fish, sea anemones, kelp forests swaying, sunlight rays piercing through turquoise water, bioluminescent jellyfish, dreamy painterly style', color: 'text-teal-400', emoji: '🐠' },
+];
 
-Schema:
+// ── Prompt Templates ─────────────────────────────────────────────
+
+const WORLD_INIT_SYSTEM = `You are BLEU BASE GG — an AI that creates playable 2D side-scrolling game worlds.
+
+Given a user's world description, output a JSON object with:
 {
-  "biome": "cyberpunk"|"fantasy"|"nature"|"desert"|"arctic"|"ocean"|"space"|"medieval",
-  "time": "day"|"night"|"sunset"|"dawn",
-  "weather": "clear"|"rain"|"fog"|"storm"|"snow",
-  "terrain": { "type": "flat"|"hills"|"mountains"|"floating"|"canyon", "size": 100-500, "color": "#hex", "roughness": 0-1 },
-  "structures": [
-    { "type": "building"|"tower"|"wall"|"bridge"|"dome"|"pyramid"|"arch"|"pillar"|"house"|"skyscraper",
-      "position": [x,y,z], "scale": [w,h,d], "color": "#hex",
-      "emissive": "#hex or null", "emissiveIntensity": 0-3, "metalness": 0-1, "roughness": 0-1 }
-  ],
-  "vegetation": { "trees": 0-50, "rocks": 0-30, "grass": bool },
-  "lighting": {
-    "sunPosition": [x,y,z], "sunIntensity": 0-3, "ambientIntensity": 0-1,
-    "pointLights": [{ "position": [x,y,z], "color": "#hex", "intensity": 0-5 }]
-  },
-  "water": bool,
-  "particles": { "type": "none"|"rain"|"snow"|"fireflies"|"embers"|"sparkles"|"dust", "density": 0-1 },
-  "fog": { "color": "#hex", "near": number, "far": number } | null,
-  "skyColor": "#hex",
-  "ambientColor": "#hex",
-  "neonColors": ["#hex", "#hex", ...],
-  "description": "one-line scene description"
+  "worldDescription": "Detailed 3-4 sentence description of the entire world, its geography, atmosphere, and key features",
+  "artStyle": "Specific short art style (e.g. '16-bit pixel art', 'watercolor painting', 'anime cel-shaded')",
+  "colorPalette": "5-6 specific colors that define this world",
+  "terrainType": "Description of the ground/terrain",
+  "landmarks": ["landmark at far left", "landmark at center-left", "landmark at center", "landmark at center-right", "landmark at far right"],
+  "initialFramePrompt": "Concise prompt for the first frame. MUST be a 2D side-scrolling view. Include the art style. Under 200 characters. No text, no UI, no characters."
 }
 
-Rules:
-- Generate 10-30 structures spread across the terrain for a full world
-- For cyberpunk: use many skyscrapers, neon emissives, dark terrain, rain, fog
-- For fantasy: use towers, arches, floating terrain, fireflies
-- For nature: hills/mountains, many trees, clear sky, grass
-- Position structures randomly across terrain size. Y position is ground level (0 for most, can be higher for floating).
-- Use varied scales — mix small (2-5) and large (15-40) structures
-- Add 3-8 point lights for atmosphere
-- Be creative with colors matching the biome mood
-- Output ONLY the JSON object, nothing else`;
+Keep initialFramePrompt SHORT and vivid — under 200 characters. Focus on the scene, not instructions.`;
 
-async function parsePromptToScene(prompt: string, apiKey: string): Promise<SceneConfig> {
-  // Call Groq directly — bypasses runChatAgent's personality/memory layer
-  // which interferes with structured JSON output
-  const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+// ── Utility Functions ────────────────────────────────────────────
 
-  const res = await fetch(GROQ_ENDPOINT, {
+function positionKey(pos: { x: number; y: number }): string {
+  return `${pos.x},${pos.y}`;
+}
+
+function getImageUrl(prompt: string, seed?: number): string {
+  const s = seed ?? Math.floor(Math.random() * 999999);
+  const safePrompt = prompt.slice(0, 200).replace(/[^\w\s,.!?;:'"()-]/g, ' ').trim();
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(safePrompt)}?width=${RENDER_WIDTH}&height=${RENDER_HEIGHT}&model=turbo&seed=${s}&nologo=true`;
+}
+
+/** Race a promise against a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    promise.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+  });
+}
+
+async function preloadImage(url: string, retries = 1): Promise<HTMLImageElement> {
+  const orb = (window as any).orbit;
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (orb?.fetchImage) {
+        // Electron IPC path — add 30s timeout (Pollinations can be slow)
+        const result = await withTimeout(orb.fetchImage(url), 30_000, 'fetchImage');
+        if (!result.ok) throw new Error(result.error || 'fetch failed');
+        const dataUrl = `data:${result.contentType};base64,${result.base64}`;
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.decoding = 'async';
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('decode failed'));
+          img.src = dataUrl;
+        });
+      } else {
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.decoding = 'async';
+          const t = setTimeout(() => reject(new Error('timeout')), 30_000);
+          img.onload = () => { clearTimeout(t); resolve(img); };
+          img.onerror = () => { clearTimeout(t); reject(new Error('load failed')); };
+          img.src = url;
+        });
+      }
+    } catch (e: any) {
+      lastError = e;
+      if (attempt < retries) {
+        // Retry with a different seed to get a different Pollinations server
+        url = url.replace(/seed=\d+/, `seed=${Math.floor(Math.random() * 999999)}`);
+        await new Promise(r => setTimeout(r, 1_000));
+      }
+    }
+  }
+  throw lastError || new Error('Image generation failed');
+}
+
+function positionSeed(seedBase: number, x: number, y: number): number {
+  return (seedBase + x * 7919 + y * 6271) & 0x7FFFFFFF;
+}
+
+// ── Build action prompt directly (no Groq call needed) ───────────
+
+function buildActionPrompt(world: WorldState2D, action: Direction, targetPos: { x: number; y: number }): string {
+  const { artStyle, colorPalette, terrainType, landmarks, worldDescription } = world;
+
+  // Find a landmark near this position
+  const landmarkIdx = ((targetPos.x % landmarks.length) + landmarks.length) % landmarks.length;
+  const nearLandmark = landmarks[landmarkIdx] || '';
+
+  // Vary the scene based on position for an open-world feel
+  const distance = Math.abs(targetPos.x);
+  const terrainVariation = distance % 3 === 0 ? 'with a clearing and open sky'
+    : distance % 3 === 1 ? 'dense and detailed with layered depth'
+    : 'with distant horizon and atmospheric perspective';
+
+  const heightHint = action === 'jump'
+    ? 'birds eye view looking down, ground far below, expansive landscape visible'
+    : 'ground level, expansive open world, depth and layers';
+
+  // Build a concise direct prompt — no Groq needed
+  const parts = [
+    `2D side-scrolling open world game scene`,
+    artStyle,
+    terrainType,
+    terrainVariation,
+    heightHint,
+    nearLandmark,
+    colorPalette.split(',').slice(0, 2).join(',').trim(),
+    `wide panoramic, dreamy glow, no text no UI no characters`,
+  ];
+
+  return parts.filter(Boolean).join(', ').slice(0, 200);
+}
+
+// ── Groq API Call (only for world init) ──────────────────────────
+
+async function generateWorldDescription(
+  prompt: string,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<{
+  worldDescription: string; artStyle: string; colorPalette: string;
+  terrainType: string; landmarks: string[]; initialFramePrompt: string;
+}> {
+  const res = await guardedGroqFetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    signal,
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
       messages: [
-        { role: 'system', content: SCENE_SYSTEM_PROMPT },
-        { role: 'user', content: `Generate a 3D world for: "${prompt}"` },
+        { role: 'system', content: WORLD_INIT_SYSTEM },
+        { role: 'user', content: prompt },
       ],
-      temperature: 0.7,
-      max_completion_tokens: 4096,
+      temperature: 0.85,
+      max_tokens: 800,
       response_format: { type: 'json_object' },
     }),
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.error('[BleuBase] Groq API error:', res.status, errText);
-    throw new Error(`AI generation failed (${res.status})`);
-  }
-
+  if (!res.ok) throw new Error(`World generation failed (${res.status})`);
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content || '';
+  const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] || '{}');
+  // Normalize — Groq sometimes returns arrays instead of strings
+  const str = (v: any, fallback: string) => Array.isArray(v) ? v.join(', ') : (typeof v === 'string' ? v : fallback);
+  const arr = (v: any, fallback: string[]) => Array.isArray(v) ? v : (typeof v === 'string' ? v.split(',').map((s: string) => s.trim()) : fallback);
 
-  // Extract JSON from response
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    console.error('[BleuBase] No JSON in response:', content.slice(0, 200));
-    throw new Error('No valid scene data returned');
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    // Validate essential fields exist
-    if (!parsed.biome) parsed.biome = 'cyberpunk';
-    if (!parsed.structures || !Array.isArray(parsed.structures)) parsed.structures = [];
-    if (!parsed.lighting) parsed.lighting = DEFAULT_SCENE.lighting;
-    if (!parsed.terrain) parsed.terrain = DEFAULT_SCENE.terrain;
-    if (!parsed.neonColors || !Array.isArray(parsed.neonColors)) parsed.neonColors = DEFAULT_SCENE.neonColors;
-    return { ...DEFAULT_SCENE, ...parsed };
-  } catch (e) {
-    console.error('[BleuBase] JSON parse failed:', e, content.slice(0, 300));
-    throw new Error('Failed to parse scene configuration');
-  }
+  return {
+    worldDescription: str(parsed.worldDescription, prompt),
+    artStyle: str(parsed.artStyle, 'digital painting'),
+    colorPalette: str(parsed.colorPalette, 'natural earth tones'),
+    terrainType: str(parsed.terrainType, 'grassy ground with rocks'),
+    landmarks: arr(parsed.landmarks, ['mountains far left', 'large tree center', 'ruins far right']),
+    initialFramePrompt: str(parsed.initialFramePrompt, `2D side-scrolling game scene, ${prompt.slice(0, 100)}, side view, dreamy glow`),
+  };
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// 3D SCENE COMPONENTS
-// ═══════════════════════════════════════════════════════════════════
-
-// ── Procedural Terrain ───────────────────────────────────────────
-
-function Terrain({ config }: { config: SceneConfig }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  const geometry = useMemo(() => {
-    const size = config.terrain.size;
-    const segments = 128;
-    const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-    const positions = geo.attributes.position;
-
-    if (config.terrain.type !== 'flat') {
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i);
-        const z = positions.getY(i);
-        let height = 0;
-
-        if (config.terrain.type === 'hills') {
-          height = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 4 +
-                   Math.sin(x * 0.12 + 1) * Math.cos(z * 0.08) * 2;
-        } else if (config.terrain.type === 'mountains') {
-          height = Math.sin(x * 0.03) * Math.cos(z * 0.03) * 15 +
-                   Math.sin(x * 0.08) * Math.cos(z * 0.06) * 5 +
-                   Math.sin(x * 0.15 + 2) * Math.cos(z * 0.12) * 2;
-        } else if (config.terrain.type === 'canyon') {
-          const distFromCenter = Math.abs(z) / (size * 0.3);
-          height = distFromCenter > 1 ? (distFromCenter - 1) * 20 : -distFromCenter * 8;
-        }
-
-        positions.setZ(i, height);
-      }
-    }
-
-    geo.computeVertexNormals();
-    return geo;
-  }, [config.terrain]);
-
-  return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <primitive object={geometry} />
-      <meshStandardMaterial
-        color={config.terrain.color}
-        roughness={config.terrain.roughness}
-        metalness={config.biome === 'cyberpunk' ? 0.8 : 0.1}
-        envMapIntensity={config.biome === 'cyberpunk' ? 1.5 : 0.5}
-      />
-    </mesh>
-  );
-}
-
-// ── Reflective Ground (Cyberpunk wet streets) ────────────────────
-
-function ReflectiveGround({ config }: { config: SceneConfig }) {
-  if (config.biome !== 'cyberpunk' && config.biome !== 'space') return null;
-
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-      <planeGeometry args={[config.terrain.size, config.terrain.size]} />
-      <MeshReflectorMaterial
-        blur={[300, 100]}
-        resolution={1024}
-        mixBlur={1}
-        mixStrength={40}
-        roughness={0.15}
-        depthScale={1.2}
-        minDepthThreshold={0.4}
-        maxDepthThreshold={1.4}
-        color={config.terrain.color}
-        metalness={0.9}
-        mirror={0.5}
-      />
-    </mesh>
-  );
-}
-
-// ── Procedural Building ──────────────────────────────────────────
-
-function ProceduralBuilding({ structure, neonColors }: { structure: Structure; neonColors: string[] }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const windowsRef = useRef<THREE.InstancedMesh>(null);
-
-  // Generate windows for buildings/skyscrapers
-  const windowData = useMemo(() => {
-    if (structure.type !== 'building' && structure.type !== 'skyscraper' && structure.type !== 'tower') return [];
-    const windows: { position: THREE.Matrix4; color: string }[] = [];
-    const [w, h, d] = structure.scale;
-    const spacing = 2.5;
-    const cols = Math.max(1, Math.floor(w / spacing));
-    const rows = Math.max(1, Math.floor(h / spacing));
-
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        if (Math.random() > 0.7) continue; // some windows off
-        const mat = new THREE.Matrix4();
-        const xOff = (col - cols / 2) * spacing + spacing / 2;
-        const yOff = row * spacing + spacing / 2;
-        // Front face
-        mat.setPosition(
-          structure.position[0] + xOff,
-          structure.position[1] + yOff,
-          structure.position[2] + d / 2 + 0.05
-        );
-        const color = Math.random() > 0.6
-          ? neonColors[Math.floor(Math.random() * neonColors.length)]
-          : '#ffaa44';
-        windows.push({ position: mat, color });
-      }
-    }
-    return windows;
-  }, [structure, neonColors]);
-
-  const geoType = useMemo(() => {
-    switch (structure.type) {
-      case 'dome': return 'sphere';
-      case 'pyramid': return 'cone';
-      case 'pillar': return 'cylinder';
-      default: return 'box';
-    }
-  }, [structure.type]);
-
-  return (
-    <group>
-      <mesh
-        ref={meshRef}
-        position={[
-          structure.position[0],
-          structure.position[1] + structure.scale[1] / 2,
-          structure.position[2]
-        ]}
-        castShadow
-        receiveShadow
-      >
-        {geoType === 'box' && <boxGeometry args={structure.scale} />}
-        {geoType === 'sphere' && <sphereGeometry args={[structure.scale[0] / 2, 24, 24]} />}
-        {geoType === 'cone' && <coneGeometry args={[structure.scale[0] / 2, structure.scale[1], 4]} />}
-        {geoType === 'cylinder' && <cylinderGeometry args={[structure.scale[0] / 3, structure.scale[0] / 2, structure.scale[1], 8]} />}
-        <meshStandardMaterial
-          color={structure.color}
-          emissive={structure.emissive || '#000000'}
-          emissiveIntensity={structure.emissiveIntensity || 0}
-          metalness={structure.metalness ?? 0.5}
-          roughness={structure.roughness ?? 0.3}
-        />
-      </mesh>
-
-      {/* Window lights */}
-      {windowData.map((win, i) => (
-        <mesh key={i} position={new THREE.Vector3().setFromMatrixPosition(win.position)}>
-          <planeGeometry args={[1.2, 1.6]} />
-          <meshStandardMaterial
-            color={win.color}
-            emissive={win.color}
-            emissiveIntensity={2}
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
-
-      {/* Rooftop neon accent for skyscrapers */}
-      {(structure.type === 'skyscraper' || structure.type === 'tower') && structure.emissive && (
-        <mesh position={[
-          structure.position[0],
-          structure.position[1] + structure.scale[1] + 0.3,
-          structure.position[2]
-        ]}>
-          <boxGeometry args={[structure.scale[0] + 0.5, 0.3, structure.scale[2] + 0.5]} />
-          <meshStandardMaterial
-            color={structure.emissive}
-            emissive={structure.emissive}
-            emissiveIntensity={3}
-            toneMapped={false}
-          />
-        </mesh>
-      )}
-    </group>
-  );
-}
-
-// ── Procedural Tree ──────────────────────────────────────────────
-
-function ProceduralTree({ position, biome }: { position: [number, number, number]; biome: string }) {
-  const trunkColor = biome === 'cyberpunk' ? '#1a1a2e' : '#5c3d2e';
-  const leafColor = biome === 'cyberpunk' ? '#00ff88' :
-                    biome === 'fantasy' ? '#c084fc' :
-                    biome === 'arctic' ? '#e2e8f0' : '#22c55e';
-  const height = 3 + Math.random() * 5;
-  const leafSize = 1.5 + Math.random() * 2;
-  const emissive = biome === 'cyberpunk' || biome === 'fantasy';
-
-  return (
-    <group position={position}>
-      {/* Trunk */}
-      <mesh position={[0, height / 2, 0]} castShadow>
-        <cylinderGeometry args={[0.15, 0.3, height, 6]} />
-        <meshStandardMaterial color={trunkColor} roughness={0.9} />
-      </mesh>
-      {/* Canopy */}
-      <mesh position={[0, height + leafSize * 0.4, 0]} castShadow>
-        <dodecahedronGeometry args={[leafSize, 1]} />
-        <meshStandardMaterial
-          color={leafColor}
-          emissive={emissive ? leafColor : '#000000'}
-          emissiveIntensity={emissive ? 0.3 : 0}
-          roughness={0.8}
-        />
-      </mesh>
-    </group>
-  );
-}
-
-// ── Procedural Rock ──────────────────────────────────────────────
-
-function ProceduralRock({ position, biome }: { position: [number, number, number]; biome: string }) {
-  const size = 0.5 + Math.random() * 2;
-  const color = biome === 'cyberpunk' ? '#2a2a3e' :
-                biome === 'arctic' ? '#c8d6e5' :
-                biome === 'desert' ? '#c2956b' : '#4a5568';
-
-  return (
-    <mesh position={position} castShadow rotation={[Math.random(), Math.random(), 0]}>
-      <dodecahedronGeometry args={[size, 0]} />
-      <meshStandardMaterial color={color} roughness={0.95} metalness={0.05} />
-    </mesh>
-  );
-}
-
-// ── Rain Particles ───────────────────────────────────────────────
-
-function RainSystem({ density }: { density: number }) {
-  const count = Math.floor(3000 * density);
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-
-  const particles = useMemo(() => {
-    const data: { position: THREE.Vector3; speed: number }[] = [];
-    for (let i = 0; i < count; i++) {
-      data.push({
-        position: new THREE.Vector3(
-          (Math.random() - 0.5) * 100,
-          Math.random() * 60,
-          (Math.random() - 0.5) * 100
-        ),
-        speed: 0.3 + Math.random() * 0.5,
-      });
-    }
-    return data;
-  }, [count]);
-
-  useFrame(() => {
-    if (!meshRef.current) return;
-    const dummy = new THREE.Object3D();
-    particles.forEach((p, i) => {
-      p.position.y -= p.speed;
-      if (p.position.y < 0) {
-        p.position.y = 50 + Math.random() * 10;
-        p.position.x = (Math.random() - 0.5) * 100;
-        p.position.z = (Math.random() - 0.5) * 100;
-      }
-      dummy.position.copy(p.position);
-      dummy.scale.set(0.02, 0.5, 0.02);
-      dummy.updateMatrix();
-      meshRef.current!.setMatrixAt(i, dummy.matrix);
-    });
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
-
-  return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <cylinderGeometry args={[0.5, 0.5, 1, 4]} />
-      <meshBasicMaterial color="#8888cc" transparent opacity={0.15} />
-    </instancedMesh>
-  );
-}
-
-// ── Snow Particles ───────────────────────────────────────────────
-
-function SnowSystem({ density }: { density: number }) {
-  const count = Math.floor(2000 * density);
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-
-  const particles = useMemo(() => {
-    const data: { position: THREE.Vector3; speed: number; drift: number }[] = [];
-    for (let i = 0; i < count; i++) {
-      data.push({
-        position: new THREE.Vector3(
-          (Math.random() - 0.5) * 100,
-          Math.random() * 50,
-          (Math.random() - 0.5) * 100
-        ),
-        speed: 0.02 + Math.random() * 0.05,
-        drift: (Math.random() - 0.5) * 0.02,
-      });
-    }
-    return data;
-  }, [count]);
-
-  useFrame(() => {
-    if (!meshRef.current) return;
-    const dummy = new THREE.Object3D();
-    particles.forEach((p, i) => {
-      p.position.y -= p.speed;
-      p.position.x += p.drift;
-      if (p.position.y < 0) {
-        p.position.y = 45;
-        p.position.x = (Math.random() - 0.5) * 100;
-      }
-      dummy.position.copy(p.position);
-      dummy.scale.setScalar(0.08 + Math.random() * 0.04);
-      dummy.updateMatrix();
-      meshRef.current!.setMatrixAt(i, dummy.matrix);
-    });
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
-
-  return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[1, 6, 6]} />
-      <meshBasicMaterial color="#ffffff" transparent opacity={0.6} />
-    </instancedMesh>
-  );
-}
-
-// ── Water Plane ──────────────────────────────────────────────────
-
-function WaterPlane({ size }: { size: number }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    if (meshRef.current) {
-      meshRef.current.position.y = Math.sin(clock.elapsedTime * 0.5) * 0.1 - 0.5;
-    }
-  });
-
-  return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]}>
-      <planeGeometry args={[size, size, 32, 32]} />
-      <MeshReflectorMaterial
-        blur={[400, 200]}
-        resolution={512}
-        mixBlur={1}
-        mixStrength={15}
-        roughness={0.1}
-        depthScale={1}
-        minDepthThreshold={0.4}
-        maxDepthThreshold={1.2}
-        color="#003355"
-        metalness={0.8}
-        mirror={0.75}
-      />
-    </mesh>
-  );
-}
-
-// ── Neon Sign ────────────────────────────────────────────────────
-
-function NeonLine({ start, end, color }: { start: [number, number, number]; end: [number, number, number]; color: string }) {
-  const points = useMemo(() => [
-    new THREE.Vector3(...start),
-    new THREE.Vector3(...end)
-  ], [start, end]);
-
-  return (
-    <line>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={2}
-          array={new Float32Array([...start, ...end])}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <lineBasicMaterial color={color} linewidth={2} transparent opacity={0.8} />
-    </line>
-  );
-}
-
-// ── FPS Camera Controller ────────────────────────────────────────
-
-function FPSController({ active }: { active: boolean }) {
-  const controlsRef = useRef<any>(null);
-  const { camera } = useThree();
-  const moveState = useRef({ forward: false, backward: false, left: false, right: false, up: false, down: false });
-  const speed = 0.3;
-
-  useEffect(() => {
-    camera.position.set(0, 3, 20);
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      switch (e.code) {
-        case 'KeyW': case 'ArrowUp': moveState.current.forward = true; break;
-        case 'KeyS': case 'ArrowDown': moveState.current.backward = true; break;
-        case 'KeyA': case 'ArrowLeft': moveState.current.left = true; break;
-        case 'KeyD': case 'ArrowRight': moveState.current.right = true; break;
-        case 'Space': moveState.current.up = true; break;
-        case 'ShiftLeft': moveState.current.down = true; break;
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      switch (e.code) {
-        case 'KeyW': case 'ArrowUp': moveState.current.forward = false; break;
-        case 'KeyS': case 'ArrowDown': moveState.current.backward = false; break;
-        case 'KeyA': case 'ArrowLeft': moveState.current.left = false; break;
-        case 'KeyD': case 'ArrowRight': moveState.current.right = false; break;
-        case 'Space': moveState.current.up = false; break;
-        case 'ShiftLeft': moveState.current.down = false; break;
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, [camera]);
-
-  useFrame(() => {
-    if (!active) return;
-    const direction = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    camera.getWorldDirection(direction);
-    right.crossVectors(direction, camera.up).normalize();
-    direction.y = 0;
-    direction.normalize();
-
-    const m = moveState.current;
-    if (m.forward) camera.position.addScaledVector(direction, speed);
-    if (m.backward) camera.position.addScaledVector(direction, -speed);
-    if (m.left) camera.position.addScaledVector(right, -speed);
-    if (m.right) camera.position.addScaledVector(right, speed);
-    if (m.up) camera.position.y += speed;
-    if (m.down) camera.position.y -= speed;
-  });
-
-  return active ? <PointerLockControls ref={controlsRef} /> : null;
-}
-
-// ── Cinematic Auto-Camera ────────────────────────────────────────
-
-function CinematicCamera({ active }: { active: boolean }) {
-  const { camera } = useThree();
-
-  useFrame(({ clock }) => {
-    if (!active) return;
-    const t = clock.elapsedTime * 0.15;
-    const radius = 60;
-    camera.position.x = Math.sin(t) * radius;
-    camera.position.z = Math.cos(t) * radius;
-    camera.position.y = 15 + Math.sin(t * 0.5) * 8;
-    camera.lookAt(0, 5, 0);
-  });
-
-  return null;
-}
-
-// ── Orbit Camera (click + drag) ──────────────────────────────────
-
-function OrbitViewer({ active }: { active: boolean }) {
-  const { camera } = useThree();
-  const angleRef = useRef(0);
-  const dragging = useRef(false);
-  const lastX = useRef(0);
-
-  useEffect(() => {
-    if (!active) return;
-    camera.position.set(0, 25, 60);
-    camera.lookAt(0, 0, 0);
-
-    const onDown = (e: MouseEvent) => { dragging.current = true; lastX.current = e.clientX; };
-    const onUp = () => { dragging.current = false; };
-    const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      angleRef.current += (e.clientX - lastX.current) * 0.003;
-      lastX.current = e.clientX;
-    };
-
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('mousemove', onMove);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('mousemove', onMove);
-    };
-  }, [active, camera]);
-
-  useFrame(() => {
-    if (!active) return;
-    const r = 60;
-    camera.position.x = Math.sin(angleRef.current) * r;
-    camera.position.z = Math.cos(angleRef.current) * r;
-    camera.position.y = 25;
-    camera.lookAt(0, 5, 0);
-  });
-
-  return null;
-}
-
-// ── Post-Processing Stack ────────────────────────────────────────
-
-function PostFX({ config }: { config: SceneConfig }) {
-  const isCyberpunk = config.biome === 'cyberpunk' || config.biome === 'space';
-  const bloomIntensity = isCyberpunk ? 1.5 : config.biome === 'fantasy' ? 0.8 : 0.3;
-
-  return (
-    <EffectComposer>
-      <Bloom
-        intensity={bloomIntensity}
-        luminanceThreshold={0.2}
-        luminanceSmoothing={0.9}
-        mipmapBlur
-      />
-      {isCyberpunk && (
-        <ChromaticAberration
-          offset={new THREE.Vector2(0.002, 0.002)}
-          radialModulation={true}
-          modulationOffset={0.5}
-          blendFunction={BlendFunction.NORMAL}
-        />
-      )}
-      <Vignette
-        offset={0.3}
-        darkness={isCyberpunk ? 0.8 : 0.4}
-        blendFunction={BlendFunction.NORMAL}
-      />
-      <Noise
-        premultiply
-        blendFunction={BlendFunction.ADD}
-        opacity={0.03}
-      />
-      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-    </EffectComposer>
-  );
-}
-
-// ── Main 3D Scene ────────────────────────────────────────────────
-
-function WorldScene({ config, cameraMode }: { config: SceneConfig; cameraMode: 'fps' | 'cinematic' | 'orbit' }) {
-  // Generate random positions for vegetation
-  const treePositions = useMemo(() => {
-    const positions: [number, number, number][] = [];
-    const size = config.terrain.size * 0.4;
-    for (let i = 0; i < config.vegetation.trees; i++) {
-      positions.push([
-        (Math.random() - 0.5) * size,
-        0,
-        (Math.random() - 0.5) * size
-      ]);
-    }
-    return positions;
-  }, [config.vegetation.trees, config.terrain.size]);
-
-  const rockPositions = useMemo(() => {
-    const positions: [number, number, number][] = [];
-    const size = config.terrain.size * 0.4;
-    for (let i = 0; i < config.vegetation.rocks; i++) {
-      positions.push([
-        (Math.random() - 0.5) * size,
-        0,
-        (Math.random() - 0.5) * size
-      ]);
-    }
-    return positions;
-  }, [config.vegetation.rocks, config.terrain.size]);
-
-  const isNight = config.time === 'night';
-  const isSunset = config.time === 'sunset';
-
-  return (
-    <>
-      {/* Sky */}
-      {config.biome !== 'space' ? (
-        <Sky
-          distance={450000}
-          sunPosition={config.lighting.sunPosition}
-          inclination={isNight ? 0 : isSunset ? 0.49 : 0.6}
-          azimuth={0.25}
-          turbidity={isNight ? 20 : 8}
-          rayleigh={isNight ? 0 : 2}
-        />
-      ) : (
-        <Stars radius={300} depth={60} count={5000} factor={7} saturation={0} fade speed={1} />
-      )}
-
-      {/* Stars for night scenes */}
-      {isNight && config.biome !== 'space' && (
-        <Stars radius={200} depth={50} count={3000} factor={4} saturation={0.5} fade speed={0.5} />
-      )}
-
-      {/* Fog */}
-      {config.fog && (
-        <fog attach="fog" args={[config.fog.color, config.fog.near, config.fog.far]} />
-      )}
-
-      {/* Background color */}
-      <color attach="background" args={[config.skyColor]} />
-
-      {/* Lighting */}
-      <ambientLight intensity={config.lighting.ambientIntensity} color={config.ambientColor} />
-      <directionalLight
-        position={config.lighting.sunPosition}
-        intensity={config.lighting.sunIntensity}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-far={200}
-        shadow-camera-left={-80}
-        shadow-camera-right={80}
-        shadow-camera-top={80}
-        shadow-camera-bottom={-80}
-      />
-
-      {/* Point lights */}
-      {config.lighting.pointLights.map((light, i) => (
-        <pointLight
-          key={i}
-          position={light.position}
-          color={light.color}
-          intensity={light.intensity}
-          distance={40}
-          decay={2}
-        />
-      ))}
-
-      {/* Terrain */}
-      <Terrain config={config} />
-      <ReflectiveGround config={config} />
-
-      {/* Water */}
-      {config.water && <WaterPlane size={config.terrain.size} />}
-
-      {/* Structures */}
-      {config.structures.map((structure, i) => (
-        <ProceduralBuilding key={i} structure={structure} neonColors={config.neonColors} />
-      ))}
-
-      {/* Vegetation */}
-      {treePositions.map((pos, i) => (
-        <ProceduralTree key={`tree-${i}`} position={pos} biome={config.biome} />
-      ))}
-      {rockPositions.map((pos, i) => (
-        <ProceduralRock key={`rock-${i}`} position={pos} biome={config.biome} />
-      ))}
-
-      {/* Particles */}
-      {config.particles.type === 'rain' && <RainSystem density={config.particles.density} />}
-      {config.particles.type === 'snow' && <SnowSystem density={config.particles.density} />}
-      {config.particles.type === 'fireflies' && (
-        <Sparkles count={200} scale={80} size={3} speed={0.3} color="#ffdd00" opacity={0.6} />
-      )}
-      {config.particles.type === 'sparkles' && (
-        <Sparkles count={150} scale={60} size={2} speed={0.5} color="#c084fc" opacity={0.4} />
-      )}
-      {config.particles.type === 'embers' && (
-        <Sparkles count={100} scale={40} size={4} speed={0.8} color="#ff4400" opacity={0.7} />
-      )}
-      {config.particles.type === 'dust' && (
-        <Sparkles count={300} scale={100} size={1.5} speed={0.1} color="#c8b88a" opacity={0.3} />
-      )}
-
-      {/* Clouds for day/sunset scenes */}
-      {(config.time === 'day' || config.time === 'sunset') && config.weather !== 'clear' && (
-        <>
-          <Cloud position={[-20, 30, -30]} speed={0.2} opacity={0.3} />
-          <Cloud position={[20, 35, 10]} speed={0.1} opacity={0.2} />
-          <Cloud position={[0, 28, -50]} speed={0.15} opacity={0.25} />
-        </>
-      )}
-
-      {/* Camera controllers */}
-      <FPSController active={cameraMode === 'fps'} />
-      <CinematicCamera active={cameraMode === 'cinematic'} />
-      <OrbitViewer active={cameraMode === 'orbit'} />
-
-      {/* Post-processing */}
-      <PostFX config={config} />
-    </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// BLEU BASE GG — MAIN UI
-// ═══════════════════════════════════════════════════════════════════
-
-// ── Preset Scenes ────────────────────────────────────────────────
-
-const PRESETS: { label: string; icon: React.ReactNode; prompt: string; color: string }[] = [
-  { label: 'Cyberpunk City', icon: <Building2 className="w-3.5 h-3.5" />, prompt: 'A sprawling cyberpunk megacity at night with towering neon-lit skyscrapers, holographic advertisements, rain-slicked streets reflecting pink and cyan neon, dense fog, and flying vehicles overhead', color: 'text-cyan-400' },
-  { label: 'Fantasy Kingdom', icon: <Mountain className="w-3.5 h-3.5" />, prompt: 'A magical fantasy kingdom with floating crystal towers, ancient stone arches, a grand wizard tower, enchanted forests with glowing trees, fireflies everywhere, sunset lighting with purple and gold clouds', color: 'text-violet-400' },
-  { label: 'Enchanted Forest', icon: <Trees className="w-3.5 h-3.5" />, prompt: 'A dense enchanted forest with towering ancient trees, bioluminescent mushrooms, a crystal clear stream, mossy rocks, fireflies, fog rolling through the canopy, dawn light filtering through leaves', color: 'text-emerald-400' },
-  { label: 'Desert Outpost', icon: <Sun className="w-3.5 h-3.5" />, prompt: 'A vast desert landscape with sand dunes, an ancient pyramid complex, sandstone ruins and pillars, a small oasis with water, dust particles in the air, harsh golden sunset lighting, long shadows', color: 'text-amber-400' },
-  { label: 'Arctic Base', icon: <Moon className="w-3.5 h-3.5" />, prompt: 'An arctic research station with metallic domes, antenna towers, ice formations, snow-covered mountains in the distance, aurora borealis in the night sky, snowfall, cold blue lighting', color: 'text-blue-400' },
-  { label: 'Ocean World', icon: <Waves className="w-3.5 h-3.5" />, prompt: 'A tropical ocean world with crystal clear water, rock formations rising from the sea, a wooden dock and lighthouse, palm trees on small islands, sunset with orange and purple sky, light rain', color: 'text-teal-400' },
-  { label: 'Space Station', icon: <Zap className="w-3.5 h-3.5" />, prompt: 'An alien space station floating in deep space with metallic structures, glowing energy conduits, dome habitats, landing pads, neon accent lighting in purple and blue, stars and nebula in the background, no atmosphere', color: 'text-indigo-400' },
-  { label: 'Medieval Village', icon: <Building2 className="w-3.5 h-3.5" />, prompt: 'A peaceful medieval village with thatched-roof houses, a stone church tower, wooden market stalls, cobblestone paths, a stone bridge over a stream, surrounding forest, warm afternoon light, scattered clouds', color: 'text-orange-400' },
-];
 
 // ── BLEU BASE GG Icon ────────────────────────────────────────────
 
 function BleuBaseIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" fill="none" className={className}>
-      {/* 3D Cube base */}
       <path d="M16 4L28 10V22L16 28L4 22V10L16 4Z" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.4" />
       <path d="M16 4L28 10L16 16L4 10L16 4Z" fill="currentColor" opacity="0.15" />
       <path d="M16 16V28L4 22V10L16 16Z" fill="currentColor" opacity="0.08" />
       <path d="M16 16V28L28 22V10L16 16Z" fill="currentColor" opacity="0.12" />
-      {/* Game controller overlay */}
       <circle cx="16" cy="15" r="4" fill="currentColor" stroke="currentColor" strokeWidth="0.8" opacity="0.4" />
       <path d="M14 15h4M16 13v4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.8" />
-      {/* Sparkle nodes */}
       <circle cx="8" cy="8" r="1.2" fill="currentColor" opacity="0.9">
         <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2s" repeatCount="indefinite" />
       </circle>
@@ -943,343 +253,714 @@ function BleuBaseIcon({ className }: { className?: string }) {
   );
 }
 
-// ── Main Export ───────────────────────────────────────────────────
-
 export { BleuBaseIcon };
 
-export function BleuBaseGG({ onClose, apiKey }: BleuBaseProps) {
+// ── Landing Screen ───────────────────────────────────────────────
+
+function LandingScreen({ onGenerate, onPreset }: {
+  onGenerate: (prompt: string, imageDataUrl?: string) => void;
+  onPreset: (prompt: string) => void;
+}) {
   const [prompt, setPrompt] = useState('');
-  const [sceneConfig, setSceneConfig] = useState<SceneConfig | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cameraMode, setCameraMode] = useState<'fps' | 'cinematic' | 'orbit'>('cinematic');
-  const [showControls, setShowControls] = useState(true);
-  const [showPresets, setShowPresets] = useState(true);
-  const [generationLog, setGenerationLog] = useState<string[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleGenerate = useCallback(async (text?: string) => {
-    const finalPrompt = text || prompt;
-    if (!finalPrompt.trim() || !apiKey) return;
-
-    setIsGenerating(true);
-    setError(null);
-    setShowPresets(false);
-    setGenerationLog(['Analyzing prompt...']);
-
-    try {
-      setGenerationLog(prev => [...prev, 'Generating scene configuration...']);
-      const config = await parsePromptToScene(finalPrompt, apiKey);
-
-      setGenerationLog(prev => [...prev, `Scene: ${config.description || config.biome}`, `Structures: ${config.structures.length}`, `Biome: ${config.biome} | Time: ${config.time}`, 'Building 3D world...']);
-
-      // Small delay for log readability
-      await new Promise(r => setTimeout(r, 500));
-      setSceneConfig(config);
-      setGenerationLog(prev => [...prev, 'World generated. Explore!']);
-      setCameraMode('cinematic');
-    } catch (e: any) {
-      setError(e.message || 'Failed to generate world');
-      setGenerationLog(prev => [...prev, `Error: ${e.message}`]);
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [prompt, apiKey]);
-
-  const handlePreset = useCallback((presetPrompt: string) => {
-    setPrompt(presetPrompt);
-    handleGenerate(presetPrompt);
-  }, [handleGenerate]);
-
-  const handleReset = useCallback(() => {
-    setSceneConfig(null);
-    setPrompt('');
-    setShowPresets(true);
-    setGenerationLog([]);
-    setError(null);
+  const handleFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => setUploadedImage(e.target?.result as string);
+    reader.readAsDataURL(file);
   }, []);
 
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  const handleSubmit = useCallback(() => {
+    if (!prompt.trim() && !uploadedImage) return;
+    onGenerate(prompt.trim() || 'a beautiful 2D game world', uploadedImage || undefined);
+  }, [prompt, uploadedImage, onGenerate]);
+
   return (
-    <div className="fixed inset-0 flex flex-col" style={{
-      background: sceneConfig ? '#000' : G.panel,
-      backdropFilter: sceneConfig ? undefined : G.blur,
-      WebkitBackdropFilter: sceneConfig ? undefined : G.blur,
-      fontFamily: 'Inter, system-ui, sans-serif',
-    }}>
-
-      {/* ── Top Bar ──────────────────────────────────────────── */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 z-20 relative" style={{
-        background: sceneConfig ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.02)',
-        backdropFilter: 'blur(20px)',
-        borderBottom: `1px solid ${G.border}`,
-      }}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 flex items-center justify-center" style={{
-            borderRadius: G.radiusSm,
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            boxShadow: '0 2px 10px rgba(99,102,241,0.3)',
-          }}>
-            <Gamepad2 className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-[14px] font-bold text-white tracking-tight">BLEU BASE GG</h1>
-            <p className="text-[9px] uppercase tracking-[0.15em] text-slate-500">AI World Generator</p>
-          </div>
+    <div className="flex flex-col items-center justify-center min-h-full px-6 py-12 gap-8">
+      <div className="text-center space-y-3">
+        <div className="flex items-center justify-center gap-3">
+          <Gamepad2 className="w-8 h-8 text-indigo-400" />
+          <h1 className="text-2xl font-light tracking-wide text-white/90">BLEU BASE GG</h1>
         </div>
-
-        <div className="flex items-center gap-2">
-          {sceneConfig && (
-            <>
-              {/* Camera Mode Toggle */}
-              <div className="flex items-center" style={{ borderRadius: G.radiusSm, border: `1px solid ${G.border}`, overflow: 'hidden' }}>
-                {(['orbit', 'cinematic', 'fps'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setCameraMode(mode)}
-                    className={`px-2.5 py-1.5 text-[10px] font-medium transition-colors ${
-                      cameraMode === mode ? 'bg-indigo-500/30 text-indigo-300' : 'text-slate-500 hover:text-white'
-                    }`}
-                    title={mode === 'fps' ? 'WASD + Mouse (click to lock)' : mode === 'cinematic' ? 'Auto flythrough' : 'Click + drag to orbit'}
-                  >
-                    {mode === 'fps' && <Crosshair className="w-3 h-3 inline mr-1" />}
-                    {mode === 'cinematic' && <Video className="w-3 h-3 inline mr-1" />}
-                    {mode === 'orbit' && <Eye className="w-3 h-3 inline mr-1" />}
-                    {mode.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-
-              {/* Reset */}
-              <button onClick={handleReset} className="p-1.5 text-slate-400 hover:text-white transition-colors" style={{ borderRadius: G.radiusSm, border: `1px solid ${G.border}` }} title="New world">
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors" style={{ borderRadius: G.radiusSm }}>
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <p className="text-sm text-white/40 max-w-md">
+          Upload an image or describe a world — AI turns it into a living 2D world.
+          It auto-explores, generating new frames as it moves through the scene.
+        </p>
       </div>
 
-      {/* ── 3D Canvas ────────────────────────────────────────── */}
-      {sceneConfig ? (
-        <div ref={canvasContainerRef} className="flex-1 relative">
-          <Canvas
-            shadows
-            camera={{ fov: 60, near: 0.1, far: 1000 }}
-            gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1 }}
-            dpr={[1, 1.5]}
-          >
-            <Suspense fallback={null}>
-              <WorldScene config={sceneConfig} cameraMode={cameraMode} />
-            </Suspense>
-          </Canvas>
+      {/* Upload Zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className="w-full max-w-lg cursor-pointer transition-all duration-200"
+        style={{
+          border: `2px dashed ${isDragging ? 'rgba(99,102,241,0.6)' : uploadedImage ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.1)'}`,
+          borderRadius: '12px',
+          padding: uploadedImage ? '8px' : '32px',
+          background: isDragging ? 'rgba(99,102,241,0.05)' : 'rgba(255,255,255,0.02)',
+        }}
+      >
+        {uploadedImage ? (
+          <div className="relative">
+            <img src={uploadedImage} alt="Uploaded" className="w-full rounded-lg" style={{ maxHeight: '200px', objectFit: 'cover' }} />
+            <button
+              onClick={(e) => { e.stopPropagation(); setUploadedImage(null); }}
+              className="absolute top-2 right-2 p-1 rounded-full bg-black/60 hover:bg-black/80 text-white/60 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 text-white/30">
+            <Upload className="w-8 h-8" />
+            <span className="text-sm">Drop concept art, sketch, or photo here</span>
+            <span className="text-xs text-white/20">or click to browse</span>
+          </div>
+        )}
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFile(file);
+        }} />
+      </div>
 
-          {/* HUD Overlay — scene info */}
-          <div className="absolute bottom-4 left-4 z-10">
-            <div className="px-3 py-2" style={{
-              background: 'rgba(0,0,0,0.6)',
-              backdropFilter: 'blur(12px)',
-              borderRadius: G.radiusSm,
-              border: `1px solid ${G.border}`,
-            }}>
-              <div className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider mb-0.5">{sceneConfig.biome} — {sceneConfig.time}</div>
-              <div className="text-[11px] text-slate-400">{sceneConfig.description || prompt.slice(0, 60)}</div>
-              <div className="text-[9px] text-slate-600 mt-1">
-                {sceneConfig.structures.length} structures · {sceneConfig.vegetation.trees} trees · {sceneConfig.lighting.pointLights.length} lights
-              </div>
+      {/* Text Prompt */}
+      <div className="w-full max-w-lg flex gap-2">
+        <input
+          type="text"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+          placeholder={uploadedImage ? 'Describe this world...' : 'Describe your world... (e.g. "enchanted forest with glowing mushrooms")'}
+          className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white/90 text-sm placeholder:text-white/25 focus:outline-none focus:border-indigo-500/50 transition-colors"
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={!prompt.trim() && !uploadedImage}
+          className="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-white/5 disabled:text-white/20 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+        >
+          <Sparkles className="w-4 h-4" />
+          Generate
+        </button>
+      </div>
+
+      {/* Presets */}
+      <div className="w-full max-w-lg">
+        <p className="text-xs text-white/25 mb-3 text-center">Quick worlds</p>
+        <div className="grid grid-cols-4 gap-2">
+          {WORLD_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => onPreset(p.prompt)}
+              className="flex flex-col items-center gap-1.5 p-3 rounded-lg transition-all duration-150 hover:scale-[1.02]"
+              style={{ background: G.card, border: `1px solid ${G.border}` }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = G.cardHover;
+                (e.currentTarget as HTMLElement).style.borderColor = G.borderLit;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = G.card;
+                (e.currentTarget as HTMLElement).style.borderColor = G.border;
+              }}
+            >
+              <span className="text-lg">{p.emoji}</span>
+              <span className={`text-[10px] ${p.color} font-medium`}>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ══════════════════════════════════════════════════════════════════
+
+function BleuBaseGG({ onClose, apiKey }: BleuBaseProps) {
+  const [phase, setPhase] = useState<GamePhase>('landing');
+  const [world, setWorld] = useState<WorldState2D | null>(null);
+  const [previousFrameUrl, setPreviousFrameUrl] = useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(true);
+  const [frameCount, setFrameCount] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [nextDirection, setNextDirection] = useState<Direction>('right');
+
+  const worldRef = useRef<WorldState2D | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const isGeneratingRef = useRef(false);
+  const autoPlayRef = useRef(true);
+
+  // Keep refs in sync
+  useEffect(() => { worldRef.current = world; }, [world]);
+  useEffect(() => { autoPlayRef.current = autoPlay; }, [autoPlay]);
+
+  // ── Generate Next Frame ──────────────────────────────────────
+
+  const generateNextFrame = useCallback(async (direction: Direction) => {
+    const w = worldRef.current;
+    if (!w || isGeneratingRef.current) return;
+
+    isGeneratingRef.current = true;
+    setIsGenerating(true);
+
+    const targetPos = direction === 'left' ? { x: w.currentPosition.x - 1, y: w.currentPosition.y }
+      : direction === 'right' ? { x: w.currentPosition.x + 1, y: w.currentPosition.y }
+      : { x: w.currentPosition.x, y: w.currentPosition.y + 1 };
+
+    const key = positionKey(targetPos);
+
+    // Check cache first
+    const cached = w.frameCache.get(key);
+    if (cached) {
+      setPreviousFrameUrl(w.currentFrameUrl);
+      setIsTransitioning(true);
+
+      const newWorld: WorldState2D = {
+        ...w,
+        currentPosition: targetPos,
+        currentFrameUrl: cached.url,
+        currentFrameImg: cached.img,
+        frameHistory: w.currentFrameUrl && w.currentFrameImg
+          ? [...w.frameHistory, { position: w.currentPosition, url: w.currentFrameUrl, img: w.currentFrameImg, prompt: '' }]
+          : w.frameHistory,
+      };
+      setWorld(newWorld);
+      setFrameCount(c => c + 1);
+
+      setTimeout(() => {
+        setIsTransitioning(false);
+        isGeneratingRef.current = false;
+        setIsGenerating(false);
+      }, 500);
+      return;
+    }
+
+    try {
+      // Build prompt directly — no Groq call needed for movement frames
+      const imagePrompt = buildActionPrompt(w, direction, targetPos);
+      const seed = positionSeed(w.seedBase, targetPos.x, targetPos.y);
+      const url = getImageUrl(imagePrompt, seed);
+      const img = await preloadImage(url, 1);
+
+      const currentWorld = worldRef.current;
+      if (!currentWorld) { isGeneratingRef.current = false; setIsGenerating(false); return; }
+
+      // Transition
+      setPreviousFrameUrl(currentWorld.currentFrameUrl);
+      setIsTransitioning(true);
+
+      const newCache = new Map(currentWorld.frameCache);
+      if (newCache.size >= 50) {
+        const oldest = newCache.keys().next().value;
+        if (oldest) newCache.delete(oldest);
+      }
+      newCache.set(key, { position: targetPos, url, img, prompt: imagePrompt });
+
+      const newWorld: WorldState2D = {
+        ...currentWorld,
+        currentPosition: targetPos,
+        currentFrameUrl: url,
+        currentFrameImg: img,
+        frameCache: newCache,
+        frameHistory: currentWorld.currentFrameUrl && currentWorld.currentFrameImg
+          ? [...currentWorld.frameHistory.slice(-30), { position: currentWorld.currentPosition, url: currentWorld.currentFrameUrl, img: currentWorld.currentFrameImg, prompt: '' }]
+          : currentWorld.frameHistory,
+      };
+      setWorld(newWorld);
+      setFrameCount(c => c + 1);
+
+      setTimeout(() => {
+        setIsTransitioning(false);
+        isGeneratingRef.current = false;
+        setIsGenerating(false);
+      }, 500);
+    } catch (e: any) {
+      console.warn('[BleuBaseGG] Frame gen failed:', e.message);
+      isGeneratingRef.current = false;
+      setIsGenerating(false);
+      // Don't let a single failure stop auto-play — just try again next tick
+    }
+  }, []);
+
+  // ── Auto-advance loop ────────────────────────────────────────
+  // Uses setInterval that polls every 500ms — if not generating, kicks off next frame.
+  // This is resilient: doesn't break if a frame fails or if generation is slow.
+
+  useEffect(() => {
+    if (phase !== 'playing' || !autoPlay || !world) return;
+
+    const interval = setInterval(() => {
+      if (!autoPlayRef.current || !worldRef.current || isGeneratingRef.current) return;
+
+      // Pick direction — mostly forward (right), sometimes vary
+      const directions: Direction[] = ['right', 'right', 'right', 'right', 'left', 'jump'];
+      const dir = directions[Math.floor(Math.random() * directions.length)];
+      setNextDirection(dir);
+      generateNextFrame(dir);
+    }, 800); // poll every 800ms — actual rate limited by generation time
+
+    return () => clearInterval(interval);
+  }, [phase, autoPlay, world, generateNextFrame]);
+
+  // ── Pre-generate next frame in background ────────────────────
+
+  useEffect(() => {
+    if (phase !== 'playing' || !world || isGeneratingRef.current) return;
+
+    // Pre-gen the "right" frame (most common direction)
+    const targetPos = { x: world.currentPosition.x + 1, y: world.currentPosition.y };
+    const key = positionKey(targetPos);
+    if (world.frameCache.has(key)) return;
+
+    const imagePrompt = buildActionPrompt(world, 'right', targetPos);
+    const seed = positionSeed(world.seedBase, targetPos.x, targetPos.y);
+    const url = getImageUrl(imagePrompt, seed);
+
+    // Fire and forget — preload into cache
+    preloadImage(url, 1).then(img => {
+      setWorld(prev => {
+        if (!prev) return prev;
+        const newCache = new Map(prev.frameCache);
+        if (newCache.has(key)) return prev; // already cached
+        if (newCache.size >= 50) {
+          const oldest = newCache.keys().next().value;
+          if (oldest) newCache.delete(oldest);
+        }
+        newCache.set(key, { position: targetPos, url, img, prompt: imagePrompt });
+        return { ...prev, frameCache: newCache };
+      });
+    }).catch(() => { /* silent */ });
+  }, [phase, world?.currentPosition.x, world?.currentPosition.y]);
+
+  // ── World Initialization ─────────────────────────────────────
+
+  const initWorld = useCallback(async (prompt: string, imageDataUrl?: string) => {
+    if (!apiKey) {
+      setError('No API key available. Please check your settings.');
+      return;
+    }
+
+    setPhase('loading');
+    setError(null);
+    setFrameCount(0);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Animate progress while waiting
+    let progressTick: ReturnType<typeof setInterval> | null = null;
+    const startProgressTicker = (from: number, to: number) => {
+      if (progressTick) clearInterval(progressTick);
+      let p = from;
+      progressTick = setInterval(() => {
+        p = Math.min(to, p + 0.5);
+        setLoadingProgress(p);
+      }, 200);
+    };
+
+    try {
+      setLoadingMessage('Analyzing world concept...');
+      setLoadingProgress(10);
+      startProgressTicker(10, 35);
+
+      const worldMeta = await generateWorldDescription(prompt, apiKey, controller.signal);
+
+      if (controller.signal.aborted) { if (progressTick) clearInterval(progressTick); return; }
+      if (progressTick) clearInterval(progressTick);
+      setLoadingProgress(40);
+      setLoadingMessage('Rendering first frame...');
+
+      let initialFrameUrl: string;
+      let initialFrameImg: HTMLImageElement;
+
+      if (imageDataUrl) {
+        setLoadingMessage('Loading your image...');
+        setLoadingProgress(60);
+        initialFrameImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('Failed to load image'));
+          img.src = imageDataUrl;
+        });
+        initialFrameUrl = imageDataUrl;
+      } else {
+        startProgressTicker(40, 85);
+        const seed = Math.floor(Math.random() * 100000);
+        // Use a short direct prompt for the first frame — faster Pollinations response
+        const shortPrompt = `${worldMeta.artStyle}, ${worldMeta.terrainType}, 2D side-scrolling game scene, ${worldMeta.colorPalette.split(',').slice(0, 3).join(',')}, dreamy glow, side view`.slice(0, 180);
+        initialFrameUrl = getImageUrl(shortPrompt, seed);
+        console.log('[BleuBaseGG] First frame URL:', initialFrameUrl);
+        initialFrameImg = await preloadImage(initialFrameUrl);
+      }
+
+      if (controller.signal.aborted) { if (progressTick) clearInterval(progressTick); return; }
+      if (progressTick) clearInterval(progressTick);
+      setLoadingProgress(90);
+      setLoadingMessage('Entering world...');
+
+      const newWorld: WorldState2D = {
+        worldDescription: worldMeta.worldDescription,
+        artStyle: worldMeta.artStyle,
+        colorPalette: worldMeta.colorPalette,
+        terrainType: worldMeta.terrainType,
+        landmarks: worldMeta.landmarks,
+        currentPosition: { x: 0, y: 0 },
+        currentFrameUrl: initialFrameUrl,
+        currentFrameImg: initialFrameImg,
+        frameHistory: [],
+        frameCache: new Map(),
+        sourcePrompt: prompt,
+        seedBase: Math.floor(Math.random() * 100000),
+      };
+
+      newWorld.frameCache.set(positionKey({ x: 0, y: 0 }), {
+        position: { x: 0, y: 0 }, url: initialFrameUrl, img: initialFrameImg, prompt: worldMeta.artStyle,
+      });
+
+      setWorld(newWorld);
+      setLoadingProgress(100);
+
+      await new Promise(r => setTimeout(r, 200));
+      setPhase('playing');
+    } catch (e: any) {
+      if (progressTick) clearInterval(progressTick);
+      if (controller.signal.aborted) return;
+      console.error('[BleuBaseGG] Init failed:', e);
+      setError(e.message || 'Failed to generate world');
+      setPhase('landing');
+    }
+  }, [apiKey]);
+
+  // ── Manual Direction ─────────────────────────────────────────
+
+  const handleManualAction = useCallback((dir: Direction) => {
+    if (isGeneratingRef.current) return;
+    setNextDirection(dir);
+    generateNextFrame(dir);
+  }, [generateNextFrame]);
+
+  // ── Go Back ──────────────────────────────────────────────────
+
+  const handleBack = useCallback(() => {
+    const w = worldRef.current;
+    if (!w || w.frameHistory.length === 0 || isGeneratingRef.current) return;
+
+    setPreviousFrameUrl(w.currentFrameUrl);
+    setIsTransitioning(true);
+
+    const prevEntry = w.frameHistory[w.frameHistory.length - 1];
+    setWorld({
+      ...w,
+      currentPosition: prevEntry.position,
+      currentFrameUrl: prevEntry.url,
+      currentFrameImg: prevEntry.img,
+      frameHistory: w.frameHistory.slice(0, -1),
+    });
+    setFrameCount(c => c - 1);
+
+    setTimeout(() => {
+      setIsTransitioning(false);
+    }, 500);
+  }, []);
+
+  // ── Reset ────────────────────────────────────────────────────
+
+  const handleReset = useCallback(() => {
+    abortRef.current?.abort();
+    isGeneratingRef.current = false;
+    setWorld(null);
+    setIsTransitioning(false);
+    setIsGenerating(false);
+    setPreviousFrameUrl(null);
+    setError(null);
+    setFrameCount(0);
+    setPhase('landing');
+  }, []);
+
+  // ── Keyboard Controls ────────────────────────────────────────
+
+  useEffect(() => {
+    if (phase !== 'playing') return;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
+      switch (e.key) {
+        case 'ArrowLeft': case 'a': case 'A':
+          e.preventDefault(); handleManualAction('left'); break;
+        case 'ArrowRight': case 'd': case 'D':
+          e.preventDefault(); handleManualAction('right'); break;
+        case 'ArrowUp': case 'w': case 'W': case ' ':
+          e.preventDefault(); handleManualAction('jump'); break;
+        case 'Backspace':
+          e.preventDefault(); handleBack(); break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [phase, handleManualAction, handleBack]);
+
+  // ── Cleanup ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  // ── Render ───────────────────────────────────────────────────
+
+  return (
+    <div
+      className="fixed inset-0 flex flex-col items-center justify-center"
+      style={{
+        zIndex: 10000, background: G.panel, fontFamily: "'Inter', system-ui, sans-serif",
+        paddingTop: typeof window !== 'undefined' && (window as any).orbit ? 38 : 0,
+      }}
+    >
+      {/* Error banner */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/30 text-red-300 text-sm flex items-center gap-2"
+            style={{ zIndex: 100 }}
+          >
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-red-300/60 hover:text-red-300">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Landing */}
+      {phase === 'landing' && (
+        <LandingScreen onGenerate={initWorld} onPreset={(prompt) => initWorld(prompt)} />
+      )}
+
+      {/* Loading */}
+      {phase === 'loading' && (
+        <div className="flex flex-col items-center justify-center gap-6">
+          <div className="relative">
+            <Loader2 className="w-12 h-12 text-indigo-400 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Gamepad2 className="w-5 h-5 text-white/40" />
             </div>
           </div>
-
-          {/* Camera mode hint */}
-          {cameraMode === 'fps' && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none">
-              <div className="text-[10px] text-white/40 text-center">
-                <Crosshair className="w-5 h-5 mx-auto mb-1 opacity-40" />
-                Click to lock mouse · WASD to move · Space/Shift for up/down
-              </div>
-            </div>
-          )}
-
-          {/* Regenerate prompt bar at bottom */}
-          <div className="absolute bottom-4 right-4 z-10">
-            <div className="flex items-center gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleGenerate(); }}
-                placeholder="Modify world..."
-                className="text-[12px] text-white placeholder-slate-600 px-3 py-2 outline-none w-[260px]"
-                style={{
-                  background: 'rgba(0,0,0,0.6)',
-                  backdropFilter: 'blur(12px)',
-                  border: `1px solid ${G.border}`,
-                  borderRadius: G.radiusSm,
-                }}
-              />
-              <button
-                onClick={() => handleGenerate()}
-                disabled={isGenerating || !prompt.trim()}
-                className="p-2 text-indigo-400 hover:text-white disabled:opacity-30 transition-colors"
-                style={{
-                  background: 'rgba(0,0,0,0.6)',
-                  border: `1px solid ${G.borderLit}`,
-                  borderRadius: G.radiusSm,
-                }}
-              >
-                {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              </button>
+          <div className="text-center space-y-2">
+            <p className="text-sm text-white/60">{loadingMessage}</p>
+            <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
+              <motion.div className="h-full bg-indigo-500 rounded-full" initial={{ width: 0 }} animate={{ width: `${loadingProgress}%` }} transition={{ duration: 0.3 }} />
             </div>
           </div>
         </div>
-      ) : (
-        /* ── Landing / Prompt Screen ──────────────────────────── */
-        <div className="flex-1 flex flex-col items-center justify-center px-6 overflow-y-auto">
-          {/* Hero */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-8"
-          >
-            <div className="w-20 h-20 mx-auto mb-4 flex items-center justify-center" style={{
-              borderRadius: '6px',
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))',
-              border: `1px solid ${G.borderLit}`,
-              boxShadow: G.glow,
-            }}>
-              <Gamepad2 className="w-10 h-10 text-indigo-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-white tracking-tight mb-2">BLEU BASE GG</h2>
-            <p className="text-[13px] text-slate-400 max-w-md">
-              Describe any world and JUMARI generates a real navigable 3D environment with lighting, weather, structures, and cinematic cameras.
-            </p>
-          </motion.div>
+      )}
 
-          {/* Prompt Input */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="w-full max-w-xl mb-8"
-          >
-            <div className="flex items-center gap-2" style={{
-              background: G.card,
-              border: `1px solid ${G.borderLit}`,
-              borderRadius: G.radius,
-              padding: '4px',
-            }}>
-              <SparklesIcon className="w-4 h-4 text-indigo-400 ml-3 shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleGenerate(); }}
-                placeholder="Describe your world... (e.g. 'cyberpunk city at night with rain')"
-                className="flex-1 text-[13px] text-white placeholder-slate-600 py-3 px-2 outline-none bg-transparent"
-              />
+      {/* Playing — centered viewport with dreamy look */}
+      {phase === 'playing' && world && (
+        <div className="flex flex-col items-center gap-4">
+          {/* Title bar */}
+          <div className="flex items-center gap-4 w-full" style={{ maxWidth: `${FRAME_WIDTH * 1.8}px` }}>
+            <div className="flex items-center gap-2">
+              <button onClick={handleBack} disabled={world.frameHistory.length === 0} className="p-1.5 rounded hover:bg-white/10 text-white/40 hover:text-white/80 disabled:opacity-20 transition-colors">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-1.5 text-xs text-white/30">
+                <Compass className="w-3 h-3" />
+                <span>({world.currentPosition.x}, {world.currentPosition.y})</span>
+              </div>
+            </div>
+            <div className="flex-1 text-center">
+              <div className="flex items-center justify-center gap-1.5 text-[10px] text-white/25 font-medium tracking-wider">
+                <Gamepad2 className="w-3 h-3" />
+                BLEU BASE GG
+                <span className="text-white/15">· Frame {frameCount}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => handleGenerate()}
-                disabled={isGenerating || !prompt.trim()}
-                className="flex items-center gap-1.5 px-4 py-2.5 text-[12px] font-semibold text-white disabled:opacity-30 transition-all shrink-0"
-                style={{
-                  background: isGenerating ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                  borderRadius: G.radiusSm,
-                  boxShadow: isGenerating ? 'none' : '0 2px 10px rgba(99,102,241,0.3)',
-                }}
+                onClick={() => setAutoPlay(!autoPlay)}
+                className={`p-1.5 rounded transition-colors ${autoPlay ? 'bg-indigo-500/20 text-indigo-400' : 'hover:bg-white/10 text-white/40'}`}
               >
-                {isGenerating ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</>
-                ) : (
-                  <><Play className="w-3.5 h-3.5" /> Generate</>
-                )}
+                {autoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </button>
+              <button onClick={handleReset} className="p-1.5 rounded hover:bg-white/10 text-white/40 hover:text-white/80 transition-colors">
+                <RotateCcw className="w-4 h-4" />
+              </button>
+              <button onClick={onClose} className="p-1.5 rounded hover:bg-white/10 text-white/40 hover:text-white/80 transition-colors">
+                <X className="w-4 h-4" />
               </button>
             </div>
+          </div>
 
-            {/* Generation Log */}
+          {/* Dreamy viewport */}
+          <div
+            className="relative overflow-hidden rounded-2xl"
+            style={{
+              width: `${FRAME_WIDTH * 1.8}px`,
+              height: `${FRAME_HEIGHT * 1.8}px`,
+              boxShadow: '0 0 80px rgba(99,102,241,0.15), 0 0 40px rgba(139,92,246,0.1), inset 0 0 60px rgba(0,0,0,0.3)',
+              border: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            {/* Previous frame (crossfade out) */}
             <AnimatePresence>
-              {generationLog.length > 0 && !sceneConfig && (
+              {isTransitioning && previousFrameUrl && (
+                <motion.img
+                  key="prev"
+                  src={previousFrameUrl}
+                  initial={{ opacity: 1 }}
+                  animate={{ opacity: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  style={{ zIndex: 1, filter: 'blur(1px) saturate(1.2)' }}
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Current frame — dreamy soft look */}
+            {world.currentFrameUrl && (
+              <motion.img
+                key={`f-${positionKey(world.currentPosition)}`}
+                src={world.currentFrameUrl}
+                initial={{ opacity: isTransitioning ? 0 : 1, scale: 1 }}
+                animate={{ opacity: 1, scale: 1.04 }}
+                transition={{ opacity: { duration: 0.5 }, scale: { duration: 8, ease: 'linear' } }}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{
+                  zIndex: 2,
+                  filter: 'blur(0.5px) saturate(1.3) contrast(0.95)',
+                  imageRendering: 'auto',
+                }}
+              />
+            )}
+
+            {/* Dreamy glow overlay */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                zIndex: 3,
+                background: 'radial-gradient(ellipse at center, transparent 40%, rgba(99,102,241,0.08) 70%, rgba(0,0,0,0.4) 100%)',
+              }}
+            />
+
+            {/* Soft vignette */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                zIndex: 4,
+                background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%)',
+              }}
+            />
+
+            {/* Film grain */}
+            <div
+              className="absolute inset-0 pointer-events-none opacity-[0.03]"
+              style={{
+                zIndex: 5,
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
+              }}
+            />
+
+            {/* Character indicator */}
+            <div className="absolute left-1/2 bottom-[28%] -translate-x-1/2 pointer-events-none" style={{ zIndex: 6 }}>
+              <div className="flex flex-col items-center gap-0.5 opacity-60">
+                <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-transparent border-t-white/60" />
+                <div className="w-1 h-1 rounded-full bg-white/40" />
+              </div>
+            </div>
+
+            {/* Generating indicator */}
+            <AnimatePresence>
+              {isGenerating && (
                 <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mt-3 px-4 py-3"
-                  style={{ background: G.card, border: `1px solid ${G.border}`, borderRadius: G.radius }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute top-3 right-3 flex items-center gap-2 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-sm border border-white/10"
+                  style={{ zIndex: 10 }}
                 >
-                  {generationLog.map((log, i) => (
-                    <div key={i} className="text-[11px] text-slate-500 flex items-center gap-2 py-0.5">
-                      <div className="w-1 h-1 rounded-full bg-indigo-400/50 shrink-0" />
-                      {log}
-                    </div>
-                  ))}
+                  <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+                  <span className="text-[10px] text-white/50">rendering...</span>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {error && (
-              <div className="mt-3 px-4 py-2 text-[12px] text-red-400" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: G.radius }}>
-                {error}
+            {/* Auto-play indicator */}
+            {autoPlay && isGenerating && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px]" style={{ zIndex: 10 }}>
+                <motion.div
+                  className="h-full bg-indigo-500/40"
+                  initial={{ width: '0%' }}
+                  animate={{ width: '100%' }}
+                  transition={{ duration: 4, ease: 'linear', repeat: Infinity }}
+                />
               </div>
             )}
-          </motion.div>
+          </div>
 
-          {/* Preset Scenes */}
-          <AnimatePresence>
-            {showPresets && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ delay: 0.3 }}
-                className="w-full max-w-2xl"
-              >
-                <div className="text-[10px] uppercase tracking-widest text-slate-600 mb-3 text-center">Quick Worlds</div>
-                <div className="grid grid-cols-4 gap-2">
-                  {PRESETS.map((preset, i) => (
-                    <motion.button
-                      key={preset.label}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.35 + i * 0.05 }}
-                      onClick={() => handlePreset(preset.prompt)}
-                      disabled={isGenerating}
-                      className={`group flex flex-col items-center gap-1.5 px-3 py-3 text-center transition-all disabled:opacity-30 ${preset.color}`}
-                      style={{
-                        background: G.card,
-                        border: `1px solid ${G.border}`,
-                        borderRadius: G.radius,
-                      }}
-                      onMouseEnter={e => {
-                        (e.currentTarget as HTMLElement).style.background = G.cardHover;
-                        (e.currentTarget as HTMLElement).style.borderColor = 'rgba(99,102,241,0.15)';
-                        (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLElement).style.background = G.card;
-                        (e.currentTarget as HTMLElement).style.borderColor = G.border;
-                        (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-                      }}
-                    >
-                      {preset.icon}
-                      <span className="text-[11px] font-medium">{preset.label}</span>
-                    </motion.button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Footer hint */}
-          <div className="mt-8 text-[9px] uppercase tracking-[0.2em] text-slate-700">
-            Powered by JUMARI AI + Three.js
+          {/* Controls */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => handleManualAction('left')}
+              disabled={isGenerating}
+              className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 disabled:opacity-30 transition-all"
+            >
+              <ArrowLeft className="w-4 h-4 text-white/60" />
+            </button>
+            <button
+              onClick={() => handleManualAction('jump')}
+              disabled={isGenerating}
+              className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 disabled:opacity-30 transition-all"
+            >
+              <ArrowUp className="w-4 h-4 text-white/60" />
+            </button>
+            <button
+              onClick={() => handleManualAction('right')}
+              disabled={isGenerating}
+              className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 disabled:opacity-30 transition-all"
+            >
+              <ArrowRight className="w-4 h-4 text-white/60" />
+            </button>
+            <div className="ml-2 text-[10px] text-white/20">← A · W ↑ · D → · Space jump</div>
           </div>
         </div>
+      )}
+
+      {/* Close button on landing/loading */}
+      {phase !== 'playing' && (
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white/60 transition-colors"
+          style={{ zIndex: 50 }}
+        >
+          <X className="w-5 h-5" />
+        </button>
       )}
     </div>
   );
 }
+
+export { BleuBaseGG };

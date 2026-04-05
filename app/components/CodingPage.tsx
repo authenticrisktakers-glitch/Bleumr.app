@@ -1,1016 +1,3618 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
-  X, FolderOpen, Folder, ChevronRight, ChevronDown,
-  Code2, Bug, Lightbulb, Wrench, FlaskConical, Save, Copy,
-  Check, Plus, Send, Bot, Sparkles, FileCode,
-  Upload, Search, Braces, ChevronUp,
-  ChevronDown as ChevronDownIcon, RotateCcw,
-  GitBranch, Package, BookOpen, Link2, Star, Eye,
-  Key, LogOut, RefreshCw, ExternalLink, ArrowLeft,
+  X, FolderOpen, Send, Sparkles, FileCode,
+  ChevronDown, ChevronRight, Copy, Check, RotateCcw,
+  FolderInput, Eye, Menu, Trash2, Plus, StopCircle,
+  Paperclip, Image as ImageIcon, ExternalLink,
 } from 'lucide-react';
+import { runFileScout, runLintAgent, runRefactorAgent, runTestGenAgent } from '../services/CodeAgents';
+import type { SubAgentResult, FileAccess } from '../services/CodeAgents';
+import SubscriptionService from '../services/SubscriptionService';
+import { usageBudget } from '../services/UsageBudget';
+import { preacher } from '../services/Preacher';
+import {
+  loadBleumrConfig, formatConfigForPrompt,
+  filterToolsForPlanMode, checkPlanModeBlock, PLAN_MODE_PROMPT,
+  saveCodeSession, loadCodeSessionsMeta, loadCodeSession, deleteCodeSession,
+  extractCodeMemories, getCodeContext,
+  parseHooks, runHooks,
+  parseSkills, matchSkillCommand, getSkillPrompt,
+} from '../services/CodeBleu';
+import type { BleumrConfigResult, Hook, Skill } from '../services/CodeBleu';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Extracted Code Bleu Engine Modules ──────────────────────────────────────
+import type { CodingSession, AgentMessage } from './CodeBleu/types';
+import { IMPORTANT_FILES, SOURCE_DIRS, IGNORE_DIRS, GROQ_MODELS } from './CodeBleu/constants';
+import {
+  getLang, msgId, shellSafe, safePath, fetchWithTimeout,
+  extractSuggestions, pickModel, highlightCode, safeClipboardCopy,
+} from './CodeBleu/utils';
+import { ALL_TOOLS, TOOL_CAT, SHELL_CMD, pickTools } from './CodeBleu/tools';
+import { groqFetch, streamGroqResponse } from './CodeBleu/api';
+import {
+  readDirRecursive, readFileFromHandle, writeFileFromHandle,
+  readFileElectron, writeFileElectron, readDirElectronRecursive,
+} from './CodeBleu/fileSystem';
+import { buildPreviewFromFiles } from './CodeBleu/preview';
 
-interface FileNode { name:string; path:string; type:'file'|'dir'; children?:FileNode[]; expanded?:boolean; }
-interface OpenFile { name:string; path:string; content:string; language:string; dirty:boolean; }
-interface ChatMessage { role:'user'|'assistant'|'system'; content:string; codeBlock?:string; }
-interface CodingPageProps { onClose:()=>void; apiKey?:string; }
-type Integration = 'github' | 'stackoverflow' | 'npm' | 'mdn' | null;
+// ─── Types (re-exported for backward compat) ────────────────────────────────
 
-// ─── Language map ─────────────────────────────────────────────────────────────
+interface CodingPageProps { onClose: () => void; apiKey?: string; }
+interface ProjectFile { name: string; path: string; content: string; }
 
-const LANGUAGE_MAP: Record<string,string> = {
-  ts:'typescript',tsx:'typescript',js:'javascript',jsx:'javascript',mjs:'javascript',cjs:'javascript',
-  py:'python',rs:'rust',go:'go',java:'java',cs:'csharp',
-  cpp:'cpp',cc:'cpp',cxx:'cpp',c:'c',h:'c',rb:'ruby',php:'php',swift:'swift',
-  kt:'kotlin',kts:'kotlin',html:'html',htm:'html',css:'css',scss:'scss',less:'less',
-  json:'json',jsonc:'json',yaml:'yaml',yml:'yaml',toml:'toml',
-  md:'markdown',mdx:'markdown',sh:'bash',bash:'bash',zsh:'bash',
-  sql:'sql',vue:'vue',svelte:'svelte',tf:'hcl',env:'plaintext',
-  lock:'plaintext',gitignore:'plaintext',dockerfile:'dockerfile',
-};
+// (extracted to CodeBleu modules)
 
-const QUICK_ACTIONS = [
-  { id:'debug',    label:'Debug',     icon:Bug,          prompt:'Debug this code. Find all bugs, explain each issue, then provide the complete fixed version.' },
-  { id:'explain',  label:'Explain',   icon:Lightbulb,    prompt:'Explain this code — what it does, how it works, and any important patterns.' },
-  { id:'refactor', label:'Refactor',  icon:Wrench,       prompt:'Refactor for readability, performance, and maintainability.' },
-  { id:'tests',    label:'Tests',     icon:FlaskConical, prompt:'Write comprehensive unit tests covering happy paths, edge cases, and error conditions.' },
-  { id:'types',    label:'Add Types', icon:Braces,       prompt:'Add full TypeScript type annotations with proper interfaces and generics.' },
-  { id:'optimize', label:'Optimize',  icon:Sparkles,     prompt:'Optimize for performance — reduce complexity, eliminate unnecessary work.' },
-];
+// → moved to ./CodeBleu/utils.ts, ./CodeBleu/tools.ts, ./CodeBleu/constants.ts
+// REMOVED: extractSuggestions, pickModel, GROQ_MODELS, mkTool, TOOL_CAT, tagged,
+//   ALL_TOOLS, shellSafe, safePath, fetchWithTimeout, SHELL_CMD, pickTools
 
-const PLACEHOLDER_CODE = `// CODE Bleu — powered by JUMARI
-// Your AI pair programmer is ready.
-//
-//  1. Connect GitHub to browse your repos
-//  2. Open a file or paste code here
-//  3. Hit an action above to analyze it
-//  4. Or ask JUMARI anything below
+/* extractSuggestions + pickModel + GROQ_MODELS → moved to ./CodeBleu/utils.ts & ./CodeBleu/constants.ts */
 
-function greet(name: string): string {
-  return \`Hello, \${name}! Ready to build.\`;
-}
+/* mkTool, TOOL_CAT, tagged, ALL_TOOLS, SHELL_CMD, pickTools → moved to ./CodeBleu/tools.ts */
 
-console.log(greet('World'));
-`;
+// (ALL_TOOLS, shellSafe, safePath, fetchWithTimeout, SHELL_CMD, pickTools all removed
+//  — now imported from ./CodeBleu/tools.ts and ./CodeBleu/utils.ts)
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Code Bleu Logo SVG ─────────────────────────────────────────────────────
 
-function detectLanguage(f:string):string {
-  const base = f.split('/').pop() ?? f;
-  // special dotfiles / no-extension files
-  const lower = base.toLowerCase();
-  if (lower==='dockerfile') return 'dockerfile';
-  if (lower==='.gitignore'||lower==='.env'||lower==='.env.local'||lower==='.env.example') return 'plaintext';
-  if (lower==='makefile') return 'bash';
-  return LANGUAGE_MAP[base.split('.').pop()?.toLowerCase()??'']??'plaintext';
-}
-
-function getFileColor(name:string):string {
-  const ext=name.split('.').pop()?.toLowerCase()??'';
-  const m:Record<string,string>={
-    ts:'#60a5fa',tsx:'#67e8f9',js:'#fcd34d',jsx:'#67e8f9',mjs:'#fcd34d',
-    py:'#86efac',rs:'#fb923c',go:'#67e8f9',java:'#f97316',cs:'#a78bfa',
-    cpp:'#fb7185',c:'#fb7185',rb:'#f87171',php:'#a78bfa',swift:'#f97316',
-    kt:'#fb923c',html:'#f87171',htm:'#f87171',
-    css:'#93c5fd',scss:'#f9a8d4',less:'#818cf8',
-    json:'#d1d5db',yaml:'#86efac',yml:'#86efac',toml:'#86efac',
-    md:'#c4b5fd',mdx:'#c4b5fd',sh:'#6ee7b7',bash:'#6ee7b7',
-    sql:'#fbbf24',vue:'#86efac',svelte:'#fb923c',
-  };
-  return m[ext]??'rgba(255,255,255,0.3)';
-}
-
-function extractCodeBlock(text:string):string|null {
-  const m=text.match(/```(?:\w+)?\n?([\s\S]*?)```/); return m?m[1].trim():null;
-}
-
-// ─── Glass styles ─────────────────────────────────────────────────────────────
-
-const G = {
-  panel:{ background:'rgba(255,255,255,0.03)', backdropFilter:'blur(48px) saturate(1.4)', WebkitBackdropFilter:'blur(48px) saturate(1.4)' } as React.CSSProperties,
-  el:{ background:'rgba(255,255,255,0.05)', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', border:'1px solid rgba(255,255,255,0.08)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.06)' } as React.CSSProperties,
-  border:'1px solid rgba(255,255,255,0.07)',
-};
-
-// ─── Integration API calls ────────────────────────────────────────────────────
-
-async function githubFetch(path:string, token:string) {
-  const r = await fetch(`https://api.github.com${path}`, { headers:{ Authorization:`Bearer ${token}`, Accept:'application/vnd.github.v3+json' } });
-  if (!r.ok) {
-    if (r.status === 401) throw new Error('GitHub 401: Invalid or expired token. Check your PAT and its scopes.');
-    if (r.status === 403) throw new Error('GitHub 403: Token lacks required permissions.');
-    throw new Error(`GitHub ${r.status}`);
-  }
-  return r.json();
-}
-
-async function searchStackOverflow(query:string) {
-  const r = await fetch(`https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(query)}&site=stackoverflow&pagesize=8&filter=withbody`);
-  const d = await r.json();
-  return d.items ?? [];
-}
-
-async function searchNpm(query:string) {
-  const r = await fetch(`https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=10`);
-  const d = await r.json();
-  return d.objects ?? [];
-}
-
-async function searchMdn(query:string) {
-  const r = await fetch(`https://developer.mozilla.org/api/v1/search?q=${encodeURIComponent(query)}&locale=en-US&size=8`);
-  const d = await r.json();
-  return d.documents ?? [];
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function LineNumbers({ code, scrollTop }:{ code:string; scrollTop:number }) {
+function CodeBleuLogo({ size = 28 }: { size?: number }) {
   return (
-    <div style={{position:'absolute',left:0,top:0,width:48,bottom:0,overflow:'hidden',userSelect:'none',pointerEvents:'none',paddingTop:14}}>
-      <div style={{transform:`translateY(-${scrollTop}px)`}}>
-        {code.split('\n').map((_,i)=>(
-          <div key={i} style={{height:21,lineHeight:'21px',textAlign:'right',paddingRight:12,fontSize:11,fontFamily:'"JetBrains Mono",monospace',color:'rgba(255,255,255,0.14)'}}>
-            {i+1}
-          </div>
-        ))}
-      </div>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="cbl-left" x1="0.5" y1="0" x2="0.5" y2="1">
+          <stop offset="0%" stopColor="#818cf8" />
+          <stop offset="100%" stopColor="#a855f7" />
+        </linearGradient>
+        <linearGradient id="cbl-right" x1="0.5" y1="0" x2="0.5" y2="1">
+          <stop offset="0%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#06b6d4" />
+        </linearGradient>
+      </defs>
+      {/* Left bracket < */}
+      <path d="M 40 8 L 8 50 L 40 92" stroke="url(#cbl-left)" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Right bracket > */}
+      <path d="M 60 8 L 92 50 L 60 92" stroke="url(#cbl-right)" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Colon dots */}
+      <circle cx="50" cy="36" r="5.5" fill="#818cf8" />
+      <circle cx="50" cy="64" r="5.5" fill="#818cf8" />
+    </svg>
   );
 }
 
-function FileTreeNode({ node, depth, onFileClick, activeFilePath, onToggle }:{
-  node:FileNode; depth:number; onFileClick:(n:FileNode)=>void; activeFilePath:string; onToggle:(p:string)=>void;
+// → moved to ./CodeBleu/fileSystem.ts
+
+// groqFetch, streamGroqResponse, readDirElectronRecursive, highlightCode,
+// PREVIEW_CONSOLE_BRIDGE, buildPreviewFromFiles — all moved to ./CodeBleu/ modules
+// (see api.ts, fileSystem.ts, utils.ts, preview.ts)
+
+// IS_ELECTRON_ENV kept local — used by component
+const IS_ELECTRON_ENV = typeof window !== 'undefined' && !!(window as any).orbit;
+
+// highlightCode, PREVIEW_CONSOLE_BRIDGE, buildPreviewFromFiles → ./CodeBleu/utils.ts + preview.ts
+
+// buildPreviewFromFiles → ./CodeBleu/preview.ts
+
+// ─── Code Block Component ─────────────────────────────────────────────────────
+
+function CodeBlock({ code, language, file, onCopy }: {
+  code: string; language: string; file?: string; onCopy: (text: string) => void;
 }) {
-  const active = node.path===activeFilePath;
-  return (
-    <div>
-      <button
-        onClick={()=>node.type==='dir'?onToggle(node.path):onFileClick(node)}
-        style={{ width:'100%',textAlign:'left',display:'flex',alignItems:'center',gap:5,padding:`3px 8px 3px ${8+depth*12}px`,fontSize:12,color:active?'rgba(255,255,255,0.9)':'rgba(255,255,255,0.4)',background:active?'rgba(255,255,255,0.08)':'transparent',border:'none',cursor:'pointer',borderRadius:4,transition:'all 0.1s',boxShadow:active?'inset 0 0 0 1px rgba(255,255,255,0.1)':'none',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}
-        onMouseEnter={e=>{if(!active){(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.05)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.7)';}}}
-        onMouseLeave={e=>{if(!active){(e.currentTarget as HTMLElement).style.background='transparent';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.4)';}}}
-      >
-        {node.type==='dir'
-          ? <>{node.expanded?<ChevronDown size={10} style={{color:'rgba(255,255,255,0.2)',flexShrink:0}}/>:<ChevronRight size={10} style={{color:'rgba(255,255,255,0.2)',flexShrink:0}}/>}<Folder size={12} style={{color:'rgba(255,255,255,0.35)',flexShrink:0}}/></>
-          : <FileCode size={12} style={{color:getFileColor(node.name),flexShrink:0,marginLeft:16}}/>
-        }
-        <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{node.name}</span>
-      </button>
-      {node.type==='dir'&&node.expanded&&node.children?.map(c=>(
-        <FileTreeNode key={c.path} node={c} depth={depth+1} onFileClick={onFileClick} activeFilePath={activeFilePath} onToggle={onToggle}/>
-      ))}
-    </div>
-  );
-}
+  const [copied, setCopied] = useState(false);
 
-// ─── Integration Panel ────────────────────────────────────────────────────────
-
-function IntegrationPanel({
-  integration, githubToken, githubUser, githubRepos, onConnectGitHub, onDisconnectGitHub,
-  onSelectGitHubRepo, onClose, activeFile,
-}:{
-  integration: Integration;
-  githubToken: string; githubUser: any; githubRepos: any[];
-  onConnectGitHub: (token:string)=>Promise<void>;
-  onDisconnectGitHub: ()=>void;
-  onSelectGitHubRepo: (repo:any)=>void;
-  onClose: ()=>void;
-  activeFile: OpenFile|undefined;
-}) {
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
-  const [connecting, setConnecting] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { setSearch(''); setResults([]); setError(''); setSelectedItem(null); setTimeout(()=>searchRef.current?.focus(),100); }, [integration]);
-
-  const doSearch = useCallback(async (q:string) => {
-    if (!q.trim()) { setResults([]); return; }
-    setLoading(true); setError('');
-    try {
-      if (integration==='stackoverflow') setResults(await searchStackOverflow(q));
-      else if (integration==='npm') setResults(await searchNpm(q));
-      else if (integration==='mdn') setResults(await searchMdn(q));
-    } catch(e:any) { setError('Search failed. Check your connection.'); }
-    finally { setLoading(false); }
-  }, [integration]);
-
-  useEffect(() => {
-    const t = setTimeout(()=>{ if (search.trim().length>1) doSearch(search); }, 500);
-    return ()=>clearTimeout(t);
-  }, [search, doSearch]);
-
-  const handleConnect = async () => {
-    if (!tokenInput.trim()) return;
-    setConnecting(true); setError('');
-    try { await onConnectGitHub(tokenInput.trim()); setTokenInput(''); }
-    catch { setError('Invalid token or no access. Check your GitHub PAT.'); }
-    finally { setConnecting(false); }
+  const handleCopy = () => {
+    onCopy(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  const panelBg:React.CSSProperties = { position:'absolute',top:0,right:0,bottom:0,width:340,display:'flex',flexDirection:'column',background:'rgba(8,10,18,0.92)',backdropFilter:'blur(40px)',WebkitBackdropFilter:'blur(40px)',borderLeft:'1px solid rgba(255,255,255,0.07)',zIndex:50,boxShadow:'-8px 0 32px rgba(0,0,0,0.4)' };
-
-  const TITLES:Record<string,string> = { github:'GitHub', stackoverflow:'Stack Overflow', npm:'npm Registry', mdn:'MDN Docs' };
-
   return (
-    <motion.div initial={{x:340,opacity:0}} animate={{x:0,opacity:1}} exit={{x:340,opacity:0}} transition={{duration:0.2,ease:'easeOut'}} style={panelBg}>
+    <div style={{
+      background: 'rgba(0,0,0,0.4)',
+      borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)',
+      overflow: 'hidden', margin: '8px 0',
+    }}>
       {/* Header */}
-      <div style={{height:44,display:'flex',alignItems:'center',padding:'0 14px',borderBottom:'1px solid rgba(255,255,255,0.06)',flexShrink:0,gap:8}}>
-        <button onClick={onClose} style={{background:'none',border:'none',color:'rgba(255,255,255,0.3)',cursor:'pointer',display:'flex',padding:4,borderRadius:4,transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.7)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.3)';}}><ArrowLeft size={14}/></button>
-        <span style={{fontSize:12.5,fontWeight:600,color:'rgba(255,255,255,0.6)'}}>
-          {integration ? TITLES[integration] : ''}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 12px', background: 'rgba(255,255,255,0.03)',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <FileCode size={12} style={{ color: '#6366f1', opacity: 0.7 }} />
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: '"JetBrains Mono", monospace' }}>
+            {file || language}
+          </span>
+        </div>
+        <button onClick={handleCopy} style={{
+          background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+          borderRadius: 4, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4,
+          fontSize: 11, transition: 'color 0.15s',
+        }}>
+          {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy</>}
+        </button>
+      </div>
+      {/* Code */}
+      <pre style={{
+        margin: 0, padding: '12px 16px', overflow: 'auto', maxHeight: 400,
+        fontSize: 12.5, lineHeight: 1.6,
+        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+        color: '#abb2bf',
+      }}>
+        <code dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }} />
+      </pre>
+    </div>
+  );
+}
+
+// ─── Code Bleu Avatar (inline SVG — diamond face with eyes) ─────────────────
+
+function CodeBleuAvatar({ size = 24, isThinking = false, isStreaming = false }: {
+  size?: number;
+  isThinking?: boolean;
+  isStreaming?: boolean;
+}) {
+  const uid = React.useId().replace(/:/g, '');
+
+  const animStyle: React.CSSProperties = isThinking
+    ? { animation: 'cba-think 2.4s ease-in-out infinite', filter: 'drop-shadow(0 0 5px rgba(129,140,248,0.6))' }
+    : isStreaming
+    ? { animation: 'cba-stream 1.8s ease-in-out infinite', filter: 'drop-shadow(0 0 3px rgba(129,140,248,0.3))' }
+    : { animation: 'cba-idle 3s ease-in-out infinite' };
+
+  return (
+    <div style={{ width: size, height: size, flexShrink: 0, transition: 'filter 0.3s', ...animStyle }}>
+      <svg viewBox="0 0 100 100" width={size} height={size} fill="none">
+        <defs>
+          <linearGradient id={`cbg${uid}`} x1="0.2" y1="0" x2="0.8" y2="1">
+            <stop offset="0%" stopColor="#a5b4fc" />
+            <stop offset="100%" stopColor="#e0e7ff" />
+          </linearGradient>
+        </defs>
+        {/* Top chevron ^ (open diamond — gap between top and bottom) */}
+        <polyline points="14,50 50,16 86,50"
+          stroke={`url(#cbg${uid})`} strokeWidth="9"
+          strokeLinecap="round" strokeLinejoin="round" />
+        {/* Bottom chevron V (smile) */}
+        <polyline points="14,56 50,90 86,56"
+          stroke={`url(#cbg${uid})`} strokeWidth="9"
+          strokeLinecap="round" strokeLinejoin="round" />
+        {/* Left eye — always blinks, faster when thinking */}
+        <circle cx="37" cy="53" r="5.5" fill={`url(#cbg${uid})`}
+          style={{ transformOrigin: '37px 53px', animation: `cba-blink ${isThinking ? '2s' : '4s'} ease-in-out infinite` }} />
+        {/* Right eye — slight delay for natural feel */}
+        <circle cx="63" cy="53" r="5.5" fill={`url(#cbg${uid})`}
+          style={{ transformOrigin: '63px 53px', animation: `cba-blink ${isThinking ? '2s' : '4s'} ease-in-out infinite 0.1s` }} />
+      </svg>
+    </div>
+  );
+}
+
+// Inject Code Bleu avatar keyframes once
+const CBA_STYLE_ID = 'cba-keyframes';
+if (typeof document !== 'undefined' && !document.getElementById(CBA_STYLE_ID)) {
+  const style = document.createElement('style');
+  style.id = CBA_STYLE_ID;
+  style.textContent = `
+    @keyframes cba-idle {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-1.5px) rotate(0deg); }
+    }
+    @keyframes cba-think {
+      0% { transform: rotate(0deg) scale(1); }
+      12% { transform: rotate(8deg) scale(1.08); }
+      25% { transform: rotate(0deg) scale(1.04); }
+      37% { transform: rotate(-8deg) scale(1.08); }
+      50% { transform: rotate(0deg) scale(1); }
+      62% { transform: rotate(6deg) scale(1.06); }
+      75% { transform: rotate(0deg) scale(1.02); }
+      87% { transform: rotate(-6deg) scale(1.06); }
+      100% { transform: rotate(0deg) scale(1); }
+    }
+    @keyframes cba-stream {
+      0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+      25% { transform: scale(1.03) rotate(2deg); opacity: 0.9; }
+      50% { transform: scale(1.06) rotate(0deg); opacity: 0.85; }
+      75% { transform: scale(1.03) rotate(-2deg); opacity: 0.9; }
+    }
+    @keyframes cba-blink {
+      0%, 88%, 100% { transform: scaleY(1); }
+      92% { transform: scaleY(0.05); }
+      94% { transform: scaleY(1); }
+      97% { transform: scaleY(0.05); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// ─── Activity Block (agent reads/writes files inline) ─────────────────────────
+
+const ActivityBlock = memo(function ActivityBlock({ message }: { message: AgentMessage }) {
+  const [collapsed, setCollapsed] = useState(true);
+
+  // ── Thinking / status indicator (no expand/collapse) ──
+  if (message.activity === 'thinking') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={{ duration: 0.2 }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 12px', margin: '4px 0',
+          color: 'rgba(255,255,255,0.45)', fontSize: 12,
+        }}
+      >
+        <span style={{
+          width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+          background: 'rgba(255,255,255,0.35)', display: 'inline-block',
+          animation: 'pulse-dot 1.2s ease-in-out infinite',
+        }} />
+        <span style={{ fontStyle: 'italic' }}>{message.content || 'Working...'}</span>
+      </motion.div>
+    );
+  }
+
+  const label = message.activity === 'reading' ? 'Read'
+    : message.activity === 'writing' ? 'Wrote'
+    : message.activity === 'analyzing' ? 'Analyzing'
+    : 'Working';
+
+  const accentColor = message.activity === 'writing' ? '#34d399' : '#6366f1';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      style={{ margin: '3px 0' }}
+    >
+      {/* Inline row — icon + label + file path — clickable to expand */}
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          padding: '3px 0', cursor: 'pointer',
+          color: 'rgba(255,255,255,0.4)', fontSize: 12,
+        }}
+      >
+        <span style={{
+          width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+          background: accentColor, display: 'inline-block', opacity: 0.7,
+        }} />
+        <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 500, fontSize: 11.5 }}>{label}</span>
+        {message.files?.[0] && (
+          <span style={{ color: 'rgba(255,255,255,0.25)', fontFamily: '"JetBrains Mono", monospace', fontSize: 11 }}>
+            {message.files[0].path}
+          </span>
+        )}
+        <span style={{ color: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center' }}>
+          {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
         </span>
-        {integration==='github' && githubUser && (
-          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
-            <img src={githubUser.avatar_url} alt="" style={{width:20,height:20,borderRadius:'50%',opacity:0.8}}/>
-            <span style={{fontSize:11,color:'rgba(255,255,255,0.35)'}}>{githubUser.login}</span>
-            <button onClick={onDisconnectGitHub} title="Disconnect" style={{background:'none',border:'none',color:'rgba(255,255,255,0.2)',cursor:'pointer',display:'flex',padding:3,borderRadius:3,transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(252,165,165,0.7)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.2)';}}><LogOut size={12}/></button>
-          </div>
-        )}
       </div>
 
-      <div style={{flex:1,overflowY:'auto',display:'flex',flexDirection:'column'}}>
-
-        {/* ── GITHUB ── */}
-        {integration==='github' && !githubUser && (
-          <div style={{padding:20,display:'flex',flexDirection:'column',gap:14}}>
-            <div style={{padding:'12px 14px',borderRadius:8,background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)'}}>
-              <p style={{margin:'0 0 10px',fontSize:12,color:'rgba(255,255,255,0.5)',lineHeight:1.6}}>Connect your GitHub account to browse repos and open files directly into the editor.</p>
-              <p style={{margin:'0 0 14px',fontSize:11,color:'rgba(255,255,255,0.3)',lineHeight:1.5}}>Create a Personal Access Token at <strong style={{color:'rgba(255,255,255,0.5)'}}>github.com → Settings → Developer settings → PAT</strong> with <code style={{color:'rgba(255,255,255,0.5)'}}>repo</code> scope.</p>
-              <input
-                value={tokenInput} onChange={e=>setTokenInput(e.target.value)}
-                onKeyDown={e=>{ if(e.key==='Enter') handleConnect(); }}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                type="password"
-                style={{width:'100%',padding:'8px 10px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,color:'rgba(255,255,255,0.8)',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'"JetBrains Mono",monospace',marginBottom:10}}
-                onFocus={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.2)';}}
-                onBlur={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.1)';}}
-              />
-              <button onClick={handleConnect} disabled={connecting||!tokenInput.trim()} style={{width:'100%',padding:'8px',borderRadius:6,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.14)',color:'rgba(255,255,255,0.7)',cursor:'pointer',fontSize:12.5,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',gap:6,transition:'all 0.12s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.14)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.08)';}}>
-                {connecting?<><RefreshCw size={12} style={{animation:'spin 1s linear infinite'}}/>Connecting…</>:<><Key size={12}/>Connect GitHub</>}
-              </button>
-              {error && <p style={{margin:'10px 0 0',fontSize:11,color:'rgba(252,165,165,0.8)'}}>{error}</p>}
-            </div>
-          </div>
-        )}
-
-        {integration==='github' && githubUser && (
-          <div style={{display:'flex',flexDirection:'column',flex:1}}>
-            <div style={{padding:'8px 10px 4px',flexShrink:0}}>
-              <div style={{position:'relative'}}>
-                <Search size={11} style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',color:'rgba(255,255,255,0.2)',pointerEvents:'none'}}/>
-                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter repos…" ref={searchRef} style={{width:'100%',padding:'5px 8px 5px 24px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:6,color:'rgba(255,255,255,0.7)',fontSize:11.5,outline:'none',boxSizing:'border-box'}}/>
-              </div>
-            </div>
-            <div style={{flex:1,overflowY:'auto',padding:'4px 6px'}}>
-              {githubRepos
-                .filter(r=>!search||r.name.toLowerCase().includes(search.toLowerCase())||r.description?.toLowerCase().includes(search.toLowerCase()))
-                .map(repo => (
-                  <button key={repo.id} onClick={()=>onSelectGitHubRepo(repo)} style={{width:'100%',textAlign:'left',padding:'8px 10px',borderRadius:6,background:'transparent',border:'1px solid transparent',cursor:'pointer',transition:'all 0.12s',marginBottom:2,display:'block'}}
-                    onMouseEnter={e=>{const el=e.currentTarget as HTMLElement;el.style.background='rgba(255,255,255,0.05)';el.style.borderColor='rgba(255,255,255,0.08)';}}
-                    onMouseLeave={e=>{const el=e.currentTarget as HTMLElement;el.style.background='transparent';el.style.borderColor='transparent';}}
-                  >
-                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3}}>
-                      <GitBranch size={11} style={{color:'rgba(255,255,255,0.3)',flexShrink:0}}/>
-                      <span style={{fontSize:12.5,color:'rgba(255,255,255,0.75)',fontWeight:500}}>{repo.name}</span>
-                      {repo.private&&<span style={{fontSize:9,color:'rgba(255,255,255,0.3)',background:'rgba(255,255,255,0.07)',padding:'1px 5px',borderRadius:3}}>private</span>}
-                      <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,0.2)',display:'flex',alignItems:'center',gap:2}}><Star size={9}/>{repo.stargazers_count}</span>
-                      </div>
-                    </div>
-                    {repo.description&&<p style={{margin:0,fontSize:11,color:'rgba(255,255,255,0.3)',lineHeight:1.4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{repo.description}</p>}
-                    <span style={{fontSize:10,color:'rgba(255,255,255,0.2)'}}>{repo.language}</span>
-                  </button>
-                ))}
-              {githubRepos.length===0&&<div style={{padding:'24px 12px',textAlign:'center',fontSize:11,color:'rgba(255,255,255,0.2)'}}>No repos found</div>}
-            </div>
-          </div>
-        )}
-
-        {/* ── STACK OVERFLOW / npm / MDN ── */}
-        {(integration==='stackoverflow'||integration==='npm'||integration==='mdn') && (
-          <div style={{display:'flex',flexDirection:'column',flex:1}}>
-            <div style={{padding:'8px 10px 6px',flexShrink:0,borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
-              <div style={{position:'relative'}}>
-                <Search size={11} style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',color:'rgba(255,255,255,0.2)',pointerEvents:'none'}}/>
-                <input ref={searchRef} value={search} onChange={e=>setSearch(e.target.value)}
-                  placeholder={integration==='stackoverflow'?'Search questions…':integration==='npm'?'Search packages…':'Search docs…'}
-                  style={{width:'100%',padding:'6px 8px 6px 24px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:6,color:'rgba(255,255,255,0.7)',fontSize:12,outline:'none',boxSizing:'border-box'}}
-                  onFocus={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.18)';}}
-                  onBlur={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.08)';}}
-                />
-              </div>
-              {integration==='stackoverflow' && activeFile?.content.trim() && (
-                <button onClick={()=>setSearch(activeFile.name.replace(/\.[^.]+$/,''))} style={{marginTop:6,padding:'4px 10px',borderRadius:5,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',color:'rgba(255,255,255,0.35)',fontSize:11,cursor:'pointer',transition:'all 0.12s'}}
-                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.08)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}}
-                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.04)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.35)';}}
-                >Search for current file's topic</button>
-              )}
-            </div>
-            <div style={{flex:1,overflowY:'auto',padding:'6px 8px',display:'flex',flexDirection:'column',gap:4}}>
-              {loading && <div style={{padding:'20px',textAlign:'center',color:'rgba(255,255,255,0.25)',fontSize:12}}>Searching…</div>}
-              {error && <div style={{padding:'12px',fontSize:11,color:'rgba(252,165,165,0.7)',background:'rgba(239,68,68,0.08)',borderRadius:6,border:'1px solid rgba(239,68,68,0.15)'}}>{error}</div>}
-              {!loading && !error && results.length===0 && search.length>1 && <div style={{padding:'20px',textAlign:'center',color:'rgba(255,255,255,0.2)',fontSize:12}}>No results for "{search}"</div>}
-              {!loading && results.length===0 && search.length<=1 && (
-                <div style={{padding:'24px 12px',textAlign:'center',color:'rgba(255,255,255,0.2)',fontSize:11,lineHeight:1.6}}>
-                  {integration==='stackoverflow'?'Search Stack Overflow questions live.':integration==='npm'?'Search the npm registry for packages.':'Search MDN Web Docs.'}
+      <AnimatePresence>
+        {!collapsed && message.files?.map((f, i) => (
+          <motion.div
+            key={i}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            <pre style={{
+              margin: '2px 0 2px 19px', padding: '6px 10px', overflow: 'auto', maxHeight: 250,
+              fontSize: 11, lineHeight: 1.5, color: '#abb2bf',
+              fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+              background: 'rgba(0,0,0,0.25)', borderRadius: 6,
+            }}>
+              <code dangerouslySetInnerHTML={{ __html: highlightCode(f.content.slice(0, 3000), getLang(f.path)) }} />
+              {f.content.length > 3000 && (
+                <div style={{ color: 'rgba(255,255,255,0.2)', marginTop: 4, fontSize: 10 }}>
+                  ... {f.content.length - 3000} more characters
                 </div>
               )}
-
-              {/* Stack Overflow results */}
-              {integration==='stackoverflow' && results.map((item:any) => (
-                <div key={item.question_id} style={{borderRadius:7,border:'1px solid rgba(255,255,255,0.06)',background:'rgba(255,255,255,0.02)',overflow:'hidden'}}>
-                  <button onClick={()=>setSelectedItem(selectedItem?.question_id===item.question_id?null:item)} style={{width:'100%',textAlign:'left',padding:'9px 11px',background:'transparent',border:'none',cursor:'pointer',display:'block',transition:'background 0.1s'}}
-                    onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.04)';}}
-                    onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='transparent';}}
-                  >
-                    <div style={{display:'flex',alignItems:'flex-start',gap:8,marginBottom:4}}>
-                      <div style={{flexShrink:0,padding:'2px 6px',borderRadius:4,background:item.is_answered?'rgba(134,239,172,0.1)':'rgba(255,255,255,0.05)',border:`1px solid ${item.is_answered?'rgba(134,239,172,0.2)':'rgba(255,255,255,0.08)'}`,fontSize:10,color:item.is_answered?'rgba(134,239,172,0.8)':'rgba(255,255,255,0.3)'}}>
-                        {item.answer_count} ans
-                      </div>
-                      <span style={{fontSize:12,color:'rgba(255,255,255,0.65)',lineHeight:1.4,flex:1}} dangerouslySetInnerHTML={{__html:item.title}}/>
-                    </div>
-                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                      <span style={{fontSize:10,color:'rgba(255,255,255,0.2)'}}>{item.score} votes</span>
-                      <div style={{display:'flex',gap:3,flex:1,flexWrap:'wrap'}}>
-                        {item.tags?.slice(0,4).map((t:string)=>(
-                          <span key={t} style={{fontSize:9,color:'rgba(255,255,255,0.25)',background:'rgba(255,255,255,0.05)',padding:'1px 5px',borderRadius:3}}>{t}</span>
-                        ))}
-                      </div>
-                      <a href={item.link} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{color:'rgba(255,255,255,0.25)',display:'flex',textDecoration:'none',transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.25)';}}>
-                        <ExternalLink size={10}/>
-                      </a>
-                    </div>
-                  </button>
-                  {selectedItem?.question_id===item.question_id && item.body && (
-                    <div style={{padding:'8px 11px 10px',borderTop:'1px solid rgba(255,255,255,0.05)',background:'rgba(0,0,0,0.2)'}}>
-                      <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',lineHeight:1.6,maxHeight:200,overflowY:'auto'}} dangerouslySetInnerHTML={{__html:item.body?.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,600)+'…'}}/>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* npm results */}
-              {integration==='npm' && results.map((obj:any) => {
-                const p = obj.package;
-                return (
-                  <div key={p.name} style={{padding:'9px 11px',borderRadius:7,border:'1px solid rgba(255,255,255,0.06)',background:'rgba(255,255,255,0.02)',display:'flex',flexDirection:'column',gap:4}}>
-                    <div style={{display:'flex',alignItems:'center',gap:6}}>
-                      <Package size={11} style={{color:'rgba(255,255,255,0.3)',flexShrink:0}}/>
-                      <span style={{fontSize:13,color:'rgba(255,255,255,0.75)',fontWeight:500}}>{p.name}</span>
-                      <span style={{fontSize:10,color:'rgba(255,255,255,0.25)',marginLeft:2}}>v{p.version}</span>
-                      <a href={p.links?.npm} target="_blank" rel="noreferrer" style={{marginLeft:'auto',color:'rgba(255,255,255,0.2)',display:'flex',textDecoration:'none',transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.2)';}}>
-                        <ExternalLink size={10}/>
-                      </a>
-                    </div>
-                    {p.description&&<p style={{margin:0,fontSize:11,color:'rgba(255,255,255,0.4)',lineHeight:1.5}}>{p.description}</p>}
-                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                      {p.keywords?.slice(0,4).map((k:string)=>(
-                        <span key={k} style={{fontSize:9,color:'rgba(255,255,255,0.25)',background:'rgba(255,255,255,0.05)',padding:'1px 5px',borderRadius:3}}>{k}</span>
-                      ))}
-                    </div>
-                    <button onClick={()=>navigator.clipboard.writeText(`npm install ${p.name}`)} style={{marginTop:2,padding:'4px 10px',borderRadius:5,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',color:'rgba(255,255,255,0.35)',fontSize:10.5,cursor:'pointer',textAlign:'left',fontFamily:'"JetBrains Mono",monospace',transition:'all 0.12s'}}
-                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.08)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}}
-                      onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.04)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.35)';}}
-                    >
-                      npm install {p.name} — copy
-                    </button>
-                  </div>
-                );
-              })}
-
-              {/* MDN results */}
-              {integration==='mdn' && results.map((doc:any) => (
-                <div key={doc.mdn_url} style={{padding:'9px 11px',borderRadius:7,border:'1px solid rgba(255,255,255,0.06)',background:'rgba(255,255,255,0.02)',display:'flex',flexDirection:'column',gap:5}}>
-                  <div style={{display:'flex',alignItems:'flex-start',gap:6}}>
-                    <BookOpen size={11} style={{color:'rgba(255,255,255,0.3)',flexShrink:0,marginTop:2}}/>
-                    <div style={{flex:1}}>
-                      <span style={{fontSize:12.5,color:'rgba(255,255,255,0.7)',fontWeight:500,lineHeight:1.3,display:'block'}}>{doc.title}</span>
-                      {doc.summary&&<p style={{margin:'4px 0 0',fontSize:11,color:'rgba(255,255,255,0.35)',lineHeight:1.5}}>{doc.summary.slice(0,180)}{doc.summary.length>180?'…':''}</p>}
-                    </div>
-                    <a href={`https://developer.mozilla.org${doc.mdn_url}`} target="_blank" rel="noreferrer" style={{color:'rgba(255,255,255,0.2)',display:'flex',textDecoration:'none',flexShrink:0,transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.2)';}}>
-                      <ExternalLink size={10}/>
-                    </a>
-                  </div>
-                  {doc.mdn_url&&<span style={{fontSize:9.5,color:'rgba(255,255,255,0.2)',fontFamily:'"JetBrains Mono",monospace'}}>{doc.mdn_url}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+            </pre>
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </motion.div>
   );
+});
+
+// ─── Activity Group (collapses consecutive activities into compact summary) ──
+
+const ActivityGroup = memo(function ActivityGroup({ items }: { items: AgentMessage[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Separate live thinking from completed activities
+  const liveItems = items.filter(m => m.activity === 'thinking' && m.streaming);
+  const completed = items.filter(m => !(m.activity === 'thinking' && m.streaming));
+
+  // Build summary counts
+  const writes = completed.filter(m => m.activity === 'writing');
+  const reads = completed.filter(m => m.activity === 'reading');
+  const other = completed.filter(m => m.activity !== 'writing' && m.activity !== 'reading' && m.activity !== 'thinking');
+
+  const parts: string[] = [];
+  if (writes.length > 0) parts.push(`Wrote ${writes.length} file${writes.length > 1 ? 's' : ''}`);
+  if (reads.length > 0) parts.push(`Read ${reads.length} file${reads.length > 1 ? 's' : ''}`);
+  if (other.length > 0) parts.push(`${other.length} step${other.length > 1 ? 's' : ''}`);
+  const summary = parts.join(' · ') || `${completed.length} steps`;
+
+  // If only live thinking items, just show the last one
+  if (completed.length === 0 && liveItems.length > 0) {
+    return <ActivityBlock message={liveItems[liveItems.length - 1]} />;
+  }
+
+  return (
+    <div style={{ margin: '4px 0' }}>
+      {/* Compact summary bar */}
+      {completed.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '5px 10px', cursor: 'pointer',
+              color: 'rgba(255,255,255,0.4)', fontSize: 11.5,
+              background: expanded ? 'rgba(99,102,241,0.05)' : 'transparent',
+              borderRadius: 8, transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.06)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = expanded ? 'rgba(99,102,241,0.05)' : 'transparent'; }}
+          >
+            <span style={{
+              width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(255,255,255,0.3)', display: 'inline-block',
+            }} />
+            <span style={{ fontWeight: 500 }}>{summary}</span>
+            <span style={{ color: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
+              {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+            </span>
+          </div>
+
+          <AnimatePresence>
+            {expanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                style={{ overflow: 'hidden' }}
+              >
+                {completed.map(msg => (
+                  <div key={msg.id} style={{ paddingLeft: 8 }}>
+                    <ActivityBlock message={msg} />
+                  </div>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      )}
+
+      {/* Live thinking indicator — always visible */}
+      {liveItems.length > 0 && <ActivityBlock message={liveItems[liveItems.length - 1]} />}
+    </div>
+  );
+});
+
+// ─── Sub-Agent Block (shows sub-agent identity + result like Claude's UI) ────
+
+const SUB_AGENT_META: Record<string, { color: string; label: string }> = {
+  FileScout: { color: '#818cf8', label: 'Diamond' },
+  LintCheck: { color: '#f59e0b', label: 'Troy' },
+  Refactor:  { color: '#34d399', label: 'Dominic' },
+  TestGen:   { color: '#06b6d4', label: 'TestGen' },
+};
+
+const SubAgentBlock = memo(function SubAgentBlock({ message }: { message: AgentMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = SUB_AGENT_META[message.subAgent?.name ?? ''] ?? { color: '#818cf8', label: message.subAgent?.name ?? 'Agent' };
+  const isRunning = message.subAgent?.status === 'running';
+  const isError = message.subAgent?.status === 'error';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      style={{ margin: '4px 0' }}
+    >
+      {/* Inline row — no container, just icon + name + status */}
+      <div
+        onClick={() => !isRunning && message.content && setExpanded(!expanded)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '4px 0', cursor: !isRunning && message.content ? 'pointer' : 'default',
+        }}
+      >
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+          background: meta.color, display: 'inline-block',
+          animation: isRunning ? 'pulse-dot 1.2s ease-in-out infinite' : undefined,
+        }} />
+        <span style={{ color: meta.color, fontWeight: 600, fontSize: 12 }}>{meta.label}</span>
+        {isRunning && (
+          <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, fontStyle: 'italic' }}>working...</span>
+        )}
+        {!isRunning && !isError && message.content && (
+          <>
+            <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11 }}>done</span>
+            <span style={{ color: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center' }}>
+              {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </span>
+          </>
+        )}
+        {isError && (
+          <span style={{ color: 'rgba(239,68,68,0.5)', fontSize: 11 }}>failed</span>
+        )}
+      </div>
+
+      {/* Expanded result — just indented text, no box */}
+      <AnimatePresence>
+        {expanded && message.content && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              paddingLeft: 20, paddingTop: 2, paddingBottom: 4,
+              fontSize: 12.5, color: 'rgba(255,255,255,0.5)',
+              lineHeight: 1.6, whiteSpace: 'pre-wrap',
+            }}
+          >
+            {message.content}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+});
+
+// ─── Message rendering (cached — only re-parses when content changes) ────────
+
+const _parseCache = new Map<string, React.ReactNode[]>();
+const PARSE_CACHE_MAX = 60;
+
+function parseAssistantContent(content: string): React.ReactNode[] {
+  const cached = _parseCache.get(content);
+  if (cached) return cached;
+
+  const parts: React.ReactNode[] = [];
+  const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      const text = content.slice(lastIndex, match.index).trim();
+      if (text) parts.push(<span key={`t${lastIndex}`} style={{ whiteSpace: 'pre-wrap' }}>{text}</span>);
+    }
+    const lang = match[1] || 'plaintext';
+    const code = match[2].trim();
+    parts.push(
+      <CodeBlock
+        key={`c${match.index}`}
+        code={code}
+        language={lang}
+        onCopy={(t) => {
+          navigator.clipboard.writeText(t).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = t; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+          });
+        }}
+      />
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    const text = content.slice(lastIndex).trim();
+    if (text) parts.push(<span key={`t${lastIndex}`} style={{ whiteSpace: 'pre-wrap' }}>{text}</span>);
+  }
+
+  const result = parts.length ? parts : [<span key="0" style={{ whiteSpace: 'pre-wrap' }}>{content}</span>];
+
+  // Evict oldest entries when cache grows too large
+  if (_parseCache.size >= PARSE_CACHE_MAX) {
+    const first = _parseCache.keys().next().value;
+    if (first !== undefined) _parseCache.delete(first);
+  }
+  _parseCache.set(content, result);
+  return result;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function CodingPage({ onClose, apiKey }: CodingPageProps) {
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>([{ name:'untitled.ts',path:'__untitled__',content:PLACEHOLDER_CODE,language:'typescript',dirty:false }]);
-  const [activeFilePath, setActiveFilePath] = useState('__untitled__');
-  const [scrollTop, setScrollTop] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const orbit = (window as any).orbit;
-
-  // Local file tree
-  const [fileTree, setFileTree] = useState<FileNode[]>([]);
-  const [treeSearch, setTreeSearch] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  // FileSystem Access API handle registry (path → handle)
-  const fsHandleMap = useRef<Map<string, FileSystemFileHandle | FileSystemDirectoryHandle>>(new Map());
-
-  // Integrations
-  const [activeIntegration, setActiveIntegration] = useState<Integration>(null);
-  const [githubToken, setGithubToken] = useState('');
-  const [githubUser, setGithubUser] = useState<any>(null);
-  const [githubRepos, setGithubRepos] = useState<any[]>([]);
-  const [githubRepo, setGithubRepo] = useState<any>(null);
-  const [githubFileTree, setGithubFileTree] = useState<FileNode[]>([]);
-
-  // JUMARI
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role:'system', content:'CODE Bleu is ready. Open a file or paste code, then use the actions above or ask me anything.' }]);
+  // ── State ──
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
-  const [copiedIdx, setCopiedIdx] = useState<number|null>(null);
-  const [jumariOpen, setJumariOpen] = useState(true);
+  const [isWorking, setIsWorking] = useState(false);
+  const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<{ path: string; name: string }[]>([]);
+  const [projectContext, setProjectContext] = useState<string>('');
+  const [dirHandle, setDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [isElectronProject, setIsElectronProject] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [writtenFiles, setWrittenFiles] = useState<{ path: string; content: string }[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sessions, setSessions] = useState<CodingSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [autoApprove, setAutoApprove] = useState(false);
+  const [showAutoWarning, setShowAutoWarning] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<{ name: string; dataUri: string; path: string }[]>([]);
+  const [planMode, setPlanMode] = useState(false);
+  const [bleumrConfig, setBleumrConfig] = useState<BleumrConfigResult | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortedRef = useRef(false);
+  const agentRunningRef = useRef(false);
+  const loopGenRef = useRef(0); // Generation counter — detects stale loops after session switch
+  const mountedRef = useRef(true); // Unmount detection — prevents ghost state updates
+  const projectPathRef = useRef<string | null>(null);
+  const lastUserMsgRef = useRef('');
+  const lastToolContextRef = useRef('');
+  const hooksRef = useRef<Hook[]>([]);
+  const skillsRef = useRef<Skill[]>([]);
 
-  const activeFile = openFiles.find(f=>f.path===activeFilePath);
+  const isElectron = typeof window !== 'undefined' && !!(window as any).orbit;
 
-  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:'smooth'}); },[messages]);
+  // Unmount cleanup — stops ghost state updates from lingering async loops
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; abortedRef.current = true; };
+  }, []);
 
-  // Load saved GitHub token on mount
-  useEffect(()=>{
-    const load = async () => {
-      const stored = orbit?.storage?.getSecure ? await orbit.storage.getSecure('github_pat').catch(()=>null) : null;
-      if (stored) connectGitHub(stored, true).catch(()=>{ /* stored token expired/invalid — silently ignore */ });
-    };
-    load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  // Keep projectPath ref in sync
+  useEffect(() => { projectPathRef.current = projectPath; }, [projectPath]);
 
-  // ── GitHub ────────────────────────────────────────────────────────────────
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const connectGitHub = useCallback(async (token:string, silent=false) => {
-    const user = await githubFetch('/user', token);
-    const repos = await githubFetch('/user/repos?per_page=100&sort=updated', token);
-    setGithubToken(token); setGithubUser(user); setGithubRepos(repos);
-    if (orbit?.storage?.setSecure) await orbit.storage.setSecure('github_pat', token).catch(()=>{});
-  }, [orbit]);
-
-  const disconnectGitHub = useCallback(()=>{
-    setGithubToken(''); setGithubUser(null); setGithubRepos([]); setGithubRepo(null); setGithubFileTree([]);
-    if (orbit?.storage?.setSecure) orbit.storage.setSecure('github_pat','').catch(()=>{});
-  },[orbit]);
-
-  const selectGitHubRepo = useCallback(async (repo:any) => {
-    setGithubRepo(repo);
-    try {
-      const tree = await githubFetch(`/repos/${repo.full_name}/git/trees/HEAD?recursive=1`, githubToken);
-      const nodes: FileNode[] = [];
-      const dirMap: Record<string,FileNode> = {};
-      for (const item of tree.tree ?? []) {
-        if (item.type==='blob') {
-          const parts = item.path.split('/');
-          const name = parts[parts.length-1];
-          const parentPath = parts.slice(0,-1).join('/');
-          const node:FileNode = { name, path:`gh:${repo.full_name}:${item.path}`, type:'file' };
-          if (parentPath && dirMap[parentPath]) {
-            if (!dirMap[parentPath].children) dirMap[parentPath].children=[];
-            dirMap[parentPath].children!.push(node);
-          } else { nodes.push(node); }
-        } else if (item.type==='tree') {
-          const parts = item.path.split('/');
-          const name = parts[parts.length-1];
-          const dirNode:FileNode = { name, path:`gh:${repo.full_name}:${item.path}`, type:'dir', children:[], expanded:false };
-          dirMap[item.path] = dirNode;
-          const parentPath = parts.slice(0,-1).join('/');
-          if (parentPath && dirMap[parentPath]) {
-            if (!dirMap[parentPath].children) dirMap[parentPath].children=[];
-            dirMap[parentPath].children!.push(dirNode);
-          } else { nodes.push(dirNode); }
+  // Focus input on mount + load persisted sessions
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 200);
+    // Restore sessions from localStorage
+    const savedMetas = loadCodeSessionsMeta();
+    if (savedMetas.length > 0) {
+      const restored: CodingSession[] = [];
+      for (const meta of savedMetas.slice(0, 10)) {
+        const full = loadCodeSession(meta.id);
+        if (full) {
+          restored.push({
+            id: full.id, name: full.name, projectName: full.projectName,
+            messages: full.messages, projectPath: full.projectPath,
+            projectContext: '', projectFiles: full.projectFiles, timestamp: full.timestamp,
+          });
         }
       }
-      setGithubFileTree(nodes);
-    } catch(e) { console.error('Failed to load repo tree',e); }
-    setActiveIntegration(null);
-  }, [githubToken]);
+      if (restored.length > 0) setSessions(restored);
+    }
+  }, []);
 
-  const openGitHubFile = useCallback(async (node:FileNode) => {
-    const existing = openFiles.find(f=>f.path===node.path);
-    if (existing) { setActiveFilePath(node.path); return; }
-    try {
-      const [,repoFull,filePath] = node.path.split(':');
-      const data = await githubFetch(`/repos/${repoFull}/contents/${filePath}`, githubToken);
-      const content = atob(data.content.replace(/\n/g,''));
-      const nf:OpenFile={name:node.name,path:node.path,content,language:detectLanguage(node.name),dirty:false};
-      setOpenFiles(prev=>[...prev,nf]); setActiveFilePath(node.path);
-    } catch(e) { console.error('Failed to open file',e); }
-  }, [openFiles, githubToken]);
+  // ── Add message helper ──
+  const addMessage = useCallback((msg: Omit<AgentMessage, 'id' | 'timestamp'>) => {
+    setMessages(prev => [...prev, { ...msg, id: msgId(), timestamp: Date.now() }]);
+  }, []);
 
-  // ── Local filesystem ──────────────────────────────────────────────────────
+  // ── Group consecutive activities for compact chat display ──
+  const renderItems = useMemo(() => {
+    // Only keep the LAST thinking indicator — kill any trail
+    const lastThinkIdx = messages.reduce((last, m, i) =>
+      (m.role === 'activity' && m.activity === 'thinking' && m.streaming) ? i : last, -1);
+    const cleaned = messages.filter((m, i) => {
+      if (m.role === 'activity' && m.activity === 'thinking' && m.streaming && i !== lastThinkIdx) return false;
+      return true;
+    });
 
-  // Build FileNode list from a DirectoryHandle, storing all handles in fsHandleMap
-  const readDirHandle = useCallback(async (dh: FileSystemDirectoryHandle, basePath: string): Promise<FileNode[]> => {
-    const nodes: FileNode[] = [];
-    for await (const [name, handle] of (dh as any).entries()) {
-      const fullPath = basePath ? `${basePath}/${name}` : name;
-      fsHandleMap.current.set(fullPath, handle);
-      if (handle.kind === 'directory') {
-        nodes.push({ name, path: fullPath, type: 'dir', children: [], expanded: false });
+    const result: ({ msg: AgentMessage } | { id: string; items: AgentMessage[] })[] = [];
+    let buf: AgentMessage[] = [];
+
+    const flush = () => {
+      if (!buf.length) return;
+      if (buf.length <= 2) {
+        buf.forEach(m => result.push({ msg: m }));
       } else {
-        nodes.push({ name, path: fullPath, type: 'file' });
+        result.push({ id: `grp_${buf[0].id}`, items: [...buf] });
       }
+      buf = [];
+    };
+
+    for (const msg of cleaned) {
+      if (msg.role === 'activity') { buf.push(msg); }
+      else { flush(); result.push({ msg }); }
     }
-    nodes.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
-    return nodes;
+    flush();
+    return result;
+  }, [messages]);
+
+  // Pre-compute the last assistant message ID once — avoids O(n²) scan per message
+  const lastAssistantId = useMemo(() => {
+    for (let i = renderItems.length - 1; i >= 0; i--) {
+      const r = renderItems[i];
+      if ('msg' in r && r.msg.role === 'assistant') return r.msg.id;
+    }
+    return null;
+  }, [renderItems]);
+
+  const updateLastMessage = useCallback((content: string) => {
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') return prev;
+      return [...prev.slice(0, -1), { ...last, content, streaming: true }];
+    });
   }, []);
 
-  // Deep tree helpers
-  const applyToTree = (nodes: FileNode[], path: string, fn: (n: FileNode) => FileNode): FileNode[] =>
-    nodes.map(n => n.path === path ? fn(n) : { ...n, children: n.children ? applyToTree(n.children, path, fn) : undefined });
-
-  const openDirectory = useCallback(async () => {
-    fsHandleMap.current.clear();
-    if (!orbit?.listDir) {
-      // Browser File System Access API
-      try {
-        const dh: FileSystemDirectoryHandle = await (window as any).showDirectoryPicker?.({ mode: 'read' });
-        if (!dh) return;
-        fsHandleMap.current.set('__root__', dh);
-        const nodes = await readDirHandle(dh, '');
-        setFileTree(nodes);
-        setSidebarOpen(true);
-      } catch {}
-      return;
-    }
-    // Electron orbit path
+  // ── Read a file (works with both browser FileSystem API and Electron IPC) ──
+  const readProjectFile = useCallback(async (path: string): Promise<string> => {
     try {
-      const r = await orbit.listDir('.');
-      if (r?.entries) {
-        const nodes: FileNode[] = r.entries.map((e: any) => ({
-          name: e.name, path: e.path,
-          type: e.isDirectory ? 'dir' : 'file',
-          children: e.isDirectory ? [] : undefined,
-        }));
-        nodes.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
-        setFileTree(nodes);
-        setSidebarOpen(true);
+      if (isElectronProject && projectPath) {
+        return await readFileElectron(`${projectPath}/${path}`);
+      } else if (dirHandle) {
+        return await readFileFromHandle(dirHandle, path);
       }
-    } catch {}
-  }, [orbit, readDirHandle]);
+    } catch { }
+    return '';
+  }, [dirHandle, isElectronProject, projectPath]);
 
-  const toggleDir = useCallback(async (path: string) => {
-    if (githubRepo) {
-      setGithubFileTree(prev => applyToTree(prev, path, n => ({ ...n, expanded: !n.expanded })));
-      return;
-    }
-
-    // Check if this dir is collapsed and has no children loaded yet
-    const findNode = (nodes: FileNode[]): FileNode | undefined => {
-      for (const n of nodes) {
-        if (n.path === path) return n;
-        if (n.children) { const found = findNode(n.children); if (found) return found; }
+  // ── Write a file ──
+  const writeProjectFile = useCallback(async (path: string, content: string): Promise<boolean> => {
+    try {
+      if (isElectronProject && projectPath) {
+        return await writeFileElectron(`${projectPath}/${path}`, content);
+      } else if (dirHandle) {
+        return await writeFileFromHandle(dirHandle, path, content);
       }
-    };
-    const node = findNode(fileTree);
+    } catch { }
+    return false;
+  }, [dirHandle, isElectronProject, projectPath]);
 
-    // Lazy-load children if dir is being expanded and is empty
-    if (node && !node.expanded && node.type === 'dir' && (!node.children || node.children.length === 0)) {
-      // FSA handle path
-      const handle = fsHandleMap.current.get(path);
-      if (handle && handle.kind === 'directory') {
-        const children = await readDirHandle(handle as FileSystemDirectoryHandle, path);
-        setFileTree(prev => applyToTree(prev, path, n => ({ ...n, children, expanded: true })));
-        return;
-      }
-      // Electron orbit path
-      if (orbit?.listDir) {
-        try {
-          const r = await orbit.listDir(path);
-          if (r?.entries) {
-            const children: FileNode[] = r.entries.map((e: any) => ({
-              name: e.name, path: e.path,
-              type: e.isDirectory ? 'dir' : 'file',
-              children: e.isDirectory ? [] : undefined,
-            }));
-            children.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
-            setFileTree(prev => applyToTree(prev, path, n => ({ ...n, children, expanded: true })));
-            return;
-          }
-        } catch {}
+  // ── List directory from scanned project files ──
+  const listProjectDir = useCallback((dirPath: string): string[] => {
+    const isRoot = dirPath === '.' || dirPath === '' || dirPath === '/';
+    const seen = new Set<string>();
+    for (const f of projectFiles) {
+      if (isRoot) {
+        seen.add(f.path.split('/')[0]);
+      } else {
+        const prefix = dirPath.endsWith('/') ? dirPath : dirPath + '/';
+        if (f.path.startsWith(prefix)) {
+          seen.add(f.path.slice(prefix.length).split('/')[0]);
+        }
       }
     }
+    return Array.from(seen).sort();
+  }, [projectFiles]);
 
-    // Just toggle expanded state
-    setFileTree(prev => applyToTree(prev, path, n => ({ ...n, expanded: !n.expanded })));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [githubRepo, fileTree, orbit, readDirHandle]);
+  // ── Typewriter animation — types out text chunk by chunk ──
+  const typewriterAnimate = useCallback(async (text: string, messageId: string): Promise<void> => {
+    const len = text.length;
+    // Larger chunks + 16ms delay = 60fps, no jank
+    const chunkSize = len > 2000 ? 80 : len > 500 ? 40 : 20;
 
-  const openLocalFile = useCallback(async (node: FileNode) => {
-    const exists = openFiles.find(f => f.path === node.path);
-    if (exists) { setActiveFilePath(node.path); return; }
-    let content = '';
-
-    // Try FSA handle first (showDirectoryPicker)
-    const handle = fsHandleMap.current.get(node.path);
-    if (handle && handle.kind === 'file') {
-      try {
-        const file = await (handle as FileSystemFileHandle).getFile();
-        content = await file.text();
-      } catch {}
-    } else if (orbit?.readFile) {
-      // Electron IPC
-      try { content = (await orbit.readFile(node.path)) ?? ''; } catch {}
+    for (let i = 0; i < len; i += chunkSize) {
+      const partial = text.slice(0, Math.min(i + chunkSize, len));
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === messageId);
+        if (idx === -1) return prev;
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], content: partial, streaming: true };
+        return updated;
+      });
+      await new Promise(r => setTimeout(r, 16)); // 1 frame at 60fps
     }
-
-    const nf: OpenFile = { name: node.name, path: node.path, content, language: detectLanguage(node.name), dirty: false };
-    setOpenFiles(prev => [...prev, nf]);
-    setActiveFilePath(node.path);
-  }, [openFiles, orbit]);
-
-  const saveFile = useCallback(async () => {
-    if (!activeFile) return;
-
-    // Try FSA writable handle (browser showDirectoryPicker)
-    const handle = fsHandleMap.current.get(activeFile.path);
-    if (handle && handle.kind === 'file') {
-      try {
-        const writable = await (handle as any).createWritable();
-        await writable.write(activeFile.content);
-        await writable.close();
-        setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? { ...f, dirty: false } : f));
-        return;
-      } catch {}
-    }
-
-    // Electron IPC
-    if (orbit?.writeFile) {
-      try {
-        await orbit.writeFile(activeFile.path, activeFile.content);
-        setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? { ...f, dirty: false } : f));
-      } catch {}
-      return;
-    }
-
-    // Fallback: download
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([activeFile.content], { type: 'text/plain' }));
-    a.download = activeFile.name;
-    a.click();
-  }, [activeFile, orbit]);
-
-  const updateCode = useCallback((v:string)=>{
-    setOpenFiles(prev=>prev.map(f=>f.path===activeFilePath?{...f,content:v,dirty:true}:f));
-  },[activeFilePath]);
-
-  const applyCode = useCallback((code:string)=>{
-    setOpenFiles(prev=>prev.map(f=>f.path===activeFilePath?{...f,content:code,dirty:true}:f));
-    setTimeout(()=>textareaRef.current?.focus(),100);
-  },[activeFilePath]);
-
-  const handleKeyDown = useCallback((e:React.KeyboardEvent<HTMLTextAreaElement>)=>{
-    if(e.key==='Tab'){e.preventDefault();const el=e.currentTarget,s=el.selectionStart;updateCode(el.value.substring(0,s)+'  '+el.value.substring(el.selectionEnd));requestAnimationFrame(()=>{el.selectionStart=el.selectionEnd=s+2;});}
-    if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();saveFile();}
-  },[updateCode,saveFile]);
-
-  const closeTab = useCallback((path:string,e:React.MouseEvent)=>{
-    e.stopPropagation();
-    setOpenFiles(prev=>{const next=prev.filter(f=>f.path!==path);return next.length===0?[{name:'untitled.ts',path:'__untitled__',content:PLACEHOLDER_CODE,language:'typescript',dirty:false}]:next;});
-    setActiveFilePath(prev=>{if(prev!==path)return prev;const idx=openFiles.findIndex(f=>f.path===path);return openFiles.filter(f=>f.path!==path)[Math.max(0,idx-1)]?.path??'__untitled__';});
-  },[openFiles]);
-
-  const handleUpload = useCallback(() => {
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.multiple = true;
-    // Accept any text-based file; no strict allowlist — browser will show all files
-    inp.accept = '.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.cs,.cpp,.cc,.c,.h,.rb,.php,.swift,.kt,.html,.htm,.css,.scss,.less,.json,.jsonc,.yaml,.yml,.toml,.md,.mdx,.sh,.bash,.sql,.vue,.svelte,.tf,.env,.gitignore,.lock,.dockerfile';
-    inp.onchange = async (ev) => {
-      const files = Array.from((ev.target as HTMLInputElement).files ?? []);
-      for (const file of files) {
-        const content = await file.text();
-        const nf: OpenFile = { name: file.name, path: `__upload__${Date.now()}_${file.name}`, content, language: detectLanguage(file.name), dirty: false };
-        setOpenFiles(prev => [...prev, nf]);
-        setActiveFilePath(nf.path);
-      }
-    };
-    inp.click();
+    // Finalize
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      if (idx === -1) return prev;
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], content: text, streaming: false };
+      return updated;
+    });
   }, []);
 
-  // ── JUMARI ────────────────────────────────────────────────────────────────
+  // ── Analyze project ──
+  const analyzeProject = useCallback(async (
+    files: { path: string; name: string }[],
+    readFile: (path: string) => Promise<string>
+  ) => {
+    setIsWorking(true);
 
-  const callJumari = useCallback(async (userMessage:string)=>{
-    if(isThinking)return;
-    setIsThinking(true);if(!jumariOpen)setJumariOpen(true);
-    const ctx=activeFile?.content?.trim()??'';
-    const lang=activeFile?.language??'code';
-    const fname=activeFile?.name??'untitled';
-    const sys=`You are CODE Bleu — JUMARI's world-class coding assistant inside Bleumr. File: "${fname}" (${lang}). Be direct. No preamble. Wrap code in \`\`\`${lang}\\n...\\n\`\`\`. Just do it. Perfect spelling and grammar in all explanations — never misspell a word.`;
-    const userContent=ctx?`${userMessage}\n\n\`\`\`${lang}\n${ctx}\n\`\`\``:userMessage;
-    const msgs:ChatMessage[]=[...messages,{role:'user',content:userMessage}];
-    setMessages(msgs);
-    try{
-      const res=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({model:'llama-3.3-70b-versatile',messages:[{role:'system',content:sys},...msgs.slice(-10).map((m,i)=>({role:m.role==='system'?'assistant':m.role,content:i===msgs.length-1&&m.role==='user'?userContent:m.content}))],max_tokens:4096,temperature:0.3})});
-      const data=await res.json();
-      const reply=data?.choices?.[0]?.message?.content??'No response.';
-      setMessages(prev=>[...prev,{role:'assistant',content:reply,codeBlock:extractCodeBlock(reply)??undefined}]);
-    }catch(err:any){setMessages(prev=>[...prev,{role:'assistant',content:!apiKey?'No API key. Add your Groq key in Settings.':`Error: ${err?.message??'Something went wrong.'}`}]);}
-    finally{setIsThinking(false);}
-  },[isThinking,messages,activeFile,apiKey,jumariOpen]);
+    // Show scanning status
+    const scanId = msgId();
+    setMessages(prev => [...prev, {
+      id: scanId, role: 'activity' as const, content: `Found ${files.length} files — scanning project structure...`,
+      activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+    }]);
 
-  const handleSend=useCallback(()=>{const t=input.trim();if(!t||isThinking)return;setInput('');callJumari(t);},[input,isThinking,callJumari]);
+    const updateScan = (text: string) => {
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === scanId);
+        if (idx === -1) return prev;
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], content: text };
+        return updated;
+      });
+    };
 
-  const handleQuickAction=useCallback((prompt:string)=>{
-    if(!activeFile?.content.trim()){setMessages(prev=>[...prev,{role:'system',content:'Open or paste some code first.'}]);setJumariOpen(true);return;}
-    callJumari(prompt);
-  },[activeFile,callJumari]);
+    // 1. Find and read important files
+    const importantFound: ProjectFile[] = [];
+    const readQueue: string[] = [];
 
-  const handleCopy=useCallback((text:string,idx:number)=>{navigator.clipboard.writeText(text);setCopiedIdx(idx);setTimeout(()=>setCopiedIdx(null),1800);},[]);
+    for (const f of files) {
+      const name = f.path.split('/').pop() ?? '';
+      if (IMPORTANT_FILES.includes(name)) readQueue.push(f.path);
+    }
 
-  const displayTree = githubRepo ? githubFileTree : fileTree;
-  const onFileClick = githubRepo ? openGitHubFile : openLocalFile;
+    const sourceFiles = files.filter(f => {
+      const parts = f.path.split('/');
+      return parts.some(p => SOURCE_DIRS.includes(p)) && !f.path.includes('node_modules');
+    }).slice(0, 20);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+    for (const sf of sourceFiles) {
+      if (!readQueue.includes(sf.path)) readQueue.push(sf.path);
+    }
 
-  const INTEGRATIONS = [
-    { id:'github' as Integration,     label:'GitHub',         icon:GitBranch,  connected:!!githubUser },
-    { id:'stackoverflow' as Integration, label:'Stack Overflow', icon:Search,  connected:false },
-    { id:'npm' as Integration,         label:'npm',            icon:Package,   connected:false },
-    { id:'mdn' as Integration,         label:'MDN',            icon:BookOpen,  connected:false },
-  ];
+    // Read files with animated feedback
+    for (let i = 0; i < Math.min(readQueue.length, 25); i++) {
+      const filePath = readQueue[i];
+      const fileName = filePath.split('/').pop() ?? filePath;
+      updateScan(`Reading ${fileName}... (${i + 1}/${Math.min(readQueue.length, 12)})`);
+      await new Promise(r => setTimeout(r, 100));
+
+      const content = await readFile(filePath);
+      if (content) {
+        importantFound.push({ name: fileName, path: filePath, content });
+
+        // Remove scanning indicator, show file activity, re-add scanning
+        setMessages(prev => prev.filter(m => m.id !== scanId));
+        addMessage({
+          role: 'activity', content: '', activity: 'reading',
+          files: [{ path: filePath, content: content.slice(0, 2000), action: 'read' }],
+        });
+        // Re-add thinking indicator
+        setMessages(prev => [...prev, {
+          id: scanId, role: 'activity' as const, content: '',
+          activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+        }]);
+      }
+    }
+
+    // 2. Load BLEUMR.md project instructions (if present)
+    updateScan('Checking for BLEUMR.md...');
+    const config = await loadBleumrConfig(readFile);
+    setBleumrConfig(config);
+    if (config) {
+      // Parse hooks and skills from config file
+      hooksRef.current = parseHooks(config.content);
+      skillsRef.current = parseSkills(config.content);
+
+      setMessages(prev => prev.filter(m => m.id !== scanId));
+      addMessage({
+        role: 'activity', content: '', activity: 'reading',
+        files: [{ path: config.source, content: config.content.slice(0, 2000), action: 'read' }],
+      });
+      setMessages(prev => [...prev, {
+        id: scanId, role: 'activity' as const, content: '',
+        activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+      }]);
+    }
+
+    // 3. Build project context summary
+    const fileList = files.map(f => f.path).join('\n');
+    const fileContents = importantFound.map(f =>
+      `### ${f.path}\n\`\`\`\n${f.content.slice(0, 3000)}\n\`\`\``
+    ).join('\n\n');
+
+    const projectSummary = `Project files (${files.length} total):\n${fileList}\n\n${fileContents}`;
+    setProjectContext(projectSummary);
+
+    // 2b. Detect if this is a website project — auto-load HTML/CSS/JS into preview
+    const htmlFiles = files.filter(f => f.path.endsWith('.html') && !f.path.includes('node_modules'));
+    if (htmlFiles.length > 0) {
+      updateScan('Detected website project — loading preview...');
+      const webFiles: { path: string; content: string }[] = [];
+      const webExtensions = /\.(html|css|js)$/;
+      const webQueue = files.filter(f => webExtensions.test(f.path) && !f.path.includes('node_modules')).slice(0, 20);
+
+      for (const wf of webQueue) {
+        const content = await readFile(wf.path);
+        if (content) webFiles.push({ path: wf.path, content });
+      }
+
+      if (webFiles.length > 0) {
+        setWrittenFiles(webFiles);
+        // Auto-open preview
+        setTimeout(() => {
+          const orbit = (window as any).orbit;
+          if (orbit?.browser?.loadHTML) {
+            orbit.browser.loadHTML(buildPreviewFromFiles(webFiles));
+          } else {
+            setPreviewOpen(true);
+          }
+        }, 800);
+      }
+    }
+
+    // 3. Ask AI to summarize
+    updateScan('Analyzing project structure and tech stack...');
+
+    if (apiKey) {
+      try {
+        const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: pickModel('summary'),
+            messages: [
+              {
+                role: 'system',
+                content: 'You are CODE Bleu, the coding agent inside Bleumr. You just opened a project. Talk to the user like a developer who just sat down to look at their codebase. Be specific and direct:\n\n1) What the app does — its actual purpose and domain (e.g. "Instagram follower booster with automated engagement", not "social media application").\n2) Tech stack — frameworks, key libraries, APIs used.\n3) What\'s already built and what state it\'s in.\n4) 2-3 specific things you could help build or improve — be concrete (e.g. "add OAuth authentication for the Instagram API" not "improve security").\n\nKeep it to 4-6 sentences. Write naturally, no markdown, no generic filler. Do NOT say "Let me know if you need anything" or "Feel free to ask".'
+              },
+              { role: 'user', content: `I just opened a project called "${projectName}". Here's what I see:\n\n${projectSummary.slice(0, 12000)}` },
+            ],
+            max_tokens: 1024,
+            temperature: 0.3,
+          }),
+        });
+        const reply = data?.choices?.[0]?.message?.content ?? 'Project loaded. Ask me anything about the code.';
+
+        // Remove thinking, typewriter the summary
+        setMessages(prev => prev.filter(m => m.id !== scanId));
+        const summaryId = msgId();
+        setMessages(prev => [...prev, {
+          id: summaryId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+        }]);
+        await typewriterAnimate(reply, summaryId);
+      } catch (err: any) {
+        setMessages(prev => prev.filter(m => m.id !== scanId));
+        const isOffline = (err as Error)?.message === 'OFFLINE';
+        const fallback = isOffline
+          ? `I loaded ${files.length} files from the project but I can't reach the AI service right now — looks like you're offline or the connection dropped. I can still read and browse your files locally. Try sending a message when you're back online.`
+          : 'Project loaded — I can see all your files. What would you like to work on?';
+        const fbId = msgId();
+        setMessages(prev => [...prev, {
+          id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+        }]);
+        await typewriterAnimate(fallback, fbId);
+      }
+    } else {
+      setMessages(prev => prev.filter(m => m.id !== scanId));
+      addMessage({ role: 'assistant', content: 'Project loaded. Add your Groq API key in Settings to start coding with me.' });
+    }
+
+    setIsWorking(false);
+  }, [apiKey, addMessage, typewriterAnimate]);
+
+  // ── Open folder (browser) ──
+  const openFolderBrowser = useCallback(async () => {
+    try {
+      const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      setDirHandle(handle);
+      setProjectName(handle.name);
+      setProjectPath(null);
+      setIsElectronProject(false);
+      setMessages([]);
+
+      addMessage({ role: 'assistant', content: `Opening ${handle.name}... scanning files.` });
+
+      const files = await readDirRecursive(handle);
+      setProjectFiles(files);
+
+      await analyzeProject(files, (path) => readFileFromHandle(handle, path));
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        addMessage({ role: 'assistant', content: `Failed to open folder: ${err?.message ?? 'Unknown error'}` });
+      }
+    }
+  }, [addMessage, analyzeProject]);
+
+  // ── Open folder (Electron) ──
+  const openFolderElectron = useCallback(async () => {
+    const orbit = (window as any).orbit;
+    if (!orbit) return;
+
+    try {
+      // Use Electron's dialog to pick a folder
+      const result = await orbit.showOpenDialog?.({ properties: ['openDirectory'] });
+      const folderPath = result?.filePaths?.[0];
+      if (!folderPath) return;
+
+      const folderName = folderPath.split('/').pop() ?? folderPath;
+      setProjectPath(folderPath);
+      setProjectName(folderName);
+      setDirHandle(null);
+      setIsElectronProject(true);
+      setMessages([]);
+
+      addMessage({ role: 'assistant', content: `Opening ${folderName}... scanning files.` });
+
+      const files = await readDirElectronRecursive(folderPath);
+      // Normalize paths to be relative
+      const relFiles = files.map(f => ({
+        ...f,
+        path: f.path.startsWith(folderPath) ? f.path.slice(folderPath.length + 1) : f.path,
+      }));
+      setProjectFiles(relFiles);
+
+      await analyzeProject(relFiles, (path) => readFileElectron(`${folderPath}/${path}`));
+    } catch (err: any) {
+      addMessage({ role: 'assistant', content: `Failed to open folder: ${err?.message ?? 'Unknown error'}` });
+    }
+  }, [addMessage, analyzeProject]);
+
+  const openFolder = isElectron ? openFolderElectron : openFolderBrowser;
+
+  // ── Send message to agent (agentic tool-use loop) ��─
+  const sendToAgent = useCallback(async (messageText: string) => {
+    let text = messageText.trim();
+    if (!text || isWorking || agentRunningRef.current) return;
+    agentRunningRef.current = true;
+    abortedRef.current = false; // Reset abort flag for new run
+    // Generation counter: if a session switch or reset bumps the generation,
+    // this loop knows its results are stale and should bail out.
+    const myGen = ++loopGenRef.current;
+
+    // Expand skill commands (e.g. /review-pr → full prompt)
+    const skillName = matchSkillCommand(text);
+    if (skillName) {
+      const skillPrompt = getSkillPrompt(skillName, skillsRef.current);
+      if (skillPrompt) text = skillPrompt;
+    }
+
+    // Capture and clear attached images
+    const currentImages = [...attachedImages];
+    setAttachedImages([]);
+
+    // Build user message with image context
+    const imageContext = currentImages.length > 0
+      ? `\n\n[User attached ${currentImages.length} image(s): ${currentImages.map(img => img.name).join(', ')}. ${currentImages.filter(i => i.path).map(i => `File path: ${i.path}`).join('; ')}]`
+      : '';
+
+    addMessage({
+      role: 'user', content: text,
+      images: currentImages.length > 0 ? currentImages.map(i => ({ name: i.name, dataUri: i.dataUri })) : undefined,
+    });
+    setIsWorking(true);
+    abortedRef.current = false;
+
+    try {
+      if (!apiKey) throw new Error('NO_KEY');
+
+      // ── System prompt ──
+      const permissionMode = autoApprove
+        ? `You have FULL PERMISSION to read, write, create, delete, and run any commands without asking. The user enabled auto-approve mode. Just do the work — no need to ask "should I?" or "want me to?" — go ahead and execute immediately. Be fast and efficient.`
+        : `Ask the user for permission before writing or deleting files. Explain what you plan to change and why. If the user says "yes", "go ahead", "do it", "fix it", or anything affirmative — proceed.`;
+
+      // Rebuild system prompt each iteration — projectPathRef may change after create_project
+      const buildSysPrompt = () => {
+        // If project was just created this loop and no files written yet, keep the "build from scratch" prompt
+        const isNewlyCreatedProject = createdProjectThisLoop && filesWrittenThisLoop === 0;
+        if (isNewlyCreatedProject && projectPathRef.current) {
+          return `You are CODE Bleu, a coding agent inside Bleumr. You just created project "${projectName || projectPathRef.current?.split('/').pop()}".
+
+${permissionMode}
+
+Now write ALL the files for this project. Use write_file with ABSOLUTE paths starting with ${projectPathRef.current}/
+
+As you work, talk to the user naturally between tool calls:
+- Before writing files, briefly share your plan: what files you'll create and why.
+- After writing each file, tell the user what you just created and what it does.
+- Focus on quality — write clean, well-structured, production-ready code.
+- Write COMPLETE file content — no placeholders, no "TODO" comments.
+- Write each file ONCE with care. Plan ALL files before starting.
+- After ALL files are written, give a closing summary of what you built. Be specific — not generic filler.
+- NEVER say "Let me know if you need anything" or "Please note that..." — just describe what you built.
+
+Technology decisions — make them automatically:
+- "website" or "page" → plain HTML/CSS/JS (no framework needed)
+- "app" or "application" → React + TypeScript
+- "api" or "server" → Node.js + Express
+- If unclear, use HTML/CSS/JS — it's simplest and always works.`;
+        }
+
+        return (projectContext || projectPathRef.current)
+        ? `You are CODE Bleu, a powerful coding agent with 55 tools inside Bleumr. You write clean, quality code and communicate with the user as you work — like a real developer pair-programming with them.
+
+${permissionMode}
+
+Communication style:
+- Talk to the user naturally as you work. You're their coding partner, not a silent bot.
+- Before starting work, share your understanding: "I see you want X. Let me look at the code and figure out the best approach."
+- After reading files, explain what you found: "I read the file — here's what I see and what I'll change."
+- After making changes, tell them what you did: "I updated the header styles to use a blue gradient."
+- Keep messages concise but human — 1-2 sentences between tool calls. No walls of text.
+- ALL code goes into files via tools. NEVER put code in your text response.
+- After ALL tool calls are done, give a clear closing summary of everything you changed.
+
+Your workflow for MODIFYING existing code (change, fix, add to, improve, update):
+1. ALWAYS read_file FIRST to see the current code. Never skip this.
+2. ${autoApprove ? 'Tell the user your approach, then make the changes.' : 'Explain your plan and wait for approval.'}
+3. For small/targeted edits (adding a style, fixing a bug, changing text): use replace_in_file — it's precise and doesn't risk losing other code.
+4. For large rewrites (redesigning a page, adding many features): use write_file with COMPLETE file content.
+5. After changes, briefly tell the user what you did.
+
+Your workflow for BUILDING new things (create, build, make me):
+1. Tell the user your plan — what files you'll create and the approach.
+2. Create files with write_file using COMPLETE, production-quality content.
+3. After each file, briefly say what it does.
+4. Give a closing summary of what you built.
+
+Quality rules:
+- ALWAYS read existing files before modifying them. NEVER rewrite a file from memory.
+- Use replace_in_file for targeted changes. Use write_file only when rewriting most of the file.
+- Write clean, well-structured code. No placeholders, no "TODO" comments, no shortcuts.
+- Plan ALL changes before starting. Write each file ONCE — get it right the first time.
+- If the user asks to improve something, READ the code first, understand it, then make thoughtful improvements.
+- Make smart decisions yourself — don't ask the user to choose frameworks or approaches unless there's a genuine tradeoff worth discussing.
+- NEVER use generic filler phrases. Do NOT say: "Let me know if you need anything", "Please note that...", "Feel free to...", "I hope this helps", "Don't hesitate to ask". Instead, be specific about what you did and what the user can do next.
+- When you finish, describe the SPECIFIC changes you made. Don't hedge with "may need to be adjusted" — if it needs adjusting, adjust it yourself.
+
+You have 55 tools organized by category:
+- File ops: read_file, write_file, list_directory, create_directory, delete_file, rename_file, copy_file, move_file, find_files, search_in_files, replace_in_file, file_exists, file_info
+- Git: git_status, git_diff, git_log, git_commit, git_add, git_push, git_pull, git_branch, git_checkout, git_stash, git_merge, git_clone
+- Packages: install_package, uninstall_package, list_packages, check_outdated, init_package_json
+- Build & Dev: run_tests, run_build, run_lint, run_format, start_dev_server, stop_process, check_port
+- Web: web_search, fetch_url, check_url
+- W3C Validation: validate_html, validate_css — validate code against official W3C web standards. Use after writing HTML/CSS to ensure spec compliance.
+- Analysis: find_definition, find_usages, count_lines, detect_stack, analyze_dependencies
+- Scaffold: scaffold_component, scaffold_page, scaffold_api, scaffold_test, init_framework
+- Shell: run_command (for anything not covered by specific tools)
+- Agents: dispatch_agent (FileScout, LintCheck, Refactor, TestGen)
+- Interaction: ask_user (ask questions with clickable answer buttons)
+- Preacher (safety net): rollback_file, rollback_file_original — Every file you modify is automatically backed up by Preacher before you change it. If you break something, use rollback_file to undo your last change, or rollback_file_original to restore the file to its state before you touched it at all. USE THIS instead of guessing what the old code looked like. If something breaks after your edit, rollback first, then re-read the file, then try again with a better approach.
+
+Not all tools are available at once — the system loads relevant tools based on context. If you need a tool that's not available, use run_command as a fallback.
+
+${planMode ? PLAN_MODE_PROMPT : ''}
+${formatConfigForPrompt(bleumrConfig)}
+${getCodeContext(lastUserMsgRef.current)}
+${preacher.getTrackedFiles().length > 0 ? preacher.getSummary() + '\n\n' : ''}Project context:
+${(projectContext || `Project at: ${projectPathRef.current}`).slice(0, 12000)}`
+        : `You are CODE Bleu, a coding agent inside Bleumr. No project is open yet. You write quality code and communicate with the user as you work.
+
+Workflow:
+1. Tell the user your plan: "I'll build a [description] with [tech]. Let me set up the project."
+2. Call create_project with a descriptive name.
+3. Share what files you'll create: "I'll set up [list of files] — let me start with the main page."
+4. Write each file with write_file using ABSOLUTE paths. Write clean, production-quality code.
+5. After each file, briefly tell the user what it does.
+6. After ALL files are written, give a summary of what you built and how to use it.
+
+Rules:
+- ALL code goes into files via write_file. NEVER put code in your text response.
+- Write COMPLETE file content — no placeholders, no "TODO" comments.
+- Write each file ONCE with care. Quality over speed.
+- Make technology decisions yourself — don't ask the user to choose.
+- NEVER use generic filler: "Let me know if you need anything", "Please note...", "Feel free to ask". Be specific.
+- "website" or "page" → plain HTML/CSS/JS (simplest, always works)
+- "app" or "application" → React + TypeScript
+- "api" or "server" → Node.js + Express
+- If unclear, use HTML/CSS/JS.
+
+If they ask a coding question (not building), answer naturally and helpfully.`;
+      };
+
+      // ── Tool selection (dynamic — picks relevant subset of 55 tools) ──
+      // Store user message for tool selection context
+      lastUserMsgRef.current = text;
+
+      // ── Build conversation history ──
+      const historyMsgs = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-10)
+        .map(m => ({ role: m.role, content: m.content }));
+      // Inject previous tool context so model remembers what it did last turn
+      if (lastToolContextRef.current) {
+        historyMsgs.push({ role: 'assistant', content: `[Previous actions: ${lastToolContextRef.current}]` });
+      }
+      const conversationMessages: any[] = [
+        ...historyMsgs,
+        { role: 'user', content: text + imageContext },
+      ];
+
+      // ── Agentic loop — keeps going while AI calls tools ──
+      let iterations = 0;
+      const maxIterations = 20;
+      const toolResultsLog: string[] = [];
+      let lastAssistantText = '';
+      let createdProjectThisLoop = false; // Track if we just created a project (need to keep writing files)
+      let filesWrittenThisLoop = 0;       // Track file writes — don't stop until at least 1 after create_project
+      let emptyResponseStreak = 0;        // Safety: bail after 3 consecutive empty responses
+
+      // Show initial thinking status
+      let thinkingId = msgId();
+      setMessages(prev => [...prev, {
+        id: thinkingId, role: 'activity' as const, content: 'Understanding your request...',
+        activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+      }]);
+
+      const updateThinking = (text: string) => {
+        setMessages(prev => {
+          const idx = prev.findIndex(m => m.id === thinkingId);
+          if (idx === -1) return prev;
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], content: text };
+          return updated;
+        });
+      };
+
+      const removeThinking = () => {
+        setMessages(prev => prev.filter(m => m.id !== thinkingId));
+      };
+
+      while (iterations++ < maxIterations) {
+        // Check if user interrupted OR session switched OR component unmounted
+        if (abortedRef.current || loopGenRef.current !== myGen || !mountedRef.current) {
+          removeThinking();
+          const stopId = msgId();
+          setMessages(prev => [...prev, {
+            id: stopId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+          }]);
+          await typewriterAnimate('Stopped.', stopId);
+          break;
+        }
+        updateThinking(iterations === 1 ? 'Thinking about your request...' : 'Planning next steps...');
+
+        // ── Credit budget gate — Code Bleu costs 3 credits per tool iteration ──
+        const codeBleuTier = SubscriptionService.getTier();
+        const codeAction = 'code_bleu' as const;
+        const cbCreditCheck = usageBudget.canAfford(codeAction, codeBleuTier);
+        if (!cbCreditCheck.allowed) {
+          removeThinking();
+          addMessage({
+            role: 'assistant', content: cbCreditCheck.reason || 'Out of credits for today. They reset at midnight!',
+          });
+          break;
+        }
+        // Credits consumed AFTER successful API response (see below), not here.
+
+        // Dynamic tool selection — re-evaluates every iteration (fixes stuck-after-create bug)
+        const hasActiveProject = !!projectContext || !!projectPathRef.current;
+        let activeTools = pickTools(lastUserMsgRef.current, hasActiveProject);
+        if (planMode) activeTools = filterToolsForPlanMode(activeTools);
+
+        // Force tool call on first iteration when user clearly wants action
+        // 'required' = model MUST call a tool, 'auto' = model decides
+        // Force tool use on first iteration UNLESS it's a pure knowledge question
+        // "how can we improve" = action request (force tools), "how does X work" = question (don't force)
+        const isPureQuestion = text.match(/\b(how does|how do|how is|how are|how can|how would|what does|what is|what are|what ideas|what would|what can|what should|what do you|why does|why is|why do|is (this|it|that) (a |the )?(good|bad|right|correct|best|proper|safe)|should i (use|choose|pick|go with|try)|can you explain|compare|difference between|pros and cons|vs\b|thoughts on|opinion on|explain\s+(how|what|why|the)|tell me (about|how|what|why)|help me understand|any (ideas|suggestions|thoughts|tips|recommendations|advice)|do you (think|suggest|recommend|have))\b/i)
+          && !text.match(/\b(make|build|create|fix|improve|change|update|add|remove|refactor|better|upgrade|implement|write|delete|install)\b/i);
+        // Force tools on iteration 1, AND keep forcing after create_project until files are written
+        const forceToolUse = activeTools.length > 0 && !isPureQuestion
+          && (iterations === 1 || (createdProjectThisLoop && filesWrittenThisLoop === 0));
+        // Prune conversation if too large — truncate old tool results to keep under ~80K chars
+        let totalChars = conversationMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
+        if (totalChars > 80000) {
+          for (let i = 0; i < conversationMessages.length && totalChars > 60000; i++) {
+            if (conversationMessages[i].role === 'tool' && conversationMessages[i].content?.length > 500) {
+              const old = conversationMessages[i].content.length;
+              conversationMessages[i].content = conversationMessages[i].content.slice(0, 500) + '\n... (pruned for context)';
+              totalChars -= (old - 500);
+            }
+          }
+        }
+
+        const agentModel = pickModel('agent', text);
+        const requestBody: any = {
+          model: agentModel,
+          messages: [{ role: 'system', content: buildSysPrompt() }, ...conversationMessages],
+          max_tokens: 4096,
+          temperature: 0.2,
+          tools: activeTools,
+          tool_choice: forceToolUse ? 'required' : 'auto',
+        };
+
+        // ── Stream response from Groq (real-time, like Claude) ──
+        // Keep thinking indicator visible until first text token arrives
+        updateThinking(iterations === 1 ? 'Thinking...' : 'Working...');
+
+        let streamMsgId = '';
+        let streamedAnyText = false;
+        let assistantMsg: any = null;
+
+        // ── Batched streaming: buffer tokens, flush at ~60fps via rAF ──
+        let streamBuf = '';
+        let rafId = 0;
+        const flushStream = () => {
+          rafId = 0;
+          if (!streamBuf) return;
+          const pending = streamBuf;
+          streamBuf = '';
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === streamMsgId);
+            if (idx === -1) return prev;
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], content: updated[idx].content + pending };
+            return updated;
+          });
+        };
+
+        try {
+          const result = await streamGroqResponse(
+            apiKey!,
+            requestBody,
+            (chunk) => {
+              if (!streamedAnyText) {
+                // First text token — remove thinking, create streaming message
+                removeThinking();
+                streamMsgId = msgId();
+                setMessages(prev => [...prev, {
+                  id: streamMsgId, role: 'assistant' as const, content: chunk,
+                  streaming: true, timestamp: Date.now(),
+                }]);
+                streamedAnyText = true;
+              } else {
+                // Buffer tokens, flush once per animation frame (~60fps)
+                streamBuf += chunk;
+                if (!rafId) rafId = requestAnimationFrame(flushStream);
+              }
+            },
+            abortedRef,
+          );
+          // Flush any remaining buffered text
+          if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+          if (streamBuf) {
+            const final = streamBuf; streamBuf = '';
+            setMessages(prev => {
+              const idx = prev.findIndex(m => m.id === streamMsgId);
+              if (idx === -1) return prev;
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: updated[idx].content + final };
+              return updated;
+            });
+          }
+          assistantMsg = result.message;
+        } catch (fetchErr: any) {
+          // Remove streaming message if it was created
+          if (streamMsgId) setMessages(prev => prev.filter(m => m.id !== streamMsgId));
+          streamedAnyText = false;
+
+          if (fetchErr?.message?.includes('400') || fetchErr?.message?.includes('tool_use_failed')) {
+            console.warn('[CodeBleu] Stream 400 — retrying with core tools:', fetchErr.message);
+            const CORE_NAMES = ['read_file', 'write_file', 'run_command', 'list_directory', 'ask_user', 'create_project', 'create_directory'];
+            const coreTools = ALL_TOOLS.filter(t => CORE_NAMES.includes(t.function.name));
+            try {
+              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                body: JSON.stringify({ ...requestBody, tools: coreTools, tool_choice: 'auto' }),
+              });
+              assistantMsg = data.choices?.[0]?.message;
+            } catch {
+              // Core tools failed — text-only, prevent narration
+              console.error('[CodeBleu] Core tools failed, text-only fallback');
+              const textBody = { ...requestBody };
+              delete textBody.tools;
+              delete textBody.tool_choice;
+              textBody.messages = textBody.messages.map((m: any) =>
+                m.role === 'system' ? { ...m, content: 'You are Code Bleu. Tools temporarily unavailable. Tell the user to try again. Do NOT describe tool calls.' } : m
+              );
+              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                body: JSON.stringify(textBody),
+              });
+              assistantMsg = data.choices?.[0]?.message;
+            }
+
+            // Show fallback response with typewriter since we couldn't stream
+            if (assistantMsg?.content?.trim()) {
+              const fbId = msgId();
+              setMessages(prev => [...prev, { id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now() }]);
+              await typewriterAnimate(assistantMsg.content.trim(), fbId);
+              streamedAnyText = true;
+            }
+          } else {
+            throw fetchErr;
+          }
+        }
+
+        if (!assistantMsg) { removeThinking(); break; }
+
+        // Consume credits only after a successful API response (prevents lost credits on failures)
+        usageBudget.consume(codeAction, codeBleuTier);
+
+        const hasToolCalls = assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0;
+        if (hasToolCalls) emptyResponseStreak = 0; // Reset empty streak on successful tool use
+
+        // Finalize the streamed message
+        if (streamedAnyText && streamMsgId) {
+          const responseText = (assistantMsg.content || '').trim();
+          lastAssistantText = responseText;
+          const detectedSuggestions = !hasToolCalls ? extractSuggestions(responseText) : [];
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === streamMsgId);
+            if (idx === -1) return prev;
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              content: responseText,
+              streaming: false,
+              suggestions: detectedSuggestions.length > 0 ? detectedSuggestions : undefined,
+            };
+            return updated;
+          });
+        }
+
+        // If no text was streamed and model only made tool calls, remove thinking
+        // (tool execution will show its own activity indicators)
+        if (!streamedAnyText) {
+          removeThinking();
+        }
+
+        // ── No tool calls → check if we should auto-continue or stop ──
+        if (!hasToolCalls) {
+          const responseText = (assistantMsg.content || '').trim();
+
+          if (!responseText && !streamedAnyText) {
+            emptyResponseStreak++;
+
+            // After create_project with 0 files written — nudge model to continue writing
+            if (createdProjectThisLoop && filesWrittenThisLoop === 0 && emptyResponseStreak <= 2) {
+              conversationMessages.push({ role: 'assistant', content: '' });
+              conversationMessages.push({ role: 'user', content: `Continue. Write the files now using write_file with absolute paths starting with ${projectPathRef.current}/` });
+              continue;
+            }
+
+            // Model returned empty on first iteration — retry without forcing tools
+            if (forceToolUse && iterations === 1) {
+              conversationMessages.push({ role: 'assistant', content: '' });
+              conversationMessages.push({ role: 'user', content: 'Please respond to my question directly.' });
+              continue;
+            }
+
+            // Safety: too many empty responses in a row — bail
+            if (emptyResponseStreak >= 3) {
+              const doneId = msgId();
+              setMessages(prev => [...prev, {
+                id: doneId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+              }]);
+              await typewriterAnimate('Having trouble continuing — please try again or rephrase your request.', doneId);
+              break;
+            }
+
+            // Build summary from THIS loop's tool results only
+            const summary = toolResultsLog.length > 0
+              ? `All done — completed ${toolResultsLog.length} action${toolResultsLog.length > 1 ? 's' : ''}. Let me know if you need anything else.`
+              : 'Finished processing your request. Let me know if you need anything else.';
+
+            const doneId = msgId();
+            setMessages(prev => [...prev, {
+              id: doneId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+            }]);
+            await typewriterAnimate(summary, doneId);
+            break;
+          }
+
+          const respLower = responseText.toLowerCase();
+          const looksLikeQuestion = responseText.includes('?') || respLower.match(/\b(which|what|should i|want me|do you|would you|choose|pick|prefer)\b/);
+          const looksLikeClosing = respLower.match(/\b(let me know|anything else|feel free|if you (need|want|have)|further (requests|changes|questions)|happy to help|hope this|all set|i've (completed|finished|updated|created|fixed|added)|done with|changes (are|have been)|has been (applied|updated|fixed))\b/);
+          // Auto-continue: mid-task conversational updates like "I read the file. The styles need..." — NOT final answers
+          // Allows longer messages since the agent now talks to the user as it works
+          const isStatusUpdate = iterations > 1 && !looksLikeQuestion && !looksLikeClosing && responseText.length < 400
+            && respLower.match(/\b(now|next|let me|i'll|going to|updating|moving on|working on|i see|i read|i found|looking at|here's what|i'll start|i notice|the file|the code)\b/);
+
+          if (isStatusUpdate && iterations < maxIterations - 2) {
+            conversationMessages.push({ role: 'assistant', content: responseText });
+            conversationMessages.push({ role: 'user', content: 'Continue.' });
+            continue;
+          }
+
+          // After create_project but 0 files written — force continuation regardless of what model says
+          if (createdProjectThisLoop && filesWrittenThisLoop === 0 && iterations < maxIterations - 2) {
+            conversationMessages.push({ role: 'assistant', content: responseText });
+            conversationMessages.push({ role: 'user', content: `Continue. Write all the project files now using write_file. Use absolute paths starting with ${projectPathRef.current}/` });
+            continue;
+          }
+
+          break;
+        }
+
+        // ── Process tool calls ──
+        let askUserBreak = false;
+        conversationMessages.push(assistantMsg);
+
+        // Re-create thinking indicator for tool execution
+        thinkingId = msgId();
+        setMessages(prev => [...prev, {
+          id: thinkingId, role: 'activity' as const,
+          content: 'Executing...',
+          activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+        }]);
+
+        for (const toolCall of assistantMsg.tool_calls) {
+          // Abort check inside tool loop — prevents ghost tool execution after Stop/session switch
+          if (abortedRef.current || loopGenRef.current !== myGen || !mountedRef.current) break;
+
+          let args: any;
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+            if (!args || typeof args !== 'object') args = {};
+          } catch {
+            conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: 'Error: Invalid arguments' });
+            continue;
+          }
+
+          let result = '';
+
+          // Plan mode safety net — block write/destructive tools
+          const planBlock = planMode ? checkPlanModeBlock(toolCall.function.name) : null;
+          if (planBlock) {
+            conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: planBlock });
+            continue;
+          }
+
+          if (toolCall.function.name === 'read_file') {
+            // ── READ FILE ──
+            if (!args.path) { result = 'Error: read_file requires a path.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            const fileName = args.path.split('/').pop() ?? args.path;
+            updateThinking(`Reading ${fileName}...`);
+            await new Promise(r => setTimeout(r, 200));
+
+            const isAbsolutePath = args.path.startsWith('/') || args.path.startsWith('C:') || args.path.startsWith('D:');
+            const content = isAbsolutePath ? await readFileElectron(args.path) : await readProjectFile(args.path);
+            result = content ? content.slice(0, 10000) : 'File not found or empty.';
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'reading',
+              files: [{ path: args.path, content: content.slice(0, 3000), action: 'read' }],
+            });
+
+            // Re-create thinking indicator for next step
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: `Analyzing ${fileName}...`,
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            await new Promise(r => setTimeout(r, 300));
+
+          } else if (toolCall.function.name === 'write_file') {
+            // ── WRITE FILE ──
+            if (!args.path || !args.content) { result = 'Error: write_file requires path and content.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            const fileName = args.path.split('/').pop() ?? args.path;
+            updateThinking(`Writing changes to ${fileName}...`);
+
+            // ── Preacher: snapshot the file BEFORE overwriting ──
+            try {
+              const isAbsPath = args.path.startsWith('/') || args.path.startsWith('C:') || args.path.startsWith('D:');
+              let existingContent = '';
+              if (isAbsPath) {
+                const orbit = (window as any).orbit;
+                if (orbit?.readFile) existingContent = await orbit.readFile(args.path).catch(() => '');
+              } else {
+                existingContent = await readProjectFile(args.path).catch(() => '');
+              }
+              if (existingContent) {
+                preacher.snapshot(args.path, existingContent, 'write', `Before write_file by agent`);
+              }
+            } catch {} // Don't block write if snapshot fails
+
+            await new Promise(r => setTimeout(r, 200));
+
+            // Support absolute paths (for new projects) and relative paths (for opened projects)
+            const isAbsolutePath = args.path.startsWith('/') || args.path.startsWith('C:') || args.path.startsWith('D:');
+            let success: boolean;
+            if (isAbsolutePath) {
+              // Ensure parent directory exists
+              const parentDir = args.path.substring(0, args.path.lastIndexOf('/'));
+              const orbit = (window as any).orbit;
+              if (orbit?.mkdir) await orbit.mkdir(parentDir);
+              success = await writeFileElectron(args.path, args.content);
+            } else {
+              success = await writeProjectFile(args.path, args.content);
+            }
+            result = success
+              ? `Successfully wrote ${args.content.length} characters to ${args.path}`
+              : `Failed to write ${args.path}. Check permissions.`;
+            if (success) filesWrittenThisLoop++;
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'writing',
+              files: [{ path: args.path, content: args.content.slice(0, 3000), action: 'write' }],
+            });
+
+            // Update project file list if new file
+            if (success) {
+              setProjectFiles(prev => {
+                const exists = prev.some(f => f.path === args.path);
+                return exists ? prev : [...prev, { path: args.path, name: fileName }];
+              });
+              // Track for preview if it's a web file
+              if (/\.(html|css|js)$/.test(args.path)) {
+                setWrittenFiles(prev => {
+                  const idx = prev.findIndex(f => f.path === args.path);
+                  if (idx >= 0) {
+                    const updated = [...prev];
+                    updated[idx] = { path: args.path, content: args.content };
+                    return updated;
+                  }
+                  const next = [...prev, { path: args.path, content: args.content }];
+                  // Auto-open preview in Electron browser tab when first HTML file is written
+                  if (args.path.endsWith('.html') && !prev.some(f => f.path.endsWith('.html'))) {
+                    setTimeout(() => {
+                      const orbit = (window as any).orbit;
+                      if (orbit?.browser?.loadHTML) {
+                        orbit.browser.loadHTML(buildPreviewFromFiles(next));
+                      } else {
+                        setPreviewOpen(true);
+                      }
+                    }, 500);
+                  }
+                  return next;
+                });
+              }
+            }
+
+            // Run after_write hooks
+            if (success && hooksRef.current.length > 0) {
+              const orbit = (window as any).orbit;
+              const hookCwd = projectPathRef.current || projectPath;
+              if (orbit?.shellExec && hookCwd) {
+                const hookOutput = await runHooks('after_write', { file: args.path }, hooksRef.current, orbit.shellExec, hookCwd);
+                if (hookOutput) result += `\nHook: ${hookOutput.slice(0, 500)}`;
+              }
+            }
+
+            // Re-create thinking indicator
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const,
+              content: success ? `${fileName} saved` : `Failed to save ${fileName}`,
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            await new Promise(r => setTimeout(r, 400));
+
+          } else if (toolCall.function.name === 'list_directory') {
+            // ── LIST DIR ──
+            updateThinking(`Scanning ${args.path === '.' ? 'project root' : args.path}...`);
+            await new Promise(r => setTimeout(r, 150));
+
+            const entries = listProjectDir(args.path);
+            result = entries.length > 0 ? entries.join('\n') : 'Directory empty or not found.';
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'reading', files: [{ path: args.path || '.', content: result.slice(0, 2000), action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'dispatch_agent') {
+            // ── DISPATCH SUB-AGENT ──
+            // Sub-agents cost 5 credits (they run a full separate AI call)
+            usageBudget.consume('code_agent', SubscriptionService.getTier());
+
+            const agentName: string = args.agent ?? 'FileScout';
+            // Files can be array or comma-separated string
+            const agentFiles: string[] = Array.isArray(args.files) ? args.files : (args.files ?? '').split(',').map((f: string) => f.trim()).filter(Boolean);
+            const agentInstruction: string = args.instruction ?? '';
+
+            // Show running state in chat
+            removeThinking();
+            const subAgentMsgId = msgId();
+            setMessages(prev => [...prev, {
+              id: subAgentMsgId, role: 'subagent' as const, content: '',
+              subAgent: { name: agentName, status: 'running' as const },
+              streaming: true, timestamp: Date.now(),
+            }]);
+
+            // Build file access adapter for sub-agents
+            const fileAccess: FileAccess = {
+              readFile: readProjectFile,
+              writeFile: async (path: string, content: string) => writeProjectFile(path, content),
+              listDir: (path: string) => listProjectDir(path),
+              projectFiles,
+            };
+
+            let agentResult: SubAgentResult;
+            try {
+              if (agentName === 'FileScout') {
+                agentResult = await runFileScout(agentFiles, agentInstruction, fileAccess, apiKey!, groqFetch);
+              } else if (agentName === 'LintCheck') {
+                agentResult = await runLintAgent(agentFiles, fileAccess, apiKey!, groqFetch);
+              } else if (agentName === 'Refactor') {
+                agentResult = await runRefactorAgent(agentFiles[0] ?? '', agentInstruction, fileAccess, apiKey!, groqFetch);
+              } else if (agentName === 'TestGen') {
+                agentResult = await runTestGenAgent(agentFiles[0] ?? '', fileAccess, apiKey!, groqFetch);
+              } else {
+                agentResult = { agentName, status: 'error', summary: `Unknown agent: ${agentName}` };
+              }
+            } catch (err: any) {
+              agentResult = { agentName, status: 'error', summary: `Agent crashed: ${err?.message ?? 'unknown error'}` };
+            }
+
+            // Update sub-agent message with result
+            setMessages(prev => {
+              const idx = prev.findIndex(m => m.id === subAgentMsgId);
+              if (idx === -1) return prev;
+              const updated = [...prev];
+              updated[idx] = {
+                ...updated[idx],
+                content: agentResult.summary,
+                subAgent: { name: agentName, status: agentResult.status === 'error' ? 'error' : 'done' },
+                files: agentResult.filesRead?.map(f => ({ path: f.path, content: f.content.slice(0, 2000), action: 'read' as const })),
+                streaming: false,
+              };
+              return updated;
+            });
+
+            // Build result for the main agent to use
+            let agentResultText = `[${agentName}] ${agentResult.summary}`;
+            if (agentResult.data?.improvedContent) {
+              agentResultText += `\n\nRefactored code:\n${agentResult.data.improvedContent.slice(0, 8000)}`;
+            }
+            if (agentResult.data?.testContent) {
+              agentResultText += `\n\nGenerated test file (${agentResult.data.testPath}):\n${agentResult.data.testContent.slice(0, 8000)}`;
+            }
+            result = agentResultText;
+
+            // Re-create thinking indicator
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const,
+              content: `Reviewing ${agentName} results...`,
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            await new Promise(r => setTimeout(r, 400));
+
+          } else if (toolCall.function.name === 'run_command') {
+            // ── RUN SHELL COMMAND ──
+            const command: string = args.command ?? '';
+            const orbit = (window as any).orbit;
+
+            const cmdCwd = projectPathRef.current || projectPath;
+            if (!orbit?.shellExec) {
+              result = 'Shell execution is only available in the desktop app.';
+            } else {
+              removeThinking();
+              // Show command in chat as activity
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `$ ${command}`, content: 'Running...', action: 'read' }],
+              });
+
+              // Re-create thinking with command name
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const,
+                content: `Running: ${command.slice(0, 60)}...`,
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+
+              try {
+                // 60s timeout to prevent commands from hanging the agent loop forever
+                const shellPromise = orbit.shellExec(command, cmdCwd || undefined);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Command timed out after 60 seconds')), 60000));
+                const res = await Promise.race([shellPromise, timeoutPromise]) as any;
+                const output = res.stdout || '';
+                const errors = res.stderr || '';
+                result = res.success
+                  ? `Command succeeded (exit 0).\n${output ? `stdout:\n${output.slice(0, 8000)}` : '(no output)'}${errors ? `\nstderr:\n${errors.slice(0, 2000)}` : ''}`
+                  : `Command failed (exit ${res.code}).\n${errors ? `stderr:\n${errors.slice(0, 4000)}` : ''}${output ? `\nstdout:\n${output.slice(0, 4000)}` : ''}`;
+
+                // Update the activity with actual output
+                removeThinking();
+                addMessage({
+                  role: 'activity', content: '', activity: res.success ? 'analyzing' : 'writing',
+                  files: [{ path: `$ ${command}`, content: (output + (errors ? '\n' + errors : '')).slice(0, 3000) || '(no output)', action: 'read' }],
+                });
+              } catch (err: any) {
+                result = `Failed to execute command: ${err?.message ?? 'unknown error'}`;
+              }
+
+              // Re-create thinking indicator
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const,
+                content: 'Reviewing command output...',
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+              await new Promise(r => setTimeout(r, 300));
+            }
+
+          } else if (toolCall.function.name === 'create_project') {
+            // ── CREATE PROJECT ──
+            const projName: string = args.name ?? 'new-project';
+            const orbit = (window as any).orbit;
+
+            if (!orbit?.createProject) {
+              result = 'Project creation is only available in the desktop app.';
+            } else {
+              updateThinking(`Creating project folder: ${projName}...`);
+              try {
+                const res = await orbit.createProject(projName);
+                if (res.success) {
+                  const newPath = res.path;
+                  // Auto-set this as the active project
+                  projectPathRef.current = newPath; // Set ref immediately for run_command
+                  setProjectPath(newPath);
+                  setProjectName(projName);
+                  setIsElectronProject(true);
+                  setProjectFiles([]);
+
+                  createdProjectThisLoop = true; // Track: system prompt stays in "build from scratch" mode
+
+                  result = res.existed
+                    ? `Project folder already exists at ${newPath}. Using it as the active project. You MUST now write all files using write_file with absolute paths like ${newPath}/index.html — do NOT stop until all files are written.`
+                    : `Created project folder at ${newPath}. This is now your active project. You MUST now write ALL files using write_file with absolute paths like ${newPath}/index.html — do NOT stop until every file is written.`;
+
+                  removeThinking();
+                  addMessage({
+                    role: 'activity', content: '', activity: 'writing',
+                    files: [{ path: newPath, content: res.existed ? 'Folder already existed' : 'Created new project folder', action: 'write' }],
+                  });
+                } else {
+                  result = `Failed to create project: ${res.reason ?? 'unknown error'}`;
+                }
+              } catch (err: any) {
+                result = `Error creating project: ${err?.message ?? 'unknown'}`;
+              }
+
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const,
+                content: 'Setting up project...',
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+              await new Promise(r => setTimeout(r, 300));
+            }
+
+          } else if (toolCall.function.name === 'web_search') {
+            // ── WEB SEARCH ──
+            const query: string = args.query ?? '';
+            updateThinking(`Searching: ${query.slice(0, 50)}...`);
+
+            try {
+              const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+              let rawHtml = '';
+
+              const orbit = (window as any).orbit;
+              if (orbit?.proxyFetch) {
+                const res = await orbit.proxyFetch(searchUrl, {
+                  method: 'GET',
+                  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Bleumr/1.0)' },
+                });
+                rawHtml = res.text ?? '';
+              } else {
+                const res = await fetchWithTimeout(searchUrl);
+                rawHtml = await res.text();
+              }
+
+              const resultMatches = rawHtml.match(/<a[^>]*class="result__a"[^>]*>(.*?)<\/a>/gs) ?? [];
+              const snippetMatches = rawHtml.match(/<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/gs) ?? [];
+
+              const results: string[] = [];
+              for (let i = 0; i < Math.min(resultMatches.length, 5); i++) {
+                const title = (resultMatches[i] ?? '').replace(/<[^>]+>/g, '').trim();
+                const snippet = (snippetMatches[i] ?? '').replace(/<[^>]+>/g, '').trim();
+                if (title) results.push(`${i + 1}. ${title}\n   ${snippet}`);
+              }
+
+              result = results.length > 0
+                ? `Search results for "${query}":\n\n${results.join('\n\n')}`
+                : `No results found for "${query}". Try rephrasing.`;
+            } catch {
+              result = `Search failed — couldn't reach the web. Try again when online.`;
+            }
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'analyzing',
+              files: [{ path: `Search: ${query}`, content: result.slice(0, 2000), action: 'read' }],
+            });
+
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const,
+              content: 'Processing search results...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            await new Promise(r => setTimeout(r, 300));
+
+          } else if (toolCall.function.name === 'ask_user') {
+            // ── ASK USER (with clickable suggestions) ──
+            const question: string = args.question ?? 'What would you like to do?';
+            const optionStr: string = args.options ?? '';
+            const options = optionStr.split(',').map((o: string) => o.trim()).filter(Boolean);
+
+            removeThinking();
+            const askId = msgId();
+            setMessages(prev => [...prev, {
+              id: askId, role: 'assistant' as const, content: question,
+              suggestions: options.length > 0 ? options : undefined,
+              streaming: false, timestamp: Date.now(),
+            }]);
+
+            result = `Question shown to user: "${question}" with options: [${options.join(', ')}]. Waiting for their response. Do NOT continue until the user responds.`;
+            // Flag to break the while loop AFTER processing remaining tool calls
+            askUserBreak = true;
+
+          } else if (toolCall.function.name === 'fetch_url') {
+            // ── FETCH URL ──
+            const url: string = args.url ?? '';
+            updateThinking(`Fetching ${url.slice(0, 50)}...`);
+
+            try {
+              const orbit = (window as any).orbit;
+              let text = '';
+              if (orbit?.proxyFetch) {
+                const res = await orbit.proxyFetch(url, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Bleumr/1.0)' } });
+                text = res.text ?? '';
+              } else {
+                const res = await fetchWithTimeout(url);
+                text = await res.text();
+              }
+              // Strip HTML tags for cleaner output
+              if (args.format !== 'html') {
+                text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                  .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                  .replace(/<[^>]+>/g, ' ')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+              }
+              result = text.slice(0, 10000) || 'Empty response.';
+            } catch (err: any) {
+              result = `Failed to fetch URL: ${err?.message ?? 'unknown error'}`;
+            }
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'analyzing',
+              files: [{ path: `Fetch: ${url.slice(0, 60)}`, content: result.slice(0, 2000), action: 'read' }],
+            });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: 'Processing...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+
+          } else if (toolCall.function.name === 'check_url') {
+            // ── CHECK URL ──
+            updateThinking(`Checking ${args.url?.slice(0, 40)}...`);
+            try {
+              const orbit = (window as any).orbit;
+              if (orbit?.proxyFetch) {
+                const res = await orbit.proxyFetch(args.url, { method: 'HEAD', headers: {} });
+                result = res.ok ? `URL is reachable (status ${res.status})` : `URL returned status ${res.status}`;
+              } else {
+                const res = await fetchWithTimeout(args.url, { method: 'HEAD' }, 10000);
+                result = `URL is ${res.ok ? 'reachable' : 'not reachable'} (status ${res.status})`;
+              }
+            } catch { result = 'URL is not reachable.'; }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'analyzing', files: [{ path: `URL: ${(args.url || '').slice(0, 60)}`, content: result, action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'validate_html') {
+            // ── W3C HTML VALIDATION ──
+            const html: string = (args.html ?? '').slice(0, 50000);
+            updateThinking('Validating HTML against W3C standards...');
+
+            try {
+              const orbit = (window as any).orbit;
+              const validatorUrl = 'https://validator.w3.org/nu/?out=json';
+              let responseText = '';
+
+              if (orbit?.proxyFetch) {
+                const res = await orbit.proxyFetch(validatorUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/html; charset=utf-8', 'User-Agent': 'Bleumr/1.0' },
+                  body: html,
+                });
+                responseText = res.text ?? '';
+              } else {
+                const res = await fetchWithTimeout(validatorUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                  body: html,
+                });
+                responseText = await res.text();
+              }
+
+              let data: any;
+              try { data = JSON.parse(responseText); } catch {
+                throw new Error(`Validator returned non-JSON response (${responseText.slice(0, 120)})`);
+              }
+              const messages = data.messages ?? [];
+              const errors = messages.filter((m: any) => m.type === 'error');
+              const warnings = messages.filter((m: any) => m.type === 'info' && m.subType === 'warning');
+              const info = messages.filter((m: any) => m.type === 'info' && m.subType !== 'warning');
+
+              const lines: string[] = [
+                `## W3C HTML Validation Results`,
+                `✅ Passed: ${errors.length === 0 ? 'Yes' : 'No'}`,
+                `❌ Errors: ${errors.length}  ⚠️ Warnings: ${warnings.length}  ℹ️ Info: ${info.length}`,
+                '',
+              ];
+
+              if (errors.length > 0) {
+                lines.push('### Errors:');
+                errors.slice(0, 20).forEach((e: any, i: number) => {
+                  lines.push(`${i + 1}. Line ${e.lastLine ?? '?'}: ${e.message}`);
+                  if (e.extract) lines.push(`   Extract: \`${e.extract.slice(0, 100)}\``);
+                });
+              }
+              if (warnings.length > 0) {
+                lines.push('', '### Warnings:');
+                warnings.slice(0, 10).forEach((w: any, i: number) => {
+                  lines.push(`${i + 1}. Line ${w.lastLine ?? '?'}: ${w.message}`);
+                });
+              }
+
+              result = lines.join('\n');
+            } catch (err: any) {
+              result = `W3C HTML validation failed: ${err?.message ?? 'Validator unreachable. Try again.'}`;
+            }
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'analyzing',
+              files: [{ path: 'W3C HTML Validation', content: result.slice(0, 3000), action: 'read' }],
+            });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: 'Reviewing validation results...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+
+          } else if (toolCall.function.name === 'validate_css') {
+            // ── W3C CSS VALIDATION ──
+            const css: string = (args.css ?? '').slice(0, 50000);
+            updateThinking('Validating CSS against W3C standards...');
+
+            try {
+              const orbit = (window as any).orbit;
+              // Use POST with form body to avoid URL length limits on large CSS
+              const validatorUrl = 'https://jigsaw.w3.org/css-validator/validator';
+              const formBody = `text=${encodeURIComponent(css)}&output=json&profile=css3&warning=2`;
+              let responseText = '';
+
+              if (orbit?.proxyFetch) {
+                const res = await orbit.proxyFetch(validatorUrl, {
+                  method: 'POST',
+                  headers: { 'User-Agent': 'Bleumr/1.0', 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: formBody,
+                });
+                responseText = res.text ?? '';
+              } else {
+                const res = await fetchWithTimeout(validatorUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: formBody,
+                });
+                responseText = await res.text();
+              }
+
+              let data: any;
+              try { data = JSON.parse(responseText); } catch {
+                throw new Error(`Validator returned non-JSON response (${responseText.slice(0, 120)})`);
+              }
+              const validity = data?.cssvalidation?.validity ?? false;
+              const cssErrors = data?.cssvalidation?.errors ?? [];
+              const cssWarnings = data?.cssvalidation?.warnings ?? [];
+
+              const lines: string[] = [
+                `## W3C CSS Validation Results`,
+                `✅ Valid: ${validity ? 'Yes' : 'No'}`,
+                `❌ Errors: ${cssErrors.length}  ⚠️ Warnings: ${cssWarnings.length}`,
+                '',
+              ];
+
+              if (cssErrors.length > 0) {
+                lines.push('### Errors:');
+                cssErrors.slice(0, 20).forEach((e: any, i: number) => {
+                  lines.push(`${i + 1}. Line ${e.line ?? '?'}: ${e.message?.replace(/\s+/g, ' ').trim()}`);
+                  if (e.context) lines.push(`   Context: \`${e.context.slice(0, 80)}\``);
+                });
+              }
+              if (cssWarnings.length > 0) {
+                lines.push('', '### Warnings:');
+                cssWarnings.slice(0, 10).forEach((w: any, i: number) => {
+                  lines.push(`${i + 1}. Line ${w.line ?? '?'}: ${w.message?.replace(/\s+/g, ' ').trim()}`);
+                });
+              }
+
+              result = lines.join('\n');
+            } catch (err: any) {
+              result = `W3C CSS validation failed: ${err?.message ?? 'Validator unreachable. Try again.'}`;
+            }
+
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'analyzing',
+              files: [{ path: 'W3C CSS Validation', content: result.slice(0, 3000), action: 'read' }],
+            });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: 'Reviewing validation results...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+
+
+          } else if (toolCall.function.name === 'create_directory') {
+            // ── CREATE DIRECTORY ──
+            if (!args.path) { result = 'Error: create_directory requires a path.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            updateThinking(`Creating ${args.path}...`);
+            const orbit = (window as any).orbit;
+            const dirPath = args.path.startsWith('/') ? args.path : `${projectPathRef.current || projectPath}/${args.path}`;
+            if (orbit?.mkdir) {
+              try {
+                await orbit.mkdir(dirPath);
+                result = `Created directory: ${dirPath}`;
+              } catch (err: any) { result = `Failed: ${err?.message ?? 'unknown'}`; }
+            } else { result = 'Directory creation only available in desktop app.'; }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: dirPath, content: result, action: 'write' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'file_exists') {
+            // ── FILE EXISTS ──
+            const exists = projectFiles.some(f => f.path === args.path || f.path.endsWith(`/${args.path}`));
+            result = exists ? `Yes, ${args.path} exists in the project.` : `No, ${args.path} was not found.`;
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'analyzing', files: [{ path: args.path, content: result, action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'search_in_files') {
+            // ── SEARCH IN FILES (grep) ──
+            if (!args.pattern) { result = 'Error: search_in_files requires a pattern.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && cmdCwd) {
+              const ext = args.file_type ? `--include='*.${shellSafe(args.file_type)}'` : '--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --include="*.py" --include="*.rs" --include="*.go"';
+              const cmd = `grep -rn '${shellSafe(args.pattern)}' . ${ext} 2>/dev/null | head -40`;
+              const res = await orbit.shellExec(cmd, cmdCwd);
+              result = res.stdout || 'No matches found.';
+            } else {
+              // Fallback: search in loaded project files
+              try {
+                const matches = projectFiles.filter(f => f.name.match(new RegExp(args.file_type || '.*')));
+                result = `Searched ${matches.length} file names. Use run_command with grep for content search.`;
+              } catch { result = 'Invalid file type pattern.'; }
+            }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'analyzing', files: [{ path: `Search: ${args.pattern}`, content: result.slice(0, 2000), action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Reviewing results...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'find_files') {
+            // ── FIND FILES (glob) ──
+            updateThinking(`Finding ${args.pattern || '*'}...`);
+            const pattern = args.pattern || '*';
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && cmdCwd) {
+              const cmd = `find . -name '${shellSafe(pattern)}' -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null | head -50`;
+              const res = await orbit.shellExec(cmd, cmdCwd);
+              result = res.stdout || 'No matching files found.';
+            } else {
+              const matches = projectFiles.filter(f => f.name.match(new RegExp(pattern.replace(/\*/g, '.*'))));
+              result = matches.map(f => f.path).join('\n') || 'No matches.';
+            }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'analyzing', files: [{ path: `Find: ${pattern}`, content: result.slice(0, 2000), action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'replace_in_file') {
+            // ── REPLACE IN FILE ──
+            if (!args.path || args.find === undefined || args.replace === undefined) {
+              result = 'Error: replace_in_file requires path, find, and replace.';
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue;
+            }
+            if (args.find === '') { result = 'Error: find string cannot be empty.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            try {
+              const content = args.path.startsWith('/') ? await readFileElectron(args.path) : await readProjectFile(args.path);
+              if (!content) { result = `File not found: ${args.path}`; }
+              else {
+                // Preacher: snapshot before replace
+                preacher.snapshot(args.path, content, 'replace', `Before replace_in_file: "${(args.find ?? '').slice(0, 40)}"`);
+
+                const newContent = content.split(args.find).join(args.replace);
+                if (newContent === content) { result = `Text "${args.find.slice(0, 80)}" not found in ${args.path}.`; }
+                else {
+                  const isAbs = args.path.startsWith('/');
+                  const success = isAbs ? await writeFileElectron(args.path, newContent) : await writeProjectFile(args.path, newContent);
+                  const count = (content.split(args.find).length - 1);
+                  result = success ? `Replaced ${count} occurrence(s) in ${args.path}.` : `Failed to write ${args.path}.`;
+                  if (success) {
+                    removeThinking();
+                    addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: args.path, content: newContent.slice(0, 2000), action: 'write' }] });
+                    thinkingId = msgId();
+                    setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Replaced in ${args.path.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                  }
+                }
+              }
+            } catch (err: any) { result = `Replace failed: ${err?.message ?? 'unknown error'}`; }
+            // Ensure thinking state is clean regardless of outcome
+            removeThinking();
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'get_project_tree') {
+            // ── PROJECT TREE ──
+            updateThinking('Mapping project structure...');
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && cmdCwd) {
+              const rawDepth = String(args.depth || '3').replace(/[^0-9]/g, '') || '3';
+              const depth = Math.min(parseInt(rawDepth, 10), 10);
+              const treePath = safePath(String(args.path || '.')) ?? '.';
+              const cmd = `find ${shellSafe(treePath)} -maxdepth ${depth} -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/dist/*" 2>/dev/null | head -100 | sort`;
+              const res = await orbit.shellExec(cmd, cmdCwd);
+              result = res.stdout || 'Empty project.';
+            } else {
+              result = projectFiles.map(f => f.path).sort().join('\n') || 'No files loaded.';
+            }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'reading', files: [{ path: 'Project Tree', content: result.slice(0, 2000), action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'get_project_info') {
+            // ── PROJECT INFO ──
+            updateThinking('Reading project metadata...');
+            const pkgContent = await readProjectFile('package.json');
+            if (pkgContent) {
+              try {
+                const pkg = JSON.parse(pkgContent);
+                result = `Name: ${pkg.name || 'unnamed'}\nVersion: ${pkg.version || '0.0.0'}\nDependencies: ${Object.keys(pkg.dependencies || {}).join(', ') || 'none'}\nDev deps: ${Object.keys(pkg.devDependencies || {}).join(', ') || 'none'}\nScripts: ${Object.keys(pkg.scripts || {}).join(', ') || 'none'}`;
+              } catch { result = 'package.json found but could not parse.'; }
+            } else {
+              result = `Project at: ${projectPathRef.current || projectPath || 'unknown'}\nFiles: ${projectFiles.length}\nNo package.json found.`;
+            }
+            removeThinking();
+            addMessage({ role: 'activity', content: '', activity: 'reading', files: [{ path: 'package.json', content: result.slice(0, 2000), action: 'read' }] });
+            thinkingId = msgId();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+
+          } else if (toolCall.function.name === 'scaffold_component' || toolCall.function.name === 'scaffold_page' || toolCall.function.name === 'scaffold_api' || toolCall.function.name === 'scaffold_test') {
+            // ── SCAFFOLD TOOLS — generate template and write file ──
+            const rawName = args.name || args.source_file?.split('/').pop()?.replace(/\.[^.]+$/, '') || 'Template';
+            const scaffoldName = safePath(rawName.replace(/[^a-zA-Z0-9_-]/g, '')) ?? 'Template';
+            const fw = (args.framework || 'react').toLowerCase();
+            let scaffoldPath = '';
+            let scaffoldContent = '';
+
+            if (toolCall.function.name === 'scaffold_component') {
+              scaffoldPath = `src/components/${scaffoldName}.tsx`;
+              scaffoldContent = `import React from 'react';\n\ninterface ${scaffoldName}Props {\n  // Add your props here\n}\n\nexport function ${scaffoldName}({}: ${scaffoldName}Props) {\n  return (\n    <div>\n      <h2>${scaffoldName}</h2>\n    </div>\n  );\n}\n`;
+              if (fw.includes('vue')) { scaffoldPath = `src/components/${scaffoldName}.vue`; scaffoldContent = `<template>\n  <div>\n    <h2>${scaffoldName}</h2>\n  </div>\n</template>\n\n<script setup lang="ts">\n// Props and logic here\n</script>\n`; }
+            } else if (toolCall.function.name === 'scaffold_page') {
+              scaffoldPath = `src/pages/${scaffoldName}.tsx`;
+              scaffoldContent = `import React from 'react';\n\nexport default function ${scaffoldName}Page() {\n  return (\n    <div>\n      <h1>${scaffoldName}</h1>\n    </div>\n  );\n}\n`;
+            } else if (toolCall.function.name === 'scaffold_api') {
+              const method = (args.method || 'GET').toUpperCase();
+              scaffoldPath = `src/api/${scaffoldName}.ts`;
+              scaffoldContent = `// ${method} /api/${scaffoldName.toLowerCase()}\n\nexport async function handler(req: Request): Promise<Response> {\n  if (req.method !== '${method}') {\n    return new Response('Method not allowed', { status: 405 });\n  }\n\n  try {\n    // Your logic here\n    return Response.json({ message: 'OK' });\n  } catch (error) {\n    return Response.json({ error: 'Internal error' }, { status: 500 });\n  }\n}\n`;
+            } else if (toolCall.function.name === 'scaffold_test') {
+              const srcFile = args.source_file || `${scaffoldName}.ts`;
+              const testFw = (args.framework || 'vitest').toLowerCase();
+              const extMatch = srcFile.match(/\.(ts|tsx|js|jsx)$/);
+              scaffoldPath = extMatch ? srcFile.replace(extMatch[0], `.test${extMatch[0]}`) : `${srcFile}.test.ts`;
+              if (testFw.includes('pytest')) {
+                scaffoldPath = `tests/test_${scaffoldName.toLowerCase()}.py`;
+                scaffoldContent = `import pytest\n\n\ndef test_${scaffoldName.toLowerCase()}_exists():\n    \"\"\"Test that ${scaffoldName} works correctly.\"\"\"\n    assert True  # Replace with real tests\n`;
+              } else {
+                scaffoldContent = `import { describe, it, expect } from '${testFw.includes('jest') ? '@jest/globals' : 'vitest'}';\n\ndescribe('${scaffoldName}', () => {\n  it('should work correctly', () => {\n    expect(true).toBe(true); // Replace with real tests\n  });\n});\n`;
+              }
+            }
+
+            // Write the scaffold file
+            const isAbs = scaffoldPath.startsWith('/');
+            const fullPath = isAbs ? scaffoldPath : `${projectPathRef.current || projectPath}/${scaffoldPath}`;
+            const orbit = (window as any).orbit;
+            const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+            if (orbit?.mkdir) await orbit.mkdir(parentDir);
+            const success = await writeFileElectron(fullPath, scaffoldContent);
+            result = success ? `Scaffolded ${scaffoldPath} (${scaffoldContent.length} chars)` : `Failed to scaffold ${scaffoldPath}`;
+
+            if (success) {
+              removeThinking();
+              addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: scaffoldPath, content: scaffoldContent.slice(0, 2000), action: 'write' }] });
+              setProjectFiles(prev => prev.some(f => f.path === scaffoldPath) ? prev : [...prev, { path: scaffoldPath, name: scaffoldPath.split('/').pop() ?? scaffoldPath }]);
+              thinkingId = msgId();
+              setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Scaffolded ${scaffoldPath.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+            }
+
+          } else if (toolCall.function.name === 'import_image') {
+            // ── IMPORT IMAGE into project ──
+            const orbit = (window as any).orbit;
+            const srcPath: string = args.source_path ?? '';
+            const destPath: string = args.dest_path ?? '';
+            const cmdCwd = projectPathRef.current || projectPath;
+
+            if (!safePath(srcPath) || !safePath(destPath)) {
+              result = 'Invalid path — paths must not contain ".." or shell metacharacters.';
+            } else if (!orbit?.shellExec || !cmdCwd) {
+              result = 'Image import only available in the desktop app with a project open.';
+            } else {
+              const fullDest = destPath.startsWith('/') ? destPath : `${cmdCwd}/${destPath}`;
+              const parentDir = fullDest.substring(0, fullDest.lastIndexOf('/'));
+              try {
+                if (orbit.mkdir) await orbit.mkdir(parentDir);
+                const res = await orbit.shellExec(`cp '${shellSafe(srcPath)}' '${shellSafe(fullDest)}'`, cmdCwd);
+                if (res.success) {
+                  result = `Copied image to ${destPath}. You can reference it in your code as "${destPath}" or "./${destPath}".`;
+                  removeThinking();
+                  addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: destPath, content: `[Image: ${srcPath.split('/').pop()}]`, action: 'write' }] });
+                  setProjectFiles(prev => prev.some(f => f.path === destPath) ? prev : [...prev, { path: destPath, name: destPath.split('/').pop() ?? destPath }]);
+                  thinkingId = msgId();
+                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Imported ${srcPath.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                } else {
+                  result = `Failed to copy image: ${res.stderr || 'unknown error'}`;
+                }
+              } catch (err: any) {
+                result = `Error importing image: ${err?.message ?? 'unknown'}`;
+              }
+            }
+
+          } else if (toolCall.function.name === 'rollback_file') {
+            // ── PREACHER: UNDO LAST CHANGE ──
+            if (!args.path) { result = 'Error: rollback_file requires a path.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            const snap = preacher.popLatest(args.path);
+            if (!snap) {
+              result = `No snapshot found for ${args.path}. Preacher only has backups of files you've modified this session.`;
+              removeThinking();
+              thinkingId = msgId();
+              setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+            } else {
+              updateThinking(`Rolling back ${args.path.split('/').pop()}...`);
+              const isAbs = args.path.startsWith('/') || snap.path.startsWith('/');
+              const success = isAbs ? await writeFileElectron(snap.path, snap.content) : await writeProjectFile(snap.path, snap.content);
+              result = success
+                ? `Rolled back ${args.path} to its state before your last change (snapshot from ${new Date(snap.timestamp).toLocaleTimeString()}). ${preacher.getHistory(args.path).length} older version(s) still available.`
+                : `Rollback failed — couldn't write to ${args.path}.`;
+              if (success) {
+                removeThinking();
+                addMessage({
+                  role: 'activity', content: '', activity: 'writing',
+                  files: [{ path: args.path, content: snap.content.slice(0, 2000), action: 'write' }],
+                });
+                thinkingId = msgId();
+                setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Rolled back ${args.path.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+              }
+            }
+
+          } else if (toolCall.function.name === 'rollback_file_original') {
+            // ── PREACHER: NUCLEAR ROLLBACK TO ORIGINAL ──
+            if (!args.path) { result = 'Error: rollback_file_original requires a path.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            const snap = preacher.getOriginal(args.path);
+            if (!snap) {
+              result = `No original snapshot found for ${args.path}. Preacher only has backups of files you've modified this session.`;
+              removeThinking();
+              thinkingId = msgId();
+              setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: 'Processing...', activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+            } else {
+              updateThinking(`Restoring original ${args.path.split('/').pop()}...`);
+              const isAbs = args.path.startsWith('/') || snap.path.startsWith('/');
+              const success = isAbs ? await writeFileElectron(snap.path, snap.content) : await writeProjectFile(snap.path, snap.content);
+              result = success
+                ? `Fully restored ${args.path} to its original state (before any of your changes). All ${preacher.getHistory(args.path).length} intermediate versions cleared.`
+                : `Rollback failed — couldn't write to ${args.path}.`;
+              if (success) {
+                preacher.clearFile(args.path); // Clear all snapshots — we're back to original
+                removeThinking();
+                addMessage({
+                  role: 'activity', content: '', activity: 'writing',
+                  files: [{ path: args.path, content: snap.content.slice(0, 2000), action: 'write' }],
+                });
+                thinkingId = msgId();
+                setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Restored original ${args.path.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+              }
+            }
+
+          } else if (SHELL_CMD[toolCall.function.name]) {
+            // ── SHELL-BASED TOOLS (git, packages, build, analysis, etc.) ──
+            const shellCommand = SHELL_CMD[toolCall.function.name](args);
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+
+            // Preacher: snapshot before destructive file operations
+            if (orbit?.readFile && (toolCall.function.name === 'delete_file' || toolCall.function.name === 'rename_file' || toolCall.function.name === 'move_file')) {
+              const targetPath = args.path || args.old_path || args.source || '';
+              if (targetPath) {
+                try {
+                  const fullPath = targetPath.startsWith('/') ? targetPath : `${cmdCwd}/${targetPath}`;
+                  const snap = await orbit.readFile(fullPath).catch(() => '');
+                  if (snap) preacher.snapshot(targetPath, snap, toolCall.function.name === 'delete_file' ? 'delete' : 'rename', `Before ${toolCall.function.name}`);
+                } catch {}
+              }
+            }
+
+            if (!orbit?.shellExec) {
+              result = 'Shell execution is only available in the desktop app.';
+            } else {
+              const toolLabel = toolCall.function.name.replace(/_/g, ' ');
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `$ ${shellCommand.slice(0, 80)}`, content: 'Running...', action: 'read' }],
+              });
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const,
+                content: `${toolLabel}: ${shellCommand.slice(0, 50)}...`,
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+
+              try {
+                const res = await orbit.shellExec(shellCommand, cmdCwd || undefined);
+                const output = res.stdout || '';
+                const errors = res.stderr || '';
+                result = res.success
+                  ? `${toolLabel} succeeded.\n${output ? output.slice(0, 8000) : '(no output)'}${errors ? `\nWarnings:\n${errors.slice(0, 2000)}` : ''}`
+                  : `${toolLabel} failed (exit ${res.code}).\n${errors ? errors.slice(0, 4000) : ''}${output ? `\n${output.slice(0, 4000)}` : ''}`;
+
+                removeThinking();
+                addMessage({
+                  role: 'activity', content: '', activity: res.success ? 'analyzing' : 'writing',
+                  files: [{ path: `$ ${shellCommand.slice(0, 80)}`, content: (output + (errors ? '\n' + errors : '')).slice(0, 3000) || '(no output)', action: 'read' }],
+                });
+              } catch (err: any) {
+                result = `Failed: ${err?.message ?? 'unknown error'}`;
+              }
+
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const,
+                content: 'Reviewing output...',
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+              await new Promise(r => setTimeout(r, 200));
+            }
+
+          } else {
+            // ── UNKNOWN TOOL — fallback ──
+            result = `Unknown tool: ${toolCall.function.name}. Use run_command as a fallback.`;
+          }
+
+          // Cap tool results to prevent context explosion across iterations
+          const cappedResult = result.length > 4000 ? result.slice(0, 4000) + '\n... (truncated)' : result;
+          conversationMessages.push({
+            role: 'tool', tool_call_id: toolCall.id, content: cappedResult,
+          });
+          if (result) toolResultsLog.push(result.slice(0, 500));
+        }
+
+        // Break after ask_user — but only after all tool calls in this batch are processed
+        if (askUserBreak) break;
+        // Loop continues — AI processes tool results
+      }
+
+      removeThinking();
+      // Sweep ALL lingering thinking indicators — catches any that slipped through React batching
+      setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
+
+      // ── Post-loop: ensure a closing response exists ──
+      // If the last visible message is NOT from the assistant (e.g. it's an activity),
+      // make one final call to get a summary of what was done.
+      const lastMsgs = await new Promise<AgentMessage[]>(resolve => {
+        setMessages(prev => { resolve(prev); return prev; });
+      });
+      const lastMsg = lastMsgs[lastMsgs.length - 1];
+      const needsClosing = lastMsg && lastMsg.role !== 'assistant' && lastMsg.role !== 'user' && conversationMessages.length > 2;
+
+      if (needsClosing && apiKey && !abortedRef.current) {
+        // Wrap closing response in a 10s timeout — prevents Stop button from getting stuck
+        const closingTimeout = new Promise<void>(resolve => setTimeout(resolve, 10000));
+        const closingWork = (async () => {
+          const closingBody = {
+            model: pickModel('closing'),
+            messages: [
+              { role: 'system', content: 'You are Code Bleu. You just finished working on a task. Talk to the user naturally — summarize what you did in 2-4 sentences. Mention specific files, features, or changes. If you built something, explain how they can use it. Be warm and helpful, like a developer wrapping up with their teammate. No markdown formatting. NEVER use generic filler like "Let me know if you need anything" or "Please note that..." — just describe what you actually did.' },
+              ...conversationMessages.slice(-6),
+            ],
+            max_tokens: 300,
+            temperature: 0.3,
+          };
+
+          const closingId = msgId();
+          let closingStreamed = false;
+
+          setMessages(prev => [...prev, {
+            id: closingId, role: 'assistant' as const, content: '',
+            streaming: true, timestamp: Date.now(),
+          }]);
+
+          try {
+            await streamGroqResponse(apiKey, closingBody, (chunk) => {
+              closingStreamed = true;
+              setMessages(prev => {
+                const idx = prev.findIndex(m => m.id === closingId);
+                if (idx === -1) return prev;
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], content: updated[idx].content + chunk };
+                return updated;
+              });
+            }, abortedRef);
+          } catch {
+            try {
+              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                body: JSON.stringify(closingBody),
+              });
+              const text = data.choices?.[0]?.message?.content?.trim();
+              if (text) {
+                setMessages(prev => {
+                  const idx = prev.findIndex(m => m.id === closingId);
+                  if (idx === -1) return prev;
+                  const updated = [...prev];
+                  updated[idx] = { ...updated[idx], content: text };
+                  return updated;
+                });
+                closingStreamed = true;
+              }
+            } catch { /* give up */ }
+          }
+
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === closingId);
+            if (idx === -1) return prev;
+            if (!closingStreamed) return prev.filter(m => m.id !== closingId);
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], streaming: false };
+            return updated;
+          });
+        })();
+        try { await Promise.race([closingWork, closingTimeout]); } catch { /* best-effort */ }
+      }
+
+    } catch (err: any) {
+      // Remove any lingering thinking indicators
+      setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
+
+      const errMsg = (err as Error)?.message ?? '';
+      let errorContent: string;
+
+      if (errMsg === 'NO_KEY') {
+        errorContent = 'No API key configured. Add your Groq key in Settings to start coding.';
+      } else if (errMsg === 'OFFLINE') {
+        errorContent = 'Looks like the connection dropped — I tried a few times but couldn\'t reach the AI service. Your project files are still loaded and safe. Check your internet connection and try again.';
+      } else if (errMsg.includes('429') || errMsg.includes('rate')) {
+        errorContent = 'Hit the rate limit on the AI service. Give it a few seconds and try again.';
+      } else if (errMsg.includes('401')) {
+        errorContent = 'Your Groq API key seems invalid or expired. Check it in Settings and try again.';
+      } else if (errMsg.includes('API error')) {
+        errorContent = `The AI service returned an error (${errMsg}). This is usually temporary — try again in a moment.`;
+      } else {
+        errorContent = 'Something went wrong reaching the AI service. Your files are still loaded — try sending your message again.';
+      }
+
+      const errId = msgId();
+      setMessages(prev => [...prev, {
+        id: errId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
+      }]);
+      await typewriterAnimate(errorContent, errId);
+    } finally {
+      // Only update shared state if this loop is still the active generation
+      // (prevents stale loops from corrupting a new session's state)
+      const isStale = loopGenRef.current !== myGen;
+
+      if (!isStale && toolResultsLog.length > 0) {
+        // Preserve tool context for next sendToAgent call (so model remembers what it did)
+        lastToolContextRef.current = toolResultsLog
+          .slice(-8)
+          .map(r => r.slice(0, 120))
+          .join(' | ')
+          .slice(0, 800);
+      }
+      // Auto-memory: extract learnable patterns from this interaction (safe even if stale)
+      if (toolResultsLog.length > 0 || lastAssistantText) {
+        try { extractCodeMemories(lastUserMsgRef.current, lastAssistantText, toolResultsLog); } catch { /* best-effort */ }
+      }
+      // Always release running locks — a stuck "running" state is worse than a brief race
+      agentRunningRef.current = false;
+      setIsWorking(false);
+    }
+  }, [isWorking, messages, projectContext, projectFiles, apiKey, addMessage, readProjectFile, writeProjectFile, listProjectDir, typewriterAnimate, autoApprove, attachedImages, planMode, bleumrConfig]);
+
+  // Wrapper that reads from input state
+  const handleSend = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    inputRef.current?.focus();
+    sendToAgent(text);
+  }, [input, sendToAgent]);
+
+  // Handle suggestion chip clicks
+  const handleSuggestionClick = useCallback((option: string, msgIdToUpdate: string) => {
+    // Remove suggestions from the message
+    setMessages(prev => prev.map(m =>
+      m.id === msgIdToUpdate ? { ...m, suggestions: undefined } : m
+    ));
+    sendToAgent(option);
+  }, [sendToAgent]);
+
+  // ── Image/file upload ──
+  const handleAttachFiles = useCallback(async () => {
+    const orbit = (window as any).orbit;
+    if (!orbit?.showOpenDialog) return;
+
+    const result = await orbit.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePaths?.length) return;
+
+    for (const filePath of result.filePaths) {
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+
+      if (isImage && orbit.readFileBase64) {
+        const data = await orbit.readFileBase64(filePath);
+        if (data) {
+          const dataUri = `data:${data.contentType};base64,${data.base64}`;
+          const name = filePath.split('/').pop() ?? filePath;
+          setAttachedImages(prev => [...prev, { name, dataUri, path: filePath }]);
+        }
+      } else {
+        // Non-image file — read as text and mention in input
+        const content = await orbit.readFile(filePath);
+        if (content) {
+          const name = filePath.split('/').pop() ?? filePath;
+          setInput(prev => prev + (prev ? '\n' : '') + `[Attached file: ${name}]\n`);
+        }
+      }
+    }
+  }, []);
+
+  // Handle paste (for screenshots / clipboard images)
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUri = reader.result as string;
+          const name = `screenshot_${Date.now()}.png`;
+          setAttachedImages(prev => [...prev, { name, dataUri, path: '' }]);
+        };
+        reader.readAsDataURL(blob);
+      }
+    }
+  }, []);
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  // ── Session management (must be before handleReset) ──
+  const saveCurrentSession = useCallback(() => {
+    if (messages.length === 0) return null;
+    const sessionId = activeSessionId ?? `session_${Date.now()}`;
+    const firstUserMsg = messages.find(m => m.role === 'user')?.content ?? '';
+    const sessionName = firstUserMsg.slice(0, 40) || projectName || 'Untitled session';
+
+    const session: CodingSession = {
+      id: sessionId,
+      name: sessionName,
+      projectName,
+      messages: messages.filter(m => m.role === 'user' || m.role === 'assistant'),
+      projectPath,
+      projectContext,
+      projectFiles,
+      timestamp: Date.now(),
+    };
+
+    setSessions(prev => {
+      const idx = prev.findIndex(s => s.id === sessionId);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = session;
+        return updated;
+      }
+      return [session, ...prev];
+    });
+    setActiveSessionId(sessionId);
+    // Persist to localStorage
+    saveCodeSession(session);
+    return sessionId;
+  }, [messages, activeSessionId, projectName, projectPath, projectContext, projectFiles]);
+
+  const loadSession = useCallback((session: CodingSession) => {
+    // Abort any running agent loop + invalidate stale generation
+    abortedRef.current = true;
+    agentRunningRef.current = false;
+    loopGenRef.current++;
+    setIsWorking(false);
+
+    setMessages(session.messages);
+    setProjectName(session.projectName);
+    setProjectPath(session.projectPath);
+    setProjectContext(session.projectContext);
+    setProjectFiles(session.projectFiles);
+    setIsElectronProject(!!session.projectPath);
+    setActiveSessionId(session.id);
+    setMenuOpen(false);
+    setPreviewOpen(false);
+    setWrittenFiles([]);
+  }, []);
+
+  const startNewSession = useCallback(() => {
+    // Abort any running agent loop + invalidate stale generation
+    abortedRef.current = true;
+    agentRunningRef.current = false;
+    loopGenRef.current++;
+    setIsWorking(false);
+
+    saveCurrentSession();
+    setMessages([]);
+    setProjectPath(null);
+    setProjectName(null);
+    setProjectFiles([]);
+    setProjectContext('');
+    setDirHandle(null);
+    setIsElectronProject(false);
+    setPreviewOpen(false);
+    setWrittenFiles([]);
+    setActiveSessionId(null);
+    setMenuOpen(false);
+    setBleumrConfig(null);
+    hooksRef.current = [];
+    skillsRef.current = [];
+  }, [saveCurrentSession]);
+
+  const deleteSession = useCallback((sessionId: string) => {
+    setSessions(prev => prev.filter(s => s.id !== sessionId));
+    deleteCodeSession(sessionId);
+    if (activeSessionId === sessionId) {
+      // Clear all state so deleted session doesn't linger in the UI
+      setActiveSessionId(null);
+      setMessages([]);
+      setProjectPath(null);
+      setProjectName(null);
+      setProjectFiles([]);
+      setProjectContext('');
+      setDirHandle(null);
+      setIsElectronProject(false);
+      setWrittenFiles([]);
+    }
+  }, [activeSessionId]);
+
+  // ── Reset (saves current session first) ──
+  const handleReset = useCallback(() => {
+    // Abort any running agent loop first + invalidate stale generation
+    abortedRef.current = true;
+    agentRunningRef.current = false;
+    loopGenRef.current++;
+    setIsWorking(false);
+
+    saveCurrentSession();
+    setMessages([]);
+    setProjectPath(null);
+    setProjectName(null);
+    setProjectFiles([]);
+    setProjectContext('');
+    setDirHandle(null);
+    setIsElectronProject(false);
+    setPreviewOpen(false);
+    setWrittenFiles([]);
+    setActiveSessionId(null);
+    setBleumrConfig(null);
+    hooksRef.current = [];
+    skillsRef.current = [];
+  }, [saveCurrentSession]);
+
+  // ── Input handlers ──
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [handleSend]);
+
+  const handleCopy = useCallback((text: string) => {
+    try {
+      navigator.clipboard.writeText(text).catch(() => {
+        // Fallback for contexts where clipboard API is restricted
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      });
+    } catch {
+      // Synchronous fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }, []);
+
+  const handleInterrupt = useCallback(() => {
+    abortedRef.current = true;
+    agentRunningRef.current = false;
+    setIsWorking(false);
+    // Clear any lingering thinking indicators
+    setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
+  }, []);
+
+  // ── Render ──
+  const hasProject = !!projectName;
+  const hasMessages = messages.length > 0;
 
   return (
-    <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:0.18}}
-      style={{position:'fixed',inset:0,zIndex:9999,fontFamily:'system-ui,-apple-system,sans-serif',overflow:'hidden',background:'linear-gradient(160deg,#020408 0%,#040810 40%,#030609 100%)'}}>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      fontFamily: 'Inter, system-ui, sans-serif',
+      background: '#0a0a0f',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
 
-      {/* Ambient */}
-      <div style={{position:'absolute',inset:0,pointerEvents:'none',overflow:'hidden'}}>
-        <div style={{position:'absolute',width:800,height:600,borderRadius:'50%',top:-200,left:-200,background:'radial-gradient(ellipse,rgba(79,70,229,0.07) 0%,transparent 60%)',filter:'blur(60px)',willChange:'transform',transform:'translateZ(0)'}}/>
-        <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',bottom:-100,right:-50,background:'radial-gradient(ellipse,rgba(99,102,241,0.05) 0%,transparent 60%)',filter:'blur(40px)',willChange:'transform',transform:'translateZ(0)'}}/>
+      {/* ═══ AMBIENT GLOW ═══ */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', width: 600, height: 600, borderRadius: '50%',
+          top: -300, left: '50%', marginLeft: -300,
+          background: 'radial-gradient(ellipse, rgba(99,102,241,0.06) 0%, transparent 70%)',
+          filter: 'blur(80px)',
+        }} />
       </div>
 
-      <div style={{position:'relative',zIndex:1,display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      {/* ═══ DRAG REGION + HAMBURGER ═══ */}
+      <div style={{
+        position: 'relative', zIndex: 10,
+        height: isElectron ? 38 : 6,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+        padding: '0 12px 4px',
+        paddingLeft: isElectron ? 80 : 12,
+        WebkitAppRegion: 'drag',
+      } as React.CSSProperties}>
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center',
+            padding: 4, borderRadius: 4, transition: 'color 0.15s',
+            WebkitAppRegion: 'no-drag',
+          } as React.CSSProperties}
+          onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.6)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.3)'}
+        >
+          <Menu size={16} />
+        </button>
+      </div>
 
-        {/* ── Top Bar ──────────────────────────────────────────────────── */}
-        {/* paddingLeft:90 clears macOS hiddenInset traffic lights (~68px wide at x:12) */}
-        <div style={{...G.panel,height:46,display:'flex',alignItems:'center',gap:8,paddingLeft:90,paddingRight:14,flexShrink:0,borderBottom:G.border,boxShadow:'inset 0 1px 0 rgba(255,255,255,0.04)',WebkitAppRegion:'no-drag'} as React.CSSProperties}>
-          <div style={{display:'flex',alignItems:'center',gap:7,marginRight:6,WebkitAppRegion:'no-drag'} as React.CSSProperties}>
-            <div style={{width:26,height:26,borderRadius:6,...G.el,display:'flex',alignItems:'center',justifyContent:'center'}}><Code2 size={13} style={{color:'rgba(255,255,255,0.6)'}}/></div>
-            <span style={{fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.75)',letterSpacing:'-0.01em'}}>Code</span>
-          </div>
-
-          <button onClick={()=>setSidebarOpen(v=>!v)} style={{...G.el,borderRadius:6,padding:'4px 7px',background:sidebarOpen?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.04)',color:'rgba(255,255,255,0.45)',cursor:'pointer',display:'flex',transition:'all 0.12s'}}
-            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.1)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.7)';}}
-            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background=sidebarOpen?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.04)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.45)';}}>
-            <Folder size={13}/>
-          </button>
-
-          <div style={{width:1,height:18,background:'rgba(255,255,255,0.07)',margin:'0 2px'}}/>
-
-          {[
-            {label:'Upload',icon:<Upload size={11}/>,fn:handleUpload},
-            {label:'Open Folder',icon:<FolderOpen size={11}/>,fn:openDirectory},
-            {label:'Save',icon:<Save size={11}/>,fn:saveFile},
-          ].map(b=>(
-            <button key={b.label} onClick={b.fn} style={{...G.el,borderRadius:6,padding:'5px 11px',cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontSize:12,color:'rgba(255,255,255,0.45)',transition:'all 0.12s'}}
-              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.1)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.8)';}}
-              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.05)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.45)';}}>
-              {b.icon}{b.label}
-            </button>
-          ))}
-
-          {/* Integration pills */}
-          <div style={{width:1,height:18,background:'rgba(255,255,255,0.07)',margin:'0 4px'}}/>
-          {INTEGRATIONS.map(intg=>{
-            const Icon=intg.icon;
-            const isActive=activeIntegration===intg.id;
-            return (
-              <button key={intg.id} onClick={()=>setActiveIntegration(isActive?null:intg.id)} style={{
-                borderRadius:6, padding:'5px 11px',
-                background: isActive?'rgba(255,255,255,0.1)':intg.connected?'rgba(255,255,255,0.06)':'rgba(255,255,255,0.03)',
-                border:`1px solid ${isActive?'rgba(255,255,255,0.18)':intg.connected?'rgba(255,255,255,0.1)':'rgba(255,255,255,0.06)'}`,
-                color: isActive?'rgba(255,255,255,0.85)':intg.connected?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.3)',
-                cursor:'pointer', display:'flex', alignItems:'center', gap:5,
-                fontSize:11.5, transition:'all 0.12s',
-                boxShadow: intg.connected?'inset 0 1px 0 rgba(255,255,255,0.06)':'none',
+      {/* ═══ SESSION HISTORY SIDEBAR ═══ */}
+      <AnimatePresence>
+        {menuOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => setMenuOpen(false)}
+              style={{
+                position: 'fixed', inset: 0, zIndex: 50,
+                background: 'rgba(0,0,0,0.4)',
               }}
-                onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.09)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.75)';}}
-                onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background=isActive?'rgba(255,255,255,0.1)':intg.connected?'rgba(255,255,255,0.06)':'rgba(255,255,255,0.03)';(e.currentTarget as HTMLElement).style.color=isActive?'rgba(255,255,255,0.85)':intg.connected?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.3)';}}>
-                <Icon size={11}/>
-                {intg.label}
-                {intg.connected&&<span style={{width:5,height:5,borderRadius:'50%',background:'rgba(134,239,172,0.8)',boxShadow:'0 0 6px rgba(134,239,172,0.4)',flexShrink:0}}/>}
-              </button>
-            );
-          })}
+            />
+            {/* Panel */}
+            <motion.div
+              initial={{ x: -280, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -280, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              style={{
+                position: 'fixed', top: 0, left: 0, bottom: 0,
+                width: 270, zIndex: 51,
+                background: '#0e0e16',
+                borderRight: '1px solid rgba(255,255,255,0.06)',
+                display: 'flex', flexDirection: 'column',
+                paddingTop: isElectron ? 40 : 12,
+              }}
+            >
+              {/* New session button */}
+              <div style={{ padding: '8px 14px 12px' }}>
+                <button
+                  onClick={startNewSession}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 12px', borderRadius: 8,
+                    background: 'rgba(99,102,241,0.1)',
+                    border: '1px solid rgba(99,102,241,0.15)',
+                    color: '#818cf8', fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.15)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.1)'; }}
+                >
+                  <Plus size={14} /> New Session
+                </button>
+              </div>
 
-          <div style={{flex:1}}/>
-          <button onClick={onClose} style={{...G.el,borderRadius:6,padding:'5px 7px',cursor:'pointer',display:'flex',transition:'all 0.12s',color:'rgba(255,255,255,0.3)'}}
-            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(239,68,68,0.15)';(e.currentTarget as HTMLElement).style.color='rgba(252,165,165,0.9)';}}
-            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.05)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.3)';}}>
-            <X size={13}/>
-          </button>
-        </div>
-
-        {/* ── Main Body ─────────────────────────────────────────────────── */}
-        <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
-
-          {/* ── Sidebar ───────────────────────────────────────────────── */}
-          <AnimatePresence initial={false}>
-            {sidebarOpen && (
-              <motion.div initial={{width:0,opacity:0}} animate={{width:185,opacity:1}} exit={{width:0,opacity:0}} transition={{duration:0.18,ease:'easeInOut'}}
-                style={{flexShrink:0,overflow:'hidden',borderRight:G.border,...G.panel}}>
-                <div style={{width:185,display:'flex',flexDirection:'column',height:'100%'}}>
-                  {/* Repo header if GitHub connected */}
-                  {githubRepo && (
-                    <div style={{padding:'6px 8px',borderBottom:G.border,flexShrink:0,display:'flex',alignItems:'center',gap:6}}>
-                      <button onClick={()=>{setGithubRepo(null);setGithubFileTree([]);}} style={{background:'none',border:'none',color:'rgba(255,255,255,0.25)',cursor:'pointer',display:'flex',padding:2,borderRadius:3,transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.25)';}}>
-                        <ArrowLeft size={11}/>
-                      </button>
-                      <span style={{fontSize:11,color:'rgba(255,255,255,0.45)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{githubRepo.name}</span>
-                    </div>
-                  )}
-                  <div style={{padding:'6px 6px 3px',flexShrink:0}}>
-                    <div style={{position:'relative'}}>
-                      <Search size={10} style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',color:'rgba(255,255,255,0.2)',pointerEvents:'none'}}/>
-                      <input value={treeSearch} onChange={e=>setTreeSearch(e.target.value)} placeholder="Filter…"
-                        style={{width:'100%',padding:'4px 7px 4px 22px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:5,color:'rgba(255,255,255,0.6)',fontSize:11.5,outline:'none',boxSizing:'border-box'}}/>
-                    </div>
+              {/* Session list */}
+              <div style={{ flex: 1, overflow: 'auto', padding: '0 8px' }}>
+                {sessions.length === 0 && (
+                  <div style={{ padding: '20px 12px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 12 }}>
+                    No saved sessions yet
                   </div>
-                  <div style={{flex:1,overflowY:'auto',padding:'3px 4px',scrollbarWidth:'thin'}}>
-                    {displayTree.length===0 ? (
-                      <div style={{padding:'24px 12px',textAlign:'center'}}>
-                        {githubUser && !githubRepo ? (
-                          <>
-                            <GitBranch size={18} style={{color:'rgba(255,255,255,0.1)',display:'block',margin:'0 auto 8px'}}/>
-                            <div style={{fontSize:11,color:'rgba(255,255,255,0.2)',lineHeight:1.6}}>Click <span style={{color:'rgba(255,255,255,0.4)'}}>GitHub</span> above<br/>and select a repo</div>
-                          </>
-                        ) : (
-                          <>
-                            <Folder size={18} style={{color:'rgba(255,255,255,0.1)',display:'block',margin:'0 auto 8px'}}/>
-                            <div style={{fontSize:11,color:'rgba(255,255,255,0.2)',lineHeight:1.6}}>Open a local folder<br/>or connect GitHub</div>
-                          </>
-                        )}
+                )}
+                {sessions.map(s => (
+                  <div
+                    key={s.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 10px', borderRadius: 7, marginBottom: 2,
+                      background: activeSessionId === s.id ? 'rgba(99,102,241,0.08)' : 'transparent',
+                      cursor: 'pointer', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { if (activeSessionId !== s.id) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                    onMouseLeave={e => { if (activeSessionId !== s.id) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div onClick={() => loadSession(s)} style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, color: 'rgba(255,255,255,0.6)', fontWeight: 500,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {s.name}
                       </div>
-                    ) : (treeSearch
-                        ? (() => {
-                            // Recursive flat search across all nodes
-                            const hits: FileNode[] = [];
-                            const walk = (nodes: FileNode[]) => { for (const n of nodes) { if (n.name.toLowerCase().includes(treeSearch.toLowerCase())) hits.push(n); if (n.children) walk(n.children); } };
-                            walk(displayTree);
-                            return hits.map(node => (
-                              <FileTreeNode key={node.path} node={node} depth={0} onFileClick={onFileClick} activeFilePath={activeFilePath} onToggle={toggleDir}/>
-                            ));
-                          })()
-                        : displayTree.map(node=>(
-                            <FileTreeNode key={node.path} node={node} depth={0} onFileClick={onFileClick} activeFilePath={activeFilePath} onToggle={toggleDir}/>
-                          ))
-                      )}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+                      }}>
+                        {s.projectName && (
+                          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>
+                            {s.projectName}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)' }}>
+                          {new Date(s.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'rgba(255,255,255,0.15)', padding: 4, borderRadius: 4,
+                        display: 'flex', alignItems: 'center', transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = 'rgba(239,68,68,0.5)'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.15)'}
+                    >
+                      <Trash2 size={12} />
+                    </button>
                   </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                ))}
+              </div>
 
-          {/* ── Editor Column ─────────────────────────────────────────── */}
-          <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0,position:'relative'}}>
+              {/* Close sidebar */}
+              <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                <button
+                  onClick={onClose}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+                    padding: '8px 12px', borderRadius: 7,
+                    background: 'none', border: '1px solid rgba(255,255,255,0.06)',
+                    color: 'rgba(255,255,255,0.3)', fontSize: 11, cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'; }}
+                >
+                  <X size={12} /> Close Code Bleu
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
-            {/* File tabs */}
-            <div style={{...G.panel,borderBottom:G.border,height:36,display:'flex',alignItems:'flex-end',flexShrink:0,overflowX:'auto',scrollbarWidth:'none'}}>
-              {openFiles.map(f=>(
-                <div key={f.path} onClick={()=>setActiveFilePath(f.path)} style={{display:'flex',alignItems:'center',gap:5,padding:'0 12px',height:32,cursor:'pointer',background:f.path===activeFilePath?'rgba(255,255,255,0.06)':'transparent',borderBottom:`1px solid ${f.path===activeFilePath?'rgba(255,255,255,0.35)':'transparent'}`,borderRight:'1px solid rgba(255,255,255,0.05)',fontSize:11.5,color:f.path===activeFilePath?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.3)',whiteSpace:'nowrap',flexShrink:0,transition:'all 0.1s'}}>
-                  <FileCode size={11} style={{color:getFileColor(f.name)}}/>
-                  {f.name}
-                  {f.dirty&&<span style={{color:'rgba(255,255,255,0.4)',fontSize:7}}>●</span>}
-                  <button onClick={e=>closeTab(f.path,e)} style={{background:'none',border:'none',color:'rgba(255,255,255,0.2)',cursor:'pointer',padding:1,display:'flex',borderRadius:2,marginLeft:1}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.2)';}}>
-                    <X size={10}/>
-                  </button>
-                </div>
-              ))}
-              <button onClick={()=>{const p=`__new__${Date.now()}`;setOpenFiles(prev=>[...prev,{name:'untitled.ts',path:p,content:'',language:'typescript',dirty:false}]);setActiveFilePath(p);}} style={{padding:'0 12px',height:32,background:'none',border:'none',color:'rgba(255,255,255,0.2)',cursor:'pointer',display:'flex',alignItems:'center'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.5)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.2)';}}>
-                <Plus size={11}/>
-              </button>
+      {/* ═══ MAIN CONTENT (chat + optional preview) ═══ */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+
+      {/* ── Chat + Input column ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+
+      {/* ═══ CHAT AREA ═══ */}
+      <div style={{
+        flex: 1, overflow: 'auto', position: 'relative',
+        display: 'flex', flexDirection: 'column',
+      }}>
+
+        {/* Empty state — no project selected */}
+        {!hasMessages && (
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 16, padding: 40,
+          }}>
+            {/* Code Bleu logo */}
+            <div style={{
+              width: 64, height: 64, borderRadius: 16,
+              background: 'rgba(99,102,241,0.06)',
+              border: '1px solid rgba(99,102,241,0.1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 0 40px rgba(99,102,241,0.08)',
+            }}>
+              <CodeBleuLogo size={40} />
             </div>
 
-            {/* Quick Actions */}
-            <div style={{...G.panel,borderBottom:G.border,height:40,display:'flex',alignItems:'center',gap:4,padding:'0 12px',flexShrink:0,overflowX:'auto',scrollbarWidth:'none'}}>
-              <span style={{fontSize:9,color:'rgba(255,255,255,0.15)',fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',whiteSpace:'nowrap',marginRight:6}}>JUMARI</span>
-              {QUICK_ACTIONS.map(a=>{
-                const Icon=a.icon;
+            <div style={{ textAlign: 'center', maxWidth: 420 }}>
+              <h2 style={{ color: 'white', fontSize: 18, fontWeight: 700, margin: '0 0 6px', letterSpacing: '-0.02em' }}>
+                CODE Bleu
+              </h2>
+              <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+                Open a project folder and I'll analyze the codebase, understand what's been built, and help you write, debug, and refactor code.
+              </p>
+            </div>
+
+            <button onClick={openFolder} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 20px', borderRadius: 10,
+              background: 'linear-gradient(135deg, #6366f1, #7c3aed)',
+              border: 'none', cursor: 'pointer', color: 'white',
+              fontSize: 13, fontWeight: 600,
+              boxShadow: '0 4px 20px rgba(99,102,241,0.3)',
+              transition: 'transform 0.15s, box-shadow 0.15s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 25px rgba(99,102,241,0.4)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(99,102,241,0.3)'; }}
+            >
+              <FolderOpen size={16} /> Open Project
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        {hasMessages && (
+          <div style={{ flex: 1, padding: '16px 0' }}>
+            <div style={{ maxWidth: 720, margin: '0 auto', padding: '0 20px' }}>
+              {renderItems.map((item) => {
+                if ('items' in item) return <ActivityGroup key={item.id} items={item.items} />;
+                const msg = item.msg;
+                const isLastAssistant = msg.role === 'assistant' && msg.id === lastAssistantId;
                 return (
-                  <button key={a.id} onClick={()=>handleQuickAction(a.prompt)} disabled={isThinking} style={{padding:'4px 11px',borderRadius:5,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',color:'rgba(255,255,255,0.45)',fontSize:11.5,cursor:isThinking?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0,transition:'all 0.12s',opacity:isThinking?0.35:1}}
-                    onMouseEnter={e=>{if(!isThinking){const el=e.currentTarget as HTMLElement;el.style.background='rgba(255,255,255,0.09)';el.style.borderColor='rgba(255,255,255,0.14)';el.style.color='rgba(255,255,255,0.85)';}}}
-                    onMouseLeave={e=>{const el=e.currentTarget as HTMLElement;el.style.background='rgba(255,255,255,0.04)';el.style.borderColor='rgba(255,255,255,0.07)';el.style.color='rgba(255,255,255,0.45)';}}>
-                    <Icon size={11}/>{a.label}
+                <div key={msg.id} style={{ marginBottom: 12 }}>
+
+                  {/* Activity blocks (1-2 standalone activities) */}
+                  {msg.role === 'activity' && <ActivityBlock message={msg} />}
+
+                  {/* Sub-agent blocks */}
+                  {msg.role === 'subagent' && <SubAgentBlock message={msg} />}
+
+                  {/* User messages */}
+                  {msg.role === 'user' && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'flex-end', marginBottom: 4,
+                    }}>
+                      <div style={{
+                        background: 'rgba(99,102,241,0.12)',
+                        border: '1px solid rgba(99,102,241,0.15)',
+                        borderRadius: 14, borderBottomRightRadius: 4,
+                        padding: '10px 14px', maxWidth: '85%',
+                        fontSize: 13.5, color: 'rgba(255,255,255,0.9)', lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap',
+                      }}>
+                        {/* Attached image thumbnails */}
+                        {msg.images && msg.images.length > 0 && (
+                          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                            {msg.images.map((img, idx) => (
+                              <div key={idx} style={{
+                                width: 80, height: 80, borderRadius: 8, overflow: 'hidden',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                position: 'relative', flexShrink: 0,
+                              }}>
+                                <img src={img.dataUri} alt={img.name} style={{
+                                  width: '100%', height: '100%', objectFit: 'cover',
+                                }} />
+                                <div style={{
+                                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                                  background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+                                  padding: '6px 4px 2px', display: 'flex', alignItems: 'center', gap: 3,
+                                }}>
+                                  <ImageIcon size={8} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
+                                  <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{img.name}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {msg.content}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assistant messages */}
+                  {msg.role === 'assistant' && (
+                    <div style={{ marginBottom: 4 }}>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <div style={{ marginTop: 2 }}>
+                          {isLastAssistant
+                            ? <CodeBleuAvatar size={28} isStreaming={!!msg.streaming} />
+                            : <span style={{
+                                width: 6, height: 6, borderRadius: '50%', marginTop: 6, marginLeft: 2,
+                                background: 'rgba(255,255,255,0.2)', display: 'inline-block', flexShrink: 0,
+                              }} />
+                          }
+                        </div>
+                        <div style={{
+                          flex: 1, fontSize: 13.5, color: 'rgba(255,255,255,0.8)',
+                          lineHeight: 1.7, minWidth: 0,
+                        }}>
+                          {parseAssistantContent(msg.content)}
+                          {msg.streaming && (
+                            <span style={{
+                              display: 'inline-block', width: 6, height: 16,
+                              background: '#6366f1', borderRadius: 1, marginLeft: 2,
+                              animation: 'blink 1s steps(2) infinite', verticalAlign: 'text-bottom',
+                            }} />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Clickable suggestion chips */}
+                      {msg.suggestions && msg.suggestions.length > 0 && !msg.streaming && (
+                        <div style={{
+                          display: 'flex', flexWrap: 'wrap', gap: 6,
+                          marginTop: 8, marginLeft: 34,
+                        }}>
+                          {msg.suggestions.map((option, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => handleSuggestionClick(option, msg.id)}
+                              style={{
+                                background: 'rgba(99,102,241,0.08)',
+                                border: '1px solid rgba(99,102,241,0.2)',
+                                borderRadius: 20, padding: '6px 14px',
+                                color: '#a5b4fc', fontSize: 12, fontWeight: 500,
+                                cursor: 'pointer', transition: 'all 0.15s',
+                                whiteSpace: 'nowrap',
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.15)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)'; e.currentTarget.style.color = '#c7d2fe'; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.08)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.2)'; e.currentTarget.style.color = '#a5b4fc'; }}
+                            >
+                              {option}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ); })}
+
+              {/* Working indicator */}
+              {isWorking && messages[messages.length - 1]?.role !== 'assistant' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 0', marginBottom: 8,
+                  color: 'rgba(255,255,255,0.3)', fontSize: 12,
+                }}>
+                  <CodeBleuAvatar size={28} isThinking />
+                  <span style={{ fontStyle: 'italic' }}>Thinking...</span>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ INPUT AREA ═══ */}
+      <div style={{
+        position: 'relative', zIndex: 10,
+        padding: '12px 20px 8px',
+        borderTop: hasMessages ? '1px solid rgba(255,255,255,0.04)' : 'none',
+      }}>
+        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          {/* Attached image thumbnails */}
+          {attachedImages.length > 0 && (
+            <div style={{
+              display: 'flex', gap: 8, padding: '8px 4px 6px',
+              flexWrap: 'wrap',
+            }}>
+              {attachedImages.map((img, idx) => (
+                <div key={idx} style={{
+                  position: 'relative', width: 64, height: 64, borderRadius: 10,
+                  overflow: 'hidden', border: '1px solid rgba(99,102,241,0.2)',
+                  background: 'rgba(0,0,0,0.3)',
+                  flexShrink: 0,
+                }}>
+                  <img src={img.dataUri} alt={img.name} style={{
+                    width: '100%', height: '100%', objectFit: 'cover',
+                  }} />
+                  <button
+                    onClick={() => removeAttachment(idx)}
+                    style={{
+                      position: 'absolute', top: 2, right: 2,
+                      width: 18, height: 18, borderRadius: '50%',
+                      background: 'rgba(0,0,0,0.7)', border: 'none',
+                      color: 'rgba(255,255,255,0.7)', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, lineHeight: 1,
+                    }}
+                  >
+                    <X size={10} />
                   </button>
-                );
-              })}
-              <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
-                <span style={{fontSize:10,color:'rgba(255,255,255,0.15)',fontFamily:'"JetBrains Mono",monospace'}}>{activeFile?.language??'plaintext'}</span>
-                <span style={{fontSize:10,color:'rgba(255,255,255,0.15)',fontFamily:'"JetBrains Mono",monospace'}}>{activeFile?`${activeFile.content.split('\n').length} ln`:''}</span>
-                <button onClick={()=>{if(activeFile)navigator.clipboard.writeText(activeFile.content);}} style={{padding:'3px 8px',borderRadius:5,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',color:'rgba(255,255,255,0.3)',cursor:'pointer',display:'flex',alignItems:'center',gap:4,fontSize:10.5,transition:'all 0.12s'}} onMouseEnter={e=>{const el=e.currentTarget as HTMLElement;el.style.background='rgba(255,255,255,0.08)';el.style.color='rgba(255,255,255,0.6)';}} onMouseLeave={e=>{const el=e.currentTarget as HTMLElement;el.style.background='rgba(255,255,255,0.04)';el.style.color='rgba(255,255,255,0.3)';}}>
-                  <Copy size={10}/>Copy
+                  <div style={{
+                    position: 'absolute', bottom: 0, left: 0, right: 0,
+                    background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                    padding: '8px 4px 3px', fontSize: 8, color: 'rgba(255,255,255,0.5)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {img.name}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Text input */}
+          <div style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 14, overflow: 'hidden',
+            transition: 'border-color 0.15s',
+          }}>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={hasProject ? 'Ask me to build, fix, or explain anything...' : 'Open a project folder to start, or ask a coding question...'}
+              rows={1}
+              style={{
+                width: '100%', resize: 'none', border: 'none', outline: 'none',
+                background: 'transparent', color: 'rgba(255,255,255,0.85)',
+                fontSize: 14, lineHeight: 1.6, padding: '14px 16px 4px',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                minHeight: 24, maxHeight: 160, overflow: 'auto',
+              }}
+              onInput={(e) => {
+                const t = e.currentTarget;
+                t.style.height = '24px';
+                t.style.height = Math.min(t.scrollHeight, 160) + 'px';
+              }}
+            />
+
+            {/* Bottom bar inside input */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 10px 8px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {/* Open folder button */}
+                <button onClick={openFolder} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  borderRadius: 6, color: 'rgba(255,255,255,0.3)', display: 'flex',
+                  alignItems: 'center', gap: 5, fontSize: 11, transition: 'all 0.15s',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'none'; }}
+                >
+                  <FolderInput size={13} />
+                  {hasProject ? 'Change' : 'Open Folder'}
+                </button>
+
+                {/* Attach image/file button */}
+                <button onClick={handleAttachFiles} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  borderRadius: 6, color: attachedImages.length > 0 ? '#818cf8' : 'rgba(255,255,255,0.3)',
+                  display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, transition: 'all 0.15s',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = attachedImages.length > 0 ? '#818cf8' : 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'none'; }}
+                  title="Attach images (screenshots, errors, logos, references)"
+                >
+                  <Paperclip size={13} />
+                  {attachedImages.length > 0 && <span>{attachedImages.length}</span>}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {/* Preview toggle */}
+                {writtenFiles.some(f => f.path.endsWith('.html')) && (
+                  <button onClick={() => setPreviewOpen(!previewOpen)} style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px',
+                    borderRadius: 5, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
+                    color: previewOpen ? '#818cf8' : 'rgba(255,255,255,0.3)',
+                    transition: 'color 0.15s',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#818cf8'}
+                    onMouseLeave={e => { if (!previewOpen) e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; }}
+                  >
+                    <Eye size={12} />
+                  </button>
+                )}
+
+                {/* Reset */}
+                {hasProject && (
+                  <button onClick={handleReset} style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px',
+                    borderRadius: 5, display: 'flex', alignItems: 'center',
+                    color: 'rgba(255,255,255,0.25)', transition: 'color 0.15s',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.25)'}
+                  >
+                    <RotateCcw size={12} />
+                  </button>
+                )}
+
+                {/* Close */}
+                <button onClick={onClose} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px',
+                  borderRadius: 5, display: 'flex', alignItems: 'center',
+                  color: 'rgba(255,255,255,0.25)', transition: 'color 0.15s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.25)'}
+                >
+                  <X size={14} />
+                </button>
+
+                {/* Auto-approve toggle */}
+                <button
+                  onClick={() => {
+                    if (autoApprove) {
+                      setAutoApprove(false);
+                    } else {
+                      setShowAutoWarning(true);
+                    }
+                  }}
+                  title={autoApprove ? 'Auto-approve ON — agent builds without asking' : 'Auto-approve OFF — agent asks before writing'}
+                  style={{
+                    background: autoApprove ? 'rgba(34,197,94,0.12)' : 'none',
+                    border: `1px solid ${autoApprove ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                    borderRadius: 5, padding: '3px 8px',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                    color: autoApprove ? '#4ade80' : 'rgba(255,255,255,0.25)',
+                    fontSize: 10, fontWeight: 600, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!autoApprove) e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; }}
+                  onMouseLeave={e => { if (!autoApprove) e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; }}
+                >
+                  <Sparkles size={10} />
+                  {autoApprove ? 'AUTO' : 'ASK'}
+                </button>
+
+                {/* Plan / Execute mode toggle */}
+                <button
+                  onClick={() => setPlanMode(!planMode)}
+                  title={planMode ? 'Plan mode ON — agent explores and plans without making changes' : 'Execute mode — agent can read, write, and run commands'}
+                  style={{
+                    background: planMode ? 'rgba(6,182,212,0.12)' : 'none',
+                    border: `1px solid ${planMode ? 'rgba(6,182,212,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                    borderRadius: 5, padding: '3px 8px',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                    color: planMode ? '#22d3ee' : 'rgba(255,255,255,0.25)',
+                    fontSize: 10, fontWeight: 600, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!planMode) e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; }}
+                  onMouseLeave={e => { if (!planMode) e.currentTarget.style.color = 'rgba(255,255,255,0.25)'; }}
+                >
+                  {planMode ? 'PLAN' : 'EXEC'}
+                </button>
+
+                {/* Model badge */}
+                <div style={{
+                  fontSize: 10, color: 'rgba(255,255,255,0.2)',
+                  padding: '3px 8px', borderRadius: 4,
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  fontWeight: 500,
+                }}>
+                  Multi-Model · 55 tools
+                </div>
+
+                {/* Stop / Send button */}
+                {isWorking ? (
+                  <button
+                    onClick={handleInterrupt}
+                    style={{
+                      background: 'rgba(239,68,68,0.15)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      borderRadius: 8, padding: '5px 10px',
+                      cursor: 'pointer', color: '#f87171',
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      fontSize: 11, fontWeight: 600,
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.25)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; }}
+                  >
+                    <StopCircle size={13} /> Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim()}
+                    style={{
+                      background: input.trim() ? '#6366f1' : 'rgba(255,255,255,0.05)',
+                      border: 'none', borderRadius: 8, padding: '6px 8px',
+                      cursor: input.trim() ? 'pointer' : 'default',
+                      color: input.trim() ? 'white' : 'rgba(255,255,255,0.15)',
+                      display: 'flex', alignItems: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Send size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Project bar */}
+          {hasProject && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 4px 4px', marginTop: 2,
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '4px 10px', borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgba(255,255,255,0.02)',
+              }}>
+                <FolderOpen size={12} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>
+                  {projectName}
+                </span>
+                <span style={{
+                  fontSize: 10, color: 'rgba(255,255,255,0.2)',
+                  padding: '1px 6px', borderRadius: 3,
+                  background: 'rgba(255,255,255,0.04)',
+                }}>
+                  {projectFiles.length} files
+                </span>
+              </div>
+
+              <div style={{
+                fontSize: 10, color: 'rgba(255,255,255,0.15)',
+                padding: '4px 8px', borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.04)',
+              }}>
+                Local
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      </div>{/* end chat+input column */}
+
+      </div>{/* end main content row */}
+
+      {/* ═══ PREVIEW PANEL — slides in from the right, clean edgeless ═══ */}
+      <AnimatePresence>
+        {previewOpen && writtenFiles.some(f => f.path.endsWith('.html')) && (
+          <motion.div
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+            style={{
+              position: 'fixed', top: 0, right: 0, bottom: 0,
+              width: '50%', maxWidth: 720, minWidth: 340,
+              zIndex: 100,
+              display: 'flex', flexDirection: 'column',
+              background: '#0a0a0f',
+              boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
+            }}
+          >
+            {/* Floating control bar — minimal, glass-like */}
+            <div style={{
+              position: 'absolute', top: 10, left: 12, right: 12, zIndex: 10,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 10px',
+              background: 'rgba(10,10,15,0.75)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.06)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Eye size={11} style={{ color: '#818cf8' }} />
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600 }}>Preview</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                {/* Open in Electron browser tab */}
+                <button
+                  onClick={() => {
+                    const orbit = (window as any).orbit;
+                    if (orbit?.browser?.loadHTML) {
+                      orbit.browser.loadHTML(buildPreviewFromFiles(writtenFiles));
+                    }
+                  }}
+                  title="Open in Bleumr browser tab"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '4px 8px', borderRadius: 6, fontSize: 10, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; e.currentTarget.style.background = 'rgba(99,102,241,0.1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'none'; }}
+                >
+                  <ExternalLink size={10} /> Open in Tab
+                </button>
+                <button
+                  onClick={() => setPreviewOpen(false)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center',
+                    padding: '4px 6px', borderRadius: 6, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'white'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; e.currentTarget.style.background = 'none'; }}
+                >
+                  <X size={13} />
                 </button>
               </div>
             </div>
 
-            {/* Editor */}
-            <div style={{flex:1,position:'relative',overflow:'hidden',minHeight:0,background:'rgba(0,0,0,0.3)'}}>
-              <div style={{position:'absolute',left:0,top:0,width:48,bottom:0,background:'rgba(0,0,0,0.2)',borderRight:'1px solid rgba(255,255,255,0.04)',zIndex:1,pointerEvents:'none'}}>
-                <LineNumbers code={activeFile?.content??''} scrollTop={scrollTop}/>
+            {/* Full-bleed iframe — no borders, fills the whole panel */}
+            <iframe
+              srcDoc={buildPreviewFromFiles(writtenFiles)}
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              style={{
+                width: '100%', height: '100%', border: 'none',
+                background: '#0a0a0a',
+              }}
+              title="Code Bleu Preview"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══ AUTO-APPROVE WARNING MODAL ═══ */}
+      <AnimatePresence>
+        {showAutoWarning && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => setShowAutoWarning(false)}
+              style={{
+                position: 'fixed', inset: 0, zIndex: 9998,
+                background: 'rgba(0,0,0,0.6)',
+                backdropFilter: 'blur(4px)',
+              }}
+            />
+            {/* Modal */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              style={{
+                position: 'fixed', zIndex: 9999,
+                top: '50%', left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 380, maxWidth: '90vw',
+                background: '#12121c',
+                border: '1px solid rgba(251,191,36,0.15)',
+                borderRadius: 16,
+                padding: '24px 24px 20px',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(251,191,36,0.05)',
+              }}
+            >
+              {/* Warning icon */}
+              <div style={{
+                width: 44, height: 44, borderRadius: 12, margin: '0 auto 16px',
+                background: 'rgba(251,191,36,0.1)',
+                border: '1px solid rgba(251,191,36,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
               </div>
-              <textarea ref={textareaRef} value={activeFile?.content??''} onChange={e=>updateCode(e.target.value)} onKeyDown={handleKeyDown} onScroll={e=>setScrollTop((e.target as HTMLTextAreaElement).scrollTop)} spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off"
-                style={{position:'absolute',inset:0,paddingLeft:56,paddingTop:14,paddingBottom:14,paddingRight:20,background:'transparent',color:'rgba(255,255,255,0.78)',fontFamily:'"JetBrains Mono","Fira Code","Cascadia Code",monospace',fontSize:13,lineHeight:'21px',border:'none',outline:'none',resize:'none',width:'100%',height:'100%',boxSizing:'border-box',caretColor:'rgba(255,255,255,0.7)',tabSize:2,whiteSpace:'pre',overflowX:'auto'}}/>
-            </div>
 
-            {/* Integration side panel */}
-            <AnimatePresence>
-              {activeIntegration && (
-                <IntegrationPanel
-                  integration={activeIntegration}
-                  githubToken={githubToken} githubUser={githubUser} githubRepos={githubRepos}
-                  onConnectGitHub={connectGitHub} onDisconnectGitHub={disconnectGitHub}
-                  onSelectGitHubRepo={selectGitHubRepo}
-                  onClose={()=>setActiveIntegration(null)}
-                  activeFile={activeFile}
-                />
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
+              <h3 style={{
+                textAlign: 'center', color: '#fbbf24', fontSize: 15, fontWeight: 700,
+                margin: '0 0 8px', letterSpacing: '-0.01em',
+              }}>
+                Enable Auto Mode?
+              </h3>
 
-        {/* ── JUMARI Drawer ──────────────────────────────────────────────── */}
-        <div style={{...G.panel,borderTop:G.border,flexShrink:0,boxShadow:'inset 0 1px 0 rgba(255,255,255,0.04)'}}>
-          <div onClick={()=>setJumariOpen(v=>!v)} style={{height:36,display:'flex',alignItems:'center',padding:'0 14px',cursor:'pointer',gap:8,borderBottom:jumariOpen?G.border:'none'}}>
-            <Bot size={13} style={{color:'rgba(255,255,255,0.35)'}}/>
-            <span style={{fontSize:11.5,fontWeight:500,color:'rgba(255,255,255,0.4)'}}>JUMARI Code</span>
-            {isThinking&&<div style={{display:'flex',gap:3,alignItems:'center'}}>{[0,1,2].map(i=><motion.div key={i} animate={{opacity:[0.2,0.8,0.2],y:[0,-2,0]}} transition={{repeat:Infinity,duration:0.9,delay:i*0.2}} style={{width:3,height:3,borderRadius:'50%',background:'rgba(255,255,255,0.4)'}}/>)}</div>}
-            <div style={{flex:1}}/>
-            <button onClick={e=>{e.stopPropagation();setMessages([{role:'system',content:'JUMARI Code is ready.'}]);}} style={{background:'none',border:'none',color:'rgba(255,255,255,0.15)',cursor:'pointer',padding:3,display:'flex',borderRadius:4,transition:'color 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.45)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.15)';}}>
-              <RotateCcw size={10}/>
-            </button>
-            {jumariOpen?<ChevronDownIcon size={12} style={{color:'rgba(255,255,255,0.2)'}}/>:<ChevronUp size={12} style={{color:'rgba(255,255,255,0.2)'}}/>}
-          </div>
+              <p style={{
+                textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12.5,
+                lineHeight: 1.7, margin: '0 0 6px',
+              }}>
+                This gives CODE Bleu full permission to read, write, delete files, and run shell commands without asking you first.
+              </p>
 
-          <AnimatePresence initial={false}>
-            {jumariOpen&&(
-              <motion.div initial={{height:0,opacity:0}} animate={{height:255,opacity:1}} exit={{height:0,opacity:0}} transition={{duration:0.2,ease:'easeInOut'}} style={{overflow:'hidden'}}>
-                <div style={{height:255,display:'flex',flexDirection:'column'}}>
-                  <div style={{flex:1,overflowY:'auto',padding:'10px 14px',display:'flex',flexDirection:'column',gap:7,scrollbarWidth:'thin'}}>
-                    {messages.map((msg,idx)=>(
-                      <div key={idx}>
-                        {msg.role==='system'&&<div style={{padding:'7px 11px',borderRadius:6,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',fontSize:12,color:'rgba(255,255,255,0.4)',lineHeight:1.5}}>{msg.content}</div>}
-                        {msg.role==='user'&&<div style={{display:'flex',justifyContent:'flex-end'}}><div style={{maxWidth:'72%',padding:'7px 11px',borderRadius:8,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.1)',fontSize:12.5,color:'rgba(255,255,255,0.8)',lineHeight:1.5,boxShadow:'inset 0 1px 0 rgba(255,255,255,0.06)'}}>{msg.content}</div></div>}
-                        {msg.role==='assistant'&&(
-                          <div style={{display:'flex',flexDirection:'column',gap:5}}>
-                            {msg.content.replace(/```[\s\S]*?```/g,'').trim()&&<div style={{padding:'7px 11px',borderRadius:6,background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',fontSize:12.5,color:'rgba(255,255,255,0.6)',lineHeight:1.6,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{msg.content.replace(/```[\s\S]*?```/g,'').trim()}</div>}
-                            {msg.codeBlock&&(
-                              <div style={{borderRadius:6,overflow:'hidden',border:'1px solid rgba(255,255,255,0.08)',background:'rgba(0,0,0,0.4)'}}>
-                                <div style={{padding:'5px 11px',background:'rgba(255,255,255,0.04)',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid rgba(255,255,255,0.06)'}}>
-                                  <span style={{fontSize:9.5,color:'rgba(255,255,255,0.25)',fontWeight:600,letterSpacing:'0.08em',textTransform:'uppercase'}}>Generated Code</span>
-                                  <div style={{display:'flex',gap:5}}>
-                                    <button onClick={()=>handleCopy(msg.codeBlock!,idx)} style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:4,color:'rgba(255,255,255,0.4)',cursor:'pointer',display:'flex',alignItems:'center',gap:3,fontSize:10,padding:'2px 7px',transition:'all 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.1)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.7)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.05)';(e.currentTarget as HTMLElement).style.color='rgba(255,255,255,0.4)';}}>
-                                      {copiedIdx===idx?<><Check size={9} style={{color:'rgba(134,239,172,0.8)'}}/>Copied</>:<><Copy size={9}/>Copy</>}
-                                    </button>
-                                    <button onClick={()=>applyCode(msg.codeBlock!)} style={{background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.14)',borderRadius:4,color:'rgba(255,255,255,0.7)',cursor:'pointer',fontSize:10,padding:'2px 10px',fontWeight:500,transition:'all 0.1s'}} onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.15)';}} onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background='rgba(255,255,255,0.08)';}}>
-                                      Apply →
-                                    </button>
-                                  </div>
-                                </div>
-                                <pre style={{margin:0,padding:'9px 12px',overflowX:'auto',fontSize:11.5,lineHeight:'18px',color:'rgba(255,255,255,0.55)',fontFamily:'"JetBrains Mono","Fira Code",monospace',maxHeight:130}}>
-                                  {msg.codeBlock.slice(0,800)}{msg.codeBlock.length>800?'\n…':''}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {isThinking&&<div style={{display:'flex',gap:4,padding:'5px 8px',alignItems:'center'}}>{[0,1,2].map(i=><motion.div key={i} animate={{opacity:[0.15,0.7,0.15],y:[0,-3,0]}} transition={{repeat:Infinity,duration:1,delay:i*0.22}} style={{width:4,height:4,borderRadius:'50%',background:'rgba(255,255,255,0.5)'}}/>)}</div>}
-                    <div ref={chatEndRef}/>
-                  </div>
-                  <div style={{padding:'8px 12px 11px',borderTop:'1px solid rgba(255,255,255,0.05)',display:'flex',gap:7,alignItems:'flex-end',flexShrink:0}}>
-                    <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSend();}}} placeholder="Ask JUMARI about your code…" rows={1}
-                      style={{flex:1,background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:8,color:'rgba(255,255,255,0.8)',fontSize:12.5,padding:'8px 12px',resize:'none',outline:'none',fontFamily:'system-ui,sans-serif',lineHeight:1.5,scrollbarWidth:'none',backdropFilter:'blur(20px)',transition:'border-color 0.15s',boxShadow:'inset 0 1px 0 rgba(255,255,255,0.04)'}}
-                      onFocus={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.18)';}}
-                      onBlur={e=>{(e.target as HTMLElement).style.borderColor='rgba(255,255,255,0.08)';}}
-                    />
-                    <button onClick={handleSend} disabled={isThinking||!input.trim()} style={{padding:'9px 11px',borderRadius:8,background:isThinking||!input.trim()?'rgba(255,255,255,0.04)':'rgba(255,255,255,0.1)',border:`1px solid ${isThinking||!input.trim()?'rgba(255,255,255,0.06)':'rgba(255,255,255,0.16)'}`,color:isThinking||!input.trim()?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.8)',cursor:isThinking||!input.trim()?'not-allowed':'pointer',display:'flex',alignItems:'center',transition:'all 0.12s',boxShadow:isThinking||!input.trim()?'none':'inset 0 1px 0 rgba(255,255,255,0.12)'}}>
-                      <Send size={13}/>
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-    </motion.div>
+              <div style={{
+                background: 'rgba(251,191,36,0.06)',
+                border: '1px solid rgba(251,191,36,0.1)',
+                borderRadius: 10, padding: '10px 14px', margin: '12px 0 18px',
+              }}>
+                <p style={{
+                  color: 'rgba(251,191,36,0.7)', fontSize: 11.5, lineHeight: 1.6,
+                  margin: 0, textAlign: 'center',
+                }}>
+                  The agent will modify your project files directly. Make sure you have backups or version control before enabling this.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setShowAutoWarning(false)}
+                  style={{
+                    flex: 1, padding: '10px 16px', borderRadius: 10,
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { setAutoApprove(true); setShowAutoWarning(false); }}
+                  style={{
+                    flex: 1, padding: '10px 16px', borderRadius: 10,
+                    background: 'linear-gradient(135deg, rgba(251,191,36,0.2), rgba(245,158,11,0.15))',
+                    border: '1px solid rgba(251,191,36,0.3)',
+                    color: '#fbbf24', fontSize: 13, fontWeight: 700,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(251,191,36,0.3), rgba(245,158,11,0.25))'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(251,191,36,0.2), rgba(245,158,11,0.15))'; }}
+                >
+                  Enable Auto Mode
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Keyframe animations */}
+      <style>{`
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse-dot { 0%, 100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+      `}</style>
+    </div>
   );
 }

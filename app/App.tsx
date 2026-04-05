@@ -25,6 +25,7 @@ import { callLocalBrain } from './engine/LocalBrain';
 import { BrowserService } from './services/BrowserService';
 import { SecureStorage } from './services/SecureStorage';
 import SubscriptionService, { SubscriptionTier } from './services/SubscriptionService';
+import { usageBudget, type UsageAction } from './services/UsageBudget';
 import { runChatAgent, generateFollowUps } from './services/ChatAgent';
 import { CodePlayground } from './components/CodePlayground';
 import { AppsPage } from './components/AppsPage';
@@ -327,6 +328,7 @@ export default function App() {
                 .replace(/<open>[\s\S]*?<\/open>/gi, '')
                 .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
                 .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
+                .replace(/<memory>[\s\S]*?<\/memory>/gi, '')
                 .trimEnd() }
             : m
         );
@@ -401,19 +403,36 @@ export default function App() {
   }, []);
 
   // ── Orbit Background Executor ─────────────────────────────────────────
-  // Runs active orbits on a 60-second check cycle. When an orbit is due,
+  // Runs active orbits on a 30-second check cycle. When an orbit is due,
   // sends its goal to the chat agent and stores the response as a finding.
-  const orbitCronRef = useRef<any>(null);
+  // COST CONTROL: Each orbit check costs 2 credits. When budget is exhausted,
+  // orbits auto-pause until credits reset at midnight or user buys a top-up.
+  const orbitCronRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    // Check every 60 seconds for orbits that need execution
-    orbitCronRef.current = new Cron('* * * * *', async () => {
+    // Check every 30 seconds for orbits that need execution (supports sub-minute intervals)
+    orbitCronRef.current = setInterval(async () => {
       const due = orbitService.getOrbitsDueForCheck();
       if (due.length === 0 || !secureApiKey) return;
 
+      const orbitTier = SubscriptionService.getTier();
+
       for (const orbit of due) {
         try {
+          // ── Credit budget gate for orbit checks ──
+          const orbitCreditCheck = usageBudget.canAfford('orbit_cloud', orbitTier);
+          if (!orbitCreditCheck.allowed) {
+            console.log(`[Orbit] Skipping "${orbit.title}" — out of credits (${orbitCreditCheck.remaining} remaining)`);
+            // Push next check out by 10 minutes to avoid hammering the budget check
+            const delay = new Date(Date.now() + 10 * 60000).toISOString();
+            orbitService.setNextCheck(orbit.id, delay);
+            continue;
+          }
+
           // Build a simple prompt for the orbit check
           const checkPrompt = `You are JUMARI Orbit — a background autonomous agent. The user asked you to: "${orbit.goal}". This is check #${orbit.checksPerformed + 1}. Provide a concise, useful update. If you have no new information, say so briefly. Keep response under 200 words. Focus on actionable findings.`;
+
+          // Consume credits BEFORE the API call
+          usageBudget.consume('orbit_cloud', orbitTier);
 
           // Use runChatAgent with a simple collector
           let response = '';
@@ -424,10 +443,17 @@ export default function App() {
             onError: (err) => { console.warn('[Orbit] Check failed for', orbit.title, err); },
           });
 
-          // Only store non-empty findings
+          // Only store non-empty, genuinely new findings
           const cleaned = response.replace(/<[^>]+>/g, '').trim();
           if (cleaned.length > 10) {
-            orbitService.addFinding(orbit.id, cleaned);
+            // Filter out "no new information" boilerplate responses
+            const noInfoPhrases = ['no new information', 'nothing new to report', 'no updates', 'no significant changes', 'no new findings', 'nothing to report'];
+            const lower = cleaned.toLowerCase();
+            const isNoInfo = noInfoPhrases.some(phrase => lower.includes(phrase));
+            if (!isNoInfo) {
+              // addFinding has built-in dedup — skips if too similar to last finding
+              orbitService.addFinding(orbit.id, cleaned);
+            }
           }
 
           // Schedule next check
@@ -437,9 +463,9 @@ export default function App() {
           console.warn('[Orbit] Background check error:', err);
         }
       }
-    });
+    }, 30000); // 30-second check cycle
 
-    return () => { orbitCronRef.current?.stop(); };
+    return () => { if (orbitCronRef.current) clearInterval(orbitCronRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secureApiKey]);
 
@@ -681,11 +707,29 @@ export default function App() {
   // useCallback prevents PlatformView (which is React.memo'd) from re-rendering
   // every time App re-renders from an unrelated state change.
   const handleNewChat = useCallback(() => {
+    // Abort any in-flight AI response or browser agent loop
+    chatAbortRef.current?.abort();
+    agentAbortRef.current = true;
+
+    // Reset all chat state
     currentThreadIdRef.current = null;
     setCurrentThreadId(null);
     setMessages([]);
     setAgentMode(null);
     setIsAgentWorking(false);
+
+    // Switch back to platform mode (in case browser is active)
+    setAppMode('platform');
+
+    // Close any open overlays so user lands on a clean chat
+    setShowScheduler(false);
+    setShowWorkspace(false);
+    setShowVoiceChat(false);
+    setShowSettings(false);
+    setShowCoding(false);
+    setShowTrading(false);
+    setShowWebDesigner(false);
+    setShowGameGen(false);
   }, []);
 
   const handleSelectThread = useCallback((threadId: string) => {
@@ -707,6 +751,7 @@ export default function App() {
             .replace(/<open>[\s\S]*?<\/open>/gi, '')
             .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
             .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
+            .replace(/<memory>[\s\S]*?<\/memory>/gi, '')
             .trimEnd() }
         : m
     );
@@ -716,8 +761,17 @@ export default function App() {
   }, []);
 
   const handleDeleteThread = useCallback((threadId: string) => {
+    // Clean up any active orbit linked to this thread
+    orbitService.deleteByThreadId(threadId);
+
     deleteStoredThread(threadId);
     setChatThreads(loadThreadsMeta());
+
+    // Refresh orbit state since we may have deleted an orbit
+    setOrbitThreadIds(orbitService.getActiveThreadIds());
+    setOrbitTotalCount(orbitService.getActive().length);
+    setOrbitUnreadCount(orbitService.getUnreadCount());
+
     if (currentThreadIdRef.current === threadId) {
       currentThreadIdRef.current = null;
       setCurrentThreadId(null);
@@ -908,22 +962,66 @@ export default function App() {
         setCurrentThreadId(threadId);
       }
 
+      // Parse interval from user message (e.g. "every 10 seconds", "every 5 minutes", "hourly")
+      const parseInterval = (msg: string): number => {
+        const lower = msg.toLowerCase();
+        // "every X seconds/minutes/hours"
+        const match = lower.match(/every\s+(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hour?s?|hr?s?)/);
+        if (match) {
+          const n = parseInt(match[1]);
+          const unit = match[2];
+          if (unit.startsWith('sec')) return Math.max(0.5, n / 60); // convert seconds to minutes, min 30s
+          if (unit.startsWith('min')) return Math.max(1, n);
+          if (unit.startsWith('h')) return n * 60;
+        }
+        // "every hour" / "hourly"
+        if (/\b(every\s+hour|hourly)\b/.test(lower)) return 60;
+        // "every day" / "daily"
+        if (/\b(every\s+day|daily)\b/.test(lower)) return 1440;
+        // "every minute"
+        if (/\bevery\s+minute\b/.test(lower)) return 1;
+        return 60; // default hourly
+      };
+
       // Check if this thread already has an orbit
       const existingOrbit = orbitService.getByThreadId(threadId);
-      if (!existingOrbit) {
+      if (existingOrbit) {
+        // Thread already has an orbit — check if user is changing interval
+        const newInterval = parseInterval(text);
+        if (newInterval !== existingOrbit.intervalMinutes) {
+          orbitService.update(existingOrbit.id, { intervalMinutes: newInterval });
+        }
+      } else {
         // Create a new orbit linked to this chat thread
         const orbitTitle = text.trim().length > 50 ? text.trim().slice(0, 47) + '...' : text.trim();
         orbitService.create({
           title: orbitTitle,
           goal: text.trim(),
           priority: 'medium',
-          intervalMinutes: 60,
+          intervalMinutes: parseInterval(text),
           threadId,
         });
         // Update thread IDs so sidebar shows the orbit badge immediately
         setOrbitThreadIds(orbitService.getActiveThreadIds());
       }
       // Don't return — let the message flow through to the chat agent so JUMARI responds
+    }
+
+    // ── Orbit interval update — catch "check every X seconds" in an existing orbit thread ──
+    if (!isOrbitTrigger && currentThreadIdRef.current) {
+      const threadOrbit = orbitService.getByThreadId(currentThreadIdRef.current);
+      if (threadOrbit && threadOrbit.status === 'active') {
+        const intervalMatch = text.toLowerCase().match(/(?:check|update|refresh|poll)\s+(?:it\s+)?every\s+(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hour?s?|hr?s?)/);
+        if (intervalMatch) {
+          const n = parseInt(intervalMatch[1]);
+          const unit = intervalMatch[2];
+          let newMinutes = 60;
+          if (unit.startsWith('sec')) newMinutes = Math.max(0.5, n / 60);
+          else if (unit.startsWith('min')) newMinutes = Math.max(1, n);
+          else if (unit.startsWith('h')) newMinutes = n * 60;
+          orbitService.update(threadOrbit.id, { intervalMinutes: newMinutes });
+        }
+      }
     }
 
     let processedInput = text;
@@ -996,7 +1094,6 @@ export default function App() {
        const subCheck = SubscriptionService.canSendMessage();
        if (!subCheck.allowed) {
          if (subCheck.cooldown) {
-           // Cooldown — show the user's message + block notice (don't silently swallow)
            const blockId = Date.now().toString();
            setMessages(prev => [
              ...prev,
@@ -1009,7 +1106,20 @@ export default function App() {
          }
          return;
        }
-       // 2. Server-side rate limit check (authoritative — catches admin cooldowns + central tier limits)
+       // 2. Credit budget gate — weighted cost tracking
+       const currentTier = SubscriptionService.getTier();
+       const creditCheck = usageBudget.canAfford('chat', currentTier);
+       if (!creditCheck.allowed) {
+         const blockId = Date.now().toString();
+         setMessages(prev => [
+           ...prev,
+           { id: blockId + '-u', role: 'user' as const, content: processedInput },
+           { id: blockId + '-block', role: 'assistant' as const, content: creditCheck.reason || 'You\'ve used all your credits for today. They reset at midnight!' },
+         ]);
+         if (currentTier === 'free') { setUpgradeReason('limit'); setShowUpgradeModal(true); }
+         return;
+       }
+       // 3. Server-side rate limit check (authoritative — catches admin cooldowns + central tier limits)
        try {
          const serverCheck = await SubscriptionService.checkServerRateLimit();
          if (serverCheck && !serverCheck.allowed) {
@@ -1023,12 +1133,16 @@ export default function App() {
            return;
          }
        } catch {} // Fail open if server unreachable — local check already passed
+       // Consume credits + legacy counter
+       usageBudget.consume('chat', currentTier);
        SubscriptionService.incrementUsage();
        setDailyUsage(SubscriptionService.getDailyUsage());
 
        // No browser context — route to Chat Agent
        setAgentMode('chat');
        setIsAgentWorking(true);
+       // Haptic pulse on PWA when agent starts responding
+       try { navigator?.vibrate?.(40); } catch {}
        const messageId = Date.now().toString();
        const createdAt = Date.now();
 
@@ -1096,6 +1210,7 @@ export default function App() {
           .replace(/<workspace>[\s\S]*?<\/workspace>/gi, '')
           .replace(/<activate_key>[\s\S]*?<\/activate_key>/gi, '')
           .replace(/<orbit>[\s\S]*?<\/orbit>/gi, '')
+          .replace(/<memory>[\s\S]*?<\/memory>/gi, '')
           .replace(/<followups>[\s\S]*?<\/followups>/gi, '')
           // Catch orphaned closing tags (model sometimes forgets opening tag)
           .replace(/<\/followups>/gi, '')
@@ -1103,9 +1218,20 @@ export default function App() {
           .replace(/<\/open>/gi, '')
           .replace(/<\/workspace>/gi, '')
           .replace(/<\/activate_key>/gi, '')
-          .replace(/<\/orbit>/gi, '');
+          .replace(/<\/orbit>/gi, '')
+          .replace(/<\/memory>/gi, '');
         // Hide partial opening tags still mid-stream
-        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '').replace(/<activate_key[\s\S]*$/i, '').replace(/<orbit[\s\S]*$/i, '');
+        s = s.replace(/<schedule[\s\S]*$/i, '').replace(/<open[\s\S]*$/i, '').replace(/<workspace[\s\S]*$/i, '').replace(/<followups[\s\S]*$/i, '').replace(/<activate_key[\s\S]*$/i, '').replace(/<orbit[\s\S]*$/i, '').replace(/<memory[\s\S]*$/i, '');
+        // ── Fix unclosed markdown tokens (prevents broken rendering mid-stream) ──
+        // Count backticks — if odd, the last one is unclosed; close it.
+        const fenceMatches = s.match(/```/g);
+        const fenceCount = fenceMatches ? fenceMatches.length : 0;
+        if (fenceCount % 2 !== 0) s += '\n```';
+        // Count remaining single backticks (excluding fences we just closed)
+        const withoutFences = s.replace(/```/g, '');
+        const tickCount = (withoutFences.match(/`/g) || []).length;
+        if (tickCount % 2 !== 0) s += '`';
+
         return s.trimEnd();
       };
 
@@ -1145,10 +1271,20 @@ export default function App() {
        const chatAbort = new AbortController();
        chatAbortRef.current = chatAbort;
 
+       // Gather active orbits for JUMARI's awareness
+       const currentOrbits = orbitService.getActive().map(o => ({
+         title: o.title,
+         goal: o.goal,
+         intervalMinutes: o.intervalMinutes,
+         checksPerformed: o.checksPerformed,
+         status: o.status,
+       }));
+
        runChatAgent(processedInput, history, {
          apiKey: secureApiKey,
          useMax: config.engine === 'max',
          signal: chatAbort.signal,
+         activeOrbits: currentOrbits.length > 0 ? currentOrbits : undefined,
          userProfile: userProfile ? {
            name: userProfile.name,
            birthday: userProfile.birthday,
@@ -1159,7 +1295,11 @@ export default function App() {
          onSearching: () => upsertAssistant(`Orbiting....`, true),
          onSources: (sources) => { console.log('[App] Got sources:', sources.length, sources.map(s => s.url)); pendingSources = sources; },
          onImage: (dataUrl) => { pendingImage = dataUrl; },
-         onToken: (token, replace) => upsertAssistant(token, replace ?? false),
+         onToken: (token, replace) => {
+           // Soft haptic when first real content arrives
+           if (replace) try { navigator?.vibrate?.(20); } catch {}
+           upsertAssistant(token, replace ?? false);
+         },
          onDone: () => {
            const responseTimeMs = Date.now() - createdAt;
            setIsAgentWorking(false);
@@ -1303,6 +1443,19 @@ export default function App() {
            }
 
            parseWorkspaceFromRaw(rawContent);
+
+           // ── Memory: extract <memory> tags from AI response ──
+           const parseMemoryFromRaw = (raw: string) => {
+             const memoryRegex = /<memory>([\s\S]*?)<\/memory>/gi;
+             let memMatch;
+             while ((memMatch = memoryRegex.exec(raw)) !== null) {
+               const fact = memMatch[1].trim();
+               if (fact.length > 5 && fact.length < 300) {
+                 memoryService.addFromAI(fact);
+               }
+             }
+           };
+           parseMemoryFromRaw(rawContent);
 
            // ── Orbit: store first response as a finding if this thread has an orbit ──
            if (activeThreadId) {
@@ -1510,6 +1663,16 @@ export default function App() {
           return;
         }
       } catch {}
+      // Credit budget gate for browser agent (costs 3 per step)
+      const baTier = SubscriptionService.getTier();
+      if (!usageBudget.canAfford('browser_agent', baTier).allowed) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(), role: 'assistant' as const,
+          content: usageBudget.canAfford('browser_agent', baTier).reason || 'Out of credits for today.',
+        }]);
+        return;
+      }
+      usageBudget.consume('browser_agent', baTier);
       SubscriptionService.incrementUsage();
       setDailyUsage(SubscriptionService.getDailyUsage());
     }

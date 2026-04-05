@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BLEUMR_AGENT_PREFIX } from '../services/BleumrLore';
 import { addScheduleEvent } from './CalendarPage';
 import { trackError } from '../services/Analytics';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Brain, Search as SearchIcon, Layers3, X, Zap, CheckCircle2, Bot, Orbit, Sparkles, Archive, Pencil, Download, Trash2, Plus, FolderOpen } from 'lucide-react';
 import { IS_ELECTRON } from '../services/Platform';
 import { InlineStarSphere } from './InlineStarSphere';
+import SubscriptionService from '../services/SubscriptionService';
+import { usageBudget } from '../services/UsageBudget';
 
 // ─── Agent config ─────────────────────────────────────────────────────────────
 const AGENTS = [
@@ -2274,6 +2276,15 @@ export function WorkspacePage({ onClose, apiKey, initialTask }: WorkspacePagePro
     signal: AbortSignal,
     onTok?: (t: string) => void,
   ): Promise<string> => {
+    // Mission Team: 8 credits per task (covers all 3 sequential calls)
+    // Only charge on the first call (planner) — not each sub-call
+    const mtTier = SubscriptionService.getTier();
+    const mtCheck = usageBudget.canAfford('mission_team', mtTier);
+    if (!mtCheck.allowed) {
+      throw new Error(mtCheck.reason || 'Out of credits for today.');
+    }
+    usageBudget.consume('mission_team', mtTier);
+
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST', signal,
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

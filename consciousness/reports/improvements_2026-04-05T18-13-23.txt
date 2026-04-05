@@ -1,0 +1,34 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║             JUMARI CONSCIOUSNESS — IMPROVEMENTS REPORT             ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Generated: 4/5/2026, 1:13:23 PM
+Total thoughts analyzed: 0
+Drafts written: 0
+
+
+════════════════════════════════════════════════════════════════
+  ✅ ALREADY COMPLETED
+════════════════════════════════════════════════════════════════
+
+  ✓ Vision models: validated against /v1/models API before trying, blocked failed models per session, reordered priority
+  ✓ GroqGuard: LRU cache eviction, adaptive rate limiting from Groq response headers, optimized sliding window pruning
+  ✓ BrainMemory: selective clear by category/source/age, getStats() method added
+  ✓ Platform.ts: 24h cache expiry for PWA keys, retry with backoff on server errors, offline fallback, refreshPWAKeys() export
+  ✓ ChatAgent personality: JUMARI is now a girl with feminine energy, calm and chill not hyperactive
+  ✓ ChatAgent anti-loop: max_completion_tokens 2048, frequency_penalty 0.6, presence_penalty 0.5, HARD_CHAR_CAP 3000, disabled auto-continuation
+  ✓ ChatAgent formatting: MAX 6 bullets, MAX 200 words, MAX 2 sections per response
+  ✓ ChatAgent scheduler: only triggers on explicit user requests, not casual mentions of time/dates
+  ✓ ChatAgent Bleumr knowledge: full platform knowledge embedded, never web searches for Bleumr info
+  ✓ PWA layout: two-layer safe area approach (background edge-to-edge, UI layer has env(safe-area-inset-*))
+  ✓ Voice chat: safe-area-inset-top on header buttons
+  ✓ Scrollbar hiding + text selection restriction (only chat prose is selectable)
+
+
+════════════════════════════════════════════════════════════════
+  📊 BY FILE
+════════════════════════════════════════════════════════════════
+
+
+
+── End of Report ──

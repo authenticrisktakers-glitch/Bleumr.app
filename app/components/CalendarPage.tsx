@@ -723,7 +723,7 @@ export function SchedulerPage({ onClose, onAskJumari, jumpToDate }: SchedulerPag
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       transition={{ duration: 0.22 }}
       className="fixed inset-0 z-[10001] flex flex-col font-sans select-none overflow-hidden"
-      style={{ background: 'rgba(3,4,12,0.55)', backdropFilter: glass.blur, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+      style={{ background: 'rgba(3,4,12,0.55)', backdropFilter: glass.blur, paddingTop: typeof window !== 'undefined' && (window as any).orbit ? 38 : undefined, paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">

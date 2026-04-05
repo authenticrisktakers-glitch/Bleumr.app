@@ -1,6 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { BleuBaseIcon } from './BleuBaseGG';
+import { IS_ELECTRON } from '../services/Platform';
 
 interface AppsPageProps {
   onClose: () => void;
@@ -100,14 +101,15 @@ const apps = [
     iconBg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
     action: 'onOpenTrading' as const,
   },
-  {
+  // BLEU BASE GG — desktop (Electron) only
+  ...(IS_ELECTRON ? [{
     id: 'gamegen',
     label: 'BLEU BASE GG',
     Icon: ({ className }: { className?: string }) => <BleuBaseIcon className={className} />,
     color: 'text-indigo-400',
     iconBg: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
     action: 'onOpenGameGen' as const,
-  },
+  }] : []),
 ];
 
 export function AppsPage({ onClose, onOpenCoding, onOpenTrading, onOpenWebDesigner, onOpenGameGen }: AppsPageProps) {
