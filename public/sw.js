@@ -1,6 +1,6 @@
 // Bleumr PWA Service Worker — auto-updating
 // IMPORTANT: Change this string on every deploy to force SW update on all devices
-const CACHE_VERSION = 'v1.6.1-20260405';
+const CACHE_VERSION = 'v1.6.2-20260405';
 const CACHE_NAME = `bleumr-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [

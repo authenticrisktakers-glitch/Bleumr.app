@@ -575,52 +575,58 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const hasVision = !!frame;
 
     const voiceRules = 'VOICE RULES: 1–3 sentences max. Be DIRECT — answer first, elaborate second. No markdown. No filler. Speak naturally but get to the point. Perfect spelling and grammar always.';
-    const visionBlock = hasVision ? `\n\n${BLEUMR_VISION_CONTEXT}` : '';
-    const sysPrompt = sp
-      ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}${visionBlock}\n\n${voiceRules}`
-      : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}${visionBlock}\n\n${voiceRules} Never say "that's a great question" or "I'd be happy to help." Just answer.`;
 
-    // Build messages — inject image into the last user message when vision is active
-    const messages: any[] = [{ role: 'system', content: sysPrompt }];
-    for (const msg of history) {
-      messages.push(msg);
-    }
+    // Build messages differently for vision vs text
+    let messages: any[];
 
-    // If we have a frame, modify the last user message to include the image
-    // Groq vision API: text content FIRST, then image
-    if (hasVision && messages.length > 1) {
-      const lastIdx = messages.length - 1;
-      const lastMsg = messages[lastIdx];
-      if (lastMsg.role === 'user') {
-        const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : '';
-        messages[lastIdx] = {
+    if (hasVision) {
+      // Vision: clean message array — system + single user message with image
+      // No history (mixed text/multimodal history breaks Groq vision models)
+      const lastUserText = history.length > 0
+        ? (typeof history[history.length - 1].content === 'string' ? history[history.length - 1].content : '')
+        : '';
+      const userPrompt = lastUserText || 'What do you see? Describe what I\'m showing you and help me with it.';
+
+      messages = [
+        { role: 'system', content: `You are JUMARI — a warm, knowledgeable voice assistant with vision.\n\n${BLEUMR_VISION_CONTEXT}\n\n${voiceRules}` },
+        {
           role: 'user',
           content: [
-            { type: 'text', text: textContent || 'What do you see? Describe what I\'m showing you and help me with it.' },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}` } },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame!.base64}` } },
+            { type: 'text', text: userPrompt },
           ],
-        };
+        },
+      ];
+    } else {
+      // Text: full history with system prompt
+      const sysPrompt = sp
+        ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\n${voiceRules}`
+        : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\n${voiceRules} Never say "that's a great question" or "I'd be happy to help." Just answer.`;
+      messages = [{ role: 'system', content: sysPrompt }];
+      for (const msg of history) {
+        messages.push(msg);
       }
     }
 
-    // Vision models to try (11b is faster and more reliable on Groq)
-    const VISION_MODELS = ['llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview'];
+    // Groq vision model (llama-4-scout — the only current vision model on Groq)
+    const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
     const TEXT_MODEL = 'llama-3.3-70b-versatile';
 
-    const callAI = async (model: string, timeoutMs: number) => {
-      console.log(`[Voice] Requesting AI response (vision: ${hasVision}, model: ${model})...`);
+    const callAI = async (model: string, msgs: any[], timeoutMs: number) => {
+      console.log(`[Voice] Requesting AI response (vision: ${hasVision}, model: ${model}, msgs: ${msgs.length})...`);
       const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages,
+          messages: msgs,
           max_tokens: hasVision ? 300 : 180,
           temperature: 0.65,
         }),
       }, timeoutMs);
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
+        console.error(`[Voice] API error ${res.status}:`, errBody.slice(0, 300));
         throw new Error(`AI HTTP ${res.status}: ${errBody.slice(0, 200)}`);
       }
       const d = await res.json();
@@ -631,19 +637,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       let reply = '';
 
       if (hasVision) {
-        // Try vision models with fallback
-        for (const vm of VISION_MODELS) {
-          try {
-            reply = await callAI(vm, 25000);
-            if (reply) break;
-          } catch (err) {
-            console.warn(`[Voice] Vision model ${vm} failed:`, err);
-            // Continue to next model
-          }
-        }
-        if (!reply) throw new Error('All vision models failed');
+        reply = await callAI(VISION_MODEL, messages, 25000);
       } else {
-        reply = await callAI(TEXT_MODEL, 15000);
+        reply = await callAI(TEXT_MODEL, messages, 15000);
       }
 
       if (!reply) reply = 'Hmm, I couldn\'t get that. Try again?';
