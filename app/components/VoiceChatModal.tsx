@@ -678,7 +678,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     console.log('[Voice] Recording stopped, blob size:', blob.size);
     // Minimum 2KB — Whisper hallucinates on tiny blobs (produces phantom words like "thank")
-    if (blob.size < 2000) { console.log('[Voice] Blob too small, likely silence — ignoring'); setVS('idle'); return; }
+    if (blob.size < 3000) { console.log('[Voice] Blob too small, likely noise — ignoring'); setVS('idle'); return; }
 
     let userText = '';
     try {
@@ -760,9 +760,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (!analyser) return;
     const bufLen = analyser.frequencyBinCount;
     const data   = new Uint8Array(bufLen);
-    const SILENCE_THRESHOLD = 18;
-    const SILENCE_FRAMES    = 40;   // ~1.5s silence after speech
-    const SPEECH_THRESHOLD  = 25;   // must hear speech first
+    const SILENCE_THRESHOLD = 22;   // raised — ignore low ambient noise
+    const SILENCE_FRAMES    = 45;   // ~1.7s silence after speech
+    const SPEECH_THRESHOLD  = 32;   // raised — only real speech triggers
     const MAX_LISTEN_FRAMES = 900;  // ~15s hard cap
     let heardSpeech = false;
     let totalFrames = 0;
@@ -810,7 +810,14 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           }
         } catch { /* Permissions API not supported for mic on this browser — continue */ }
       }
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       setMicError(null); // Clear any previous error
     } catch (micErr: any) {
       const errName = micErr?.name || '';
