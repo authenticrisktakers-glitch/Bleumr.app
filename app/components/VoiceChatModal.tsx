@@ -587,8 +587,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         : '';
       const userPrompt = lastUserText || 'What do you see? Describe what I\'m showing you and help me with it.';
 
+      const visionRules = 'VOICE+VISION RULES: 2-3 SHORT sentences max. Talk like a friend glancing at something — casual, direct, helpful. NEVER use markdown, bullet points, bold, asterisks, or lists. NEVER start with "Considering" or "Based on." Just say what you see plainly and give one or two quick suggestions if asked. Example: "That\'s an ondre.org business card — clean design. You could add a QR code on the back to make it easier for people to find you online."';
       messages = [
-        { role: 'system', content: `You are JUMARI — a warm, knowledgeable voice assistant with vision.\n\n${BLEUMR_VISION_CONTEXT}\n\n${voiceRules}` },
+        { role: 'system', content: `You are JUMARI — a warm, knowledgeable voice assistant with vision.\n\n${BLEUMR_VISION_CONTEXT}\n\n${visionRules}` },
         {
           role: 'user',
           content: [
@@ -620,7 +621,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         body: JSON.stringify({
           model,
           messages: msgs,
-          max_tokens: hasVision ? 300 : 180,
+          max_tokens: hasVision ? 150 : 180,
           temperature: 0.65,
         }),
       }, timeoutMs);
@@ -643,6 +644,17 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       }
 
       if (!reply) reply = 'Hmm, I couldn\'t get that. Try again?';
+
+      // Strip markdown artifacts before TTS reads them aloud
+      reply = reply
+        .replace(/\*\*(.*?)\*\*/g, '$1')   // **bold** → bold
+        .replace(/\*(.*?)\*/g, '$1')        // *italic* → italic
+        .replace(/^[\s]*[-*•]\s*/gm, '')    // bullet points
+        .replace(/^#+\s*/gm, '')            // # headers
+        .replace(/`([^`]*)`/g, '$1')        // `code` → code
+        .replace(/\n{2,}/g, ' ')            // collapse double newlines
+        .trim();
+
       console.log('[Voice] AI reply:', reply.slice(0, 100));
 
       // Store as text-only in history (don't accumulate base64 images in memory)
