@@ -678,7 +678,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     console.log('[Voice] Recording stopped, blob size:', blob.size);
     // Minimum 2KB — Whisper hallucinates on tiny blobs (produces phantom words like "thank")
-    if (blob.size < 3000) { console.log('[Voice] Blob too small, likely noise — ignoring'); setVS('idle'); return; }
+    if (blob.size < 4500) { console.log('[Voice] Blob too small, likely noise — ignoring'); setVS('idle'); return; }
 
     let userText = '';
     try {
@@ -721,17 +721,41 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       trackError('groq', 'stt', (e as any)?.message || 'Whisper fetch failed');
     }
 
-    // Filter Whisper hallucinations — these are common phantom words from silence/noise
-    const HALLUCINATION_PHRASES = [
+    // Filter Whisper hallucinations — common phantom words AND sentence patterns from silence/noise
+    const HALLUCINATION_EXACT = new Set([
       'thank', 'thanks', 'thank you', 'thanks for watching', 'bye', 'you',
-      'the end', 'okay', 'ok', 'so', 'um', 'uh', 'hmm', 'huh',
+      'the end', 'okay', 'ok', 'so', 'um', 'uh', 'hmm', 'huh', 'ah',
       'subscribe', 'like and subscribe', 'please subscribe',
-      'music', 'applause', 'laughter', 'silence',
-      'foreign', 'inaudible', 'mhm',
+      'music', 'applause', 'laughter', 'silence', 'cheering',
+      'foreign', 'inaudible', 'mhm', 'yeah', 'yes', 'no', 'oh',
+      'thank you for watching', 'thanks for listening', 'see you next time',
+      'please like and subscribe', 'dont forget to subscribe',
+      'i hope you enjoyed', 'see you in the next one', 'peace',
+      'goodbye', 'good night', 'good bye', 'take care',
+    ]);
+    // Pattern-based hallucination detection — Whisper generates these from noise
+    const HALLUCINATION_PATTERNS = [
+      /^thank(s| you)/i,
+      /subscribe/i,
+      /like (and|&) subscribe/i,
+      /next (video|episode|time)/i,
+      /see you/i,
+      /hope you enjoy/i,
+      /don'?t forget/i,
+      /watching|listened/i,
+      /\bподпис/i, // Russian subscribe hallucination
+      /請訂閱/i,   // Chinese subscribe hallucination
+      /字幕/i,     // Chinese subtitle hallucination
     ];
-    const trimmedLower = userText.toLowerCase().replace(/[.,!?]/g, '').trim();
-    if (!userText || trimmedLower.length < 2 || HALLUCINATION_PHRASES.includes(trimmedLower)) {
-      console.log('[Voice] No real transcription (hallucination or empty):', userText, '— returning to idle');
+    const trimmedLower = userText.toLowerCase().replace(/[.,!?…]/g, '').trim();
+    const isHallucination = !userText
+      || trimmedLower.length < 3
+      || HALLUCINATION_EXACT.has(trimmedLower)
+      || HALLUCINATION_PATTERNS.some(p => p.test(trimmedLower))
+      // Repeated single character or word (e.g. "you you you")
+      || /^(\w+\s*)\1{2,}$/i.test(trimmedLower);
+    if (isHallucination) {
+      console.log('[Voice] Hallucination filtered:', userText);
       setVS('idle');
       return;
     }
@@ -760,9 +784,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (!analyser) return;
     const bufLen = analyser.frequencyBinCount;
     const data   = new Uint8Array(bufLen);
-    const SILENCE_THRESHOLD = 22;   // raised — ignore low ambient noise
-    const SILENCE_FRAMES    = 45;   // ~1.7s silence after speech
-    const SPEECH_THRESHOLD  = 32;   // raised — only real speech triggers
+    const SILENCE_THRESHOLD = 24;   // ignore ambient noise floor
+    const SILENCE_FRAMES    = 50;   // ~1.8s silence after speech before auto-stop
+    const SPEECH_THRESHOLD  = 38;   // high bar — only clear speech triggers
     const MAX_LISTEN_FRAMES = 900;  // ~15s hard cap
     let heardSpeech = false;
     let totalFrames = 0;
