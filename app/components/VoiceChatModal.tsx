@@ -1042,32 +1042,34 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
         className="relative flex flex-col w-full h-full z-10"
         onClick={e => e.stopPropagation()}
       >
-        {/* ── Header ────────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
-          <div />
-          <div className="flex items-center gap-1">
-            {/* Vision toggle */}
+        {/* ── Header — invisible container blocks tap-to-talk in this zone ── */}
+        <div
+          className="flex items-center justify-end px-4 py-3 relative z-30"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-3">
             <button onClick={toggleCamera}
-              className="p-2.5 rounded-full transition-all"
-              style={{ color: visionEnabled ? '#34d399' : 'rgba(255,255,255,0.35)' }}>
-              {visionEnabled ? <Eye className="w-[18px] h-[18px]" /> : <EyeOff className="w-[18px] h-[18px]" />}
+              className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+              style={{ color: visionEnabled ? '#34d399' : 'rgba(255,255,255,0.4)' }}>
+              {visionEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </button>
             {visionEnabled && (
               <button onClick={handleFlipCamera}
-                className="p-2.5 rounded-full transition-all"
-                style={{ color: 'rgba(255,255,255,0.35)' }}>
-                <SwitchCamera className="w-[18px] h-[18px]" />
+                className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+                style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <SwitchCamera className="w-5 h-5" />
               </button>
             )}
             <button onClick={toggleMute}
-              className="p-2.5 rounded-full transition-all"
-              style={{ color: muted ? '#ef4444' : 'rgba(255,255,255,0.35)' }}>
-              {muted ? <VolumeX className="w-[18px] h-[18px]" /> : <Volume2 className="w-[18px] h-[18px]" />}
+              className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+              style={{ color: muted ? '#ef4444' : 'rgba(255,255,255,0.4)' }}>
+              {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
             </button>
             <button onClick={handleClose}
-              className="p-2.5 rounded-full transition-all"
-              style={{ color: 'rgba(255,255,255,0.35)' }}>
-              <X className="w-[18px] h-[18px]" />
+              className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+              style={{ color: 'rgba(255,255,255,0.4)' }}>
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
