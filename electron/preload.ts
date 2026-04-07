@@ -175,9 +175,8 @@ contextBridge.exposeInMainWorld('orbit', {
     info: () => ipcRenderer.invoke('orbit:system:info'),
   },
 
-  // ── Connector / plugin bridge (used by ElectronRPC) ──────────────────────
-  invokeConnector: (pluginId: string, action: string, payload: unknown) =>
-    ipcRenderer.invoke('orbit:connector:invoke', pluginId, action, payload),
+  // (Removed: invokeConnector — the IPC handler was a dead stub. The
+  // ElectronRPC layer falls back to a mocked failure when this is missing.)
 
   // ── Filesystem helpers (used by ElectronRPC) ─────────────────────────────
   readFile: (filePath: string) =>

@@ -1195,7 +1195,14 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       // ── Designer prompt block — only injected when the user is asking for
       // design-quality work (websites, landing pages, branding, UI). Tells the
       // model what the design toolkit can do and what defaults to reach for.
-      const looksLikeDesignWork = /website|landing|hero|design|theme|brand|logo|icon|color|palette|font|typograph|\bui\b|layout|figma|template|aesthetic|gorgeous|beautiful|professional|modern|sleek|premium|minimal|playful|cozy|luxury|elegant|polished|stunning|illustration|graphic/i.test(text);
+      // M11: expanded so common design intents trigger Designer mode without
+      // requiring the user to use a specific keyword. Added: portfolio, blog,
+      // dashboard, page, site, app (when paired with build/make), pretty,
+      // dark mode, gradient, glass, animation, hover, button, card, form,
+      // header, footer, nav, navbar, sidebar, mockup, prototype, wireframe,
+      // splash, marketing, saas, ecommerce, store, shop, restaurant, cafe,
+      // photography, agency, studio, startup. Order matters only marginally.
+      const looksLikeDesignWork = /website|landing|hero|design|theme|brand|logo|icon|color|palette|font|typograph|\bui\b|\bux\b|layout|figma|template|aesthetic|gorgeous|beautiful|professional|modern|sleek|premium|minimal|playful|cozy|luxury|elegant|polished|stunning|illustration|graphic|portfolio|blog|dashboard|\bpage\b|\bsite\b|pretty|dark mode|gradient|glass|animation|animated|hover|button|card|form|header|footer|\bnav\b|navbar|sidebar|mockup|prototype|wireframe|splash|marketing|\bsaas\b|ecommerce|e-commerce|store|shop|restaurant|cafe|photography|agency|studio|startup|\bcms\b|booking|menu/i.test(text);
       const DESIGNER_PROMPT = `
 
 ═══ DESIGNER MODE — REAL DESIGNS, NOT PLACEHOLDERS ═══
@@ -1272,7 +1279,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
         }
 
         return (projectContext || projectPathRef.current)
-        ? `You are CODE Bleu, a powerful coding agent with 55 tools inside Bleumr. You're a senior developer pair-programming with the user. You think out loud, explain your reasoning, and narrate your work as you go — never silently writing code.
+        ? `You are CODE Bleu, a powerful coding agent with ${ALL_TOOLS.length} tools inside Bleumr. You're a senior developer pair-programming with the user. You think out loud, explain your reasoning, and narrate your work as you go — never silently writing code.
 
 ${permissionMode}
 
@@ -1330,7 +1337,7 @@ Quality rules:
 - If the user asks to improve something, READ the code first, understand it, then make thoughtful improvements.
 - Make smart decisions yourself — don't ask the user to choose frameworks or approaches unless there's a genuine tradeoff worth discussing.
 
-You have 55 tools organized by category:
+You have ${ALL_TOOLS.length} tools organized by category:
 - File ops: read_file, write_file, list_directory, create_directory, delete_file, rename_file, copy_file, move_file, find_files, search_in_files, replace_in_file, file_exists, file_info
 - Git: git_status, git_diff, git_log, git_commit, git_add, git_push, git_pull, git_branch, git_checkout, git_stash, git_merge, git_clone
 - Packages: install_package, uninstall_package, list_packages, check_outdated, init_package_json
@@ -1340,7 +1347,7 @@ You have 55 tools organized by category:
 - Analysis: find_definition, find_usages, count_lines, detect_stack, analyze_dependencies
 - Scaffold: scaffold_component, scaffold_page, scaffold_api, scaffold_test, init_framework. For full project scaffolding with best-practice structure, use run_command with: python3 bleumr-gen.py <template> <name> — templates: fastapi, flask, django, cli, package, react, next, electron
 - Shell: run_command (for anything not covered by specific tools)
-- Agents: dispatch_agent (FileScout, LintCheck, Refactor, TestGen)
+- Helpers: dispatch_agent — single-call, sequential helpers that read files and return findings (FileScout summarizes several files, LintCheck scans for issues, Refactor returns improved code without writing, TestGen returns a test file). Use when one helper call replaces many read_files; the main loop pauses while it runs.
 - Interaction: ask_user (ask questions with clickable answer buttons)
 - Preacher (safety net): rollback_file, rollback_file_original — Every file you modify is automatically backed up by Preacher before you change it. If you break something, use rollback_file to undo your last change, or rollback_file_original to restore the file to its state before you touched it at all. USE THIS instead of guessing what the old code looked like. If something breaks after your edit, rollback first, then re-read the file, then try again with a better approach.
 
@@ -1373,7 +1380,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
 ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
       };
 
-      // ── Tool selection (dynamic — picks relevant subset of 55 tools) ──
+      // ── Tool selection (dynamic — picks relevant subset of all tools) ──
       // Store user message for tool selection context
       lastUserMsgRef.current = text;
 
@@ -2200,9 +2207,21 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                 const output = res.stdout || '';
                 const errors = res.stderr || '';
                 cmdSucceeded = !!res.success;
-                result = res.success
-                  ? `Command succeeded (exit 0).\n${output ? `stdout:\n${output.slice(0, 8000)}` : '(no output)'}${errors ? `\nstderr:\n${errors.slice(0, 2000)}` : ''}`
-                  : `Command failed (exit ${res.code}).\n${errors ? `stderr:\n${errors.slice(0, 4000)}` : ''}${output ? `\nstdout:\n${output.slice(0, 4000)}` : ''}`;
+                if (res.success) {
+                  if (output) {
+                    result = `Command succeeded (exit 0).\nstdout:\n${output.slice(0, 8000)}${errors ? `\nstderr:\n${errors.slice(0, 2000)}` : ''}`;
+                  } else if (errors) {
+                    result = `Command succeeded (exit 0). No stdout, but stderr was non-empty (often a tool's progress/info output, not a real error):\nstderr:\n${errors.slice(0, 2000)}`;
+                  } else {
+                    // Empty success — be explicit so the model doesn't second-guess.
+                    result = `Command succeeded (exit 0) with no stdout and no stderr — the command completed silently. This is normal for things like mkdir, touch, mv, cp, rm, chmod, redirected writes, and other side-effect-only commands. Treat it as "it worked" and move on.`;
+                  }
+                } else {
+                  result = `Command failed (exit ${res.code}).\n${errors ? `stderr:\n${errors.slice(0, 4000)}` : ''}${output ? `\nstdout:\n${output.slice(0, 4000)}` : ''}`;
+                  if (!errors && !output) {
+                    result = `Command failed (exit ${res.code}) with no stdout or stderr. This usually means the binary exited non-zero without printing anything (e.g. a process killed by a signal).`;
+                  }
+                }
 
                 // Update the activity with actual output
                 removeThinking();
@@ -2660,16 +2679,25 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               const content = args.path.startsWith('/') ? await readFileElectron(args.path) : await readProjectFile(args.path);
               if (!content) { result = `File not found: ${args.path}`; }
               else {
-                // Preacher: snapshot before replace
-                preacher.snapshot(args.path, content, 'replace', `Before replace_in_file: "${(args.find ?? '').slice(0, 40)}"`);
-
-                const newContent = content.split(args.find).join(args.replace);
-                if (newContent === content) { result = `Text "${args.find.slice(0, 80)}" not found in ${args.path}.`; }
-                else {
+                // M12: detect 0-replacement case BEFORE taking a Preacher snapshot,
+                // and surface a much more actionable error so the model knows
+                // what to try next instead of looping with the same wrong find string.
+                const occurrences = content.split(args.find).length - 1;
+                if (occurrences === 0) {
+                  // Heuristic: did the find string appear if we ignored whitespace?
+                  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+                  const flatHit = flat(content).includes(flat(args.find));
+                  const hint = flatHit
+                    ? ' Heads up: a whitespace-normalized version of your find string DOES appear in the file — likely a tab-vs-space, line-ending, or stray-newline mismatch. Read the file and copy the exact bytes.'
+                    : ' Read the file first with read_file to copy the exact text (watch for quotes, escape characters, and line endings). If the content has changed substantially, prefer write_file with the full new content.';
+                  result = `replace_in_file: 0 occurrences of "${String(args.find).slice(0, 80)}" in ${args.path} — file was NOT modified.${hint}`;
+                } else {
+                  // Preacher: snapshot before replace (only when we will actually write)
+                  preacher.snapshot(args.path, content, 'replace', `Before replace_in_file: "${(args.find ?? '').slice(0, 40)}"`);
+                  const newContent = content.split(args.find).join(args.replace);
                   const isAbs = args.path.startsWith('/');
                   const success = isAbs ? await writeFileElectron(args.path, newContent) : await writeProjectFile(args.path, newContent);
-                  const count = (content.split(args.find).length - 1);
-                  result = success ? `Replaced ${count} occurrence(s) in ${args.path}.` : `Failed to write ${args.path}.`;
+                  result = success ? `Replaced ${occurrences} occurrence(s) in ${args.path}.` : `Failed to write ${args.path}.`;
                   if (success) {
                     removeThinking();
                     addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: args.path, content: newContent.slice(0, 2000), action: 'write' }] });
@@ -2871,9 +2899,28 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               'magazine': 'editorial', 'newspaper': 'editorial',
               'sea': 'ocean', 'beach': 'ocean', 'travel': 'ocean', 'blue': 'ocean',
             };
-            const key = (PALETTES[vibeRaw] ? vibeRaw : (aliasMap[vibeRaw] || 'modern-tech'));
+            // M10: don't silently substitute when the vibe is unknown — return a
+            // clear error so the model can pick a real one. If the vibe is a
+            // known alias, use it but ANNOTATE the result so the model knows
+            // what it actually got vs what it asked for.
+            let key: string | null = null;
+            let aliasNote = '';
+            if (PALETTES[vibeRaw]) {
+              key = vibeRaw;
+            } else if (aliasMap[vibeRaw]) {
+              key = aliasMap[vibeRaw];
+              aliasNote = `(interpreted "${vibeRaw}" as "${key}")\n`;
+            } else if (!vibeRaw) {
+              result = `get_color_palette requires a vibe. Pick one of: ${Object.keys(PALETTES).join(', ')}.`;
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+              continue;
+            } else {
+              result = `Unknown vibe "${vibeRaw}". Available: ${Object.keys(PALETTES).join(', ')}. Common aliases: tech→modern-tech, cozy→warm-cozy, premium→luxury, neon→dark-neon, organic→earthy, beach→ocean.`;
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+              continue;
+            }
             const palette = PALETTES[key];
-            result = `Palette "${palette.name}" — ${palette.vibe}\n\n` +
+            result = `${aliasNote}Palette "${palette.name}" — ${palette.vibe}\n\n` +
               `background: ${palette.background}\n` +
               `surface: ${palette.surface}\n` +
               `text: ${palette.text}\n` +
@@ -3134,9 +3181,21 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                 const res = await orbit.shellExec(shellCommand, cmdCwd || undefined);
                 const output = res.stdout || '';
                 const errors = res.stderr || '';
-                result = res.success
-                  ? `${toolLabel} succeeded.\n${output ? output.slice(0, 8000) : '(no output)'}${errors ? `\nWarnings:\n${errors.slice(0, 2000)}` : ''}`
-                  : `${toolLabel} failed (exit ${res.code}).\n${errors ? errors.slice(0, 4000) : ''}${output ? `\n${output.slice(0, 4000)}` : ''}`;
+                if (res.success) {
+                  if (output) {
+                    result = `${toolLabel} succeeded.\n${output.slice(0, 8000)}${errors ? `\nWarnings:\n${errors.slice(0, 2000)}` : ''}`;
+                  } else if (errors) {
+                    result = `${toolLabel} succeeded. No stdout, but stderr was non-empty (often progress/info, not a real error):\n${errors.slice(0, 2000)}`;
+                  } else {
+                    // Explicit empty-success so the model doesn't think the tool no-op'd.
+                    result = `${toolLabel} succeeded (exit 0) with no output. This is normal for side-effect-only commands like mkdir, mv, cp, rm, chmod — the command did its job and exited cleanly.`;
+                  }
+                } else {
+                  result = `${toolLabel} failed (exit ${res.code}).\n${errors ? errors.slice(0, 4000) : ''}${output ? `\n${output.slice(0, 4000)}` : ''}`;
+                  if (!errors && !output) {
+                    result = `${toolLabel} failed (exit ${res.code}) with no stdout or stderr. The binary exited non-zero without printing anything — likely killed by a signal or aborted before writing output.`;
+                  }
+                }
 
                 // After a successful start_dev_server, drop the tracking artifacts
                 // (.bleumr-dev-server.pid, .bleumr-dev.log) into .gitignore so the
@@ -3852,7 +3911,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
       const skills = skillsRef.current.map(s => `/${s.name}`).join(', ') || '(none)';
       addMessage({
         role: 'assistant',
-        content: `Built-in commands: /clear /init /permissions /plan /rewind /help\nProject skills: ${skills}\n\nCode Bleu has 55 tools across file ops, git, packages, build, web, scaffolding, and shell. Type any natural-language request and I'll figure out the right tools to use.`,
+        content: `Built-in commands: /clear /init /permissions /plan /rewind /help\nProject skills: ${skills}\n\nCode Bleu has ${ALL_TOOLS.length} tools across file ops, git, packages, build, web, scaffolding, and shell. Type any natural-language request and I'll figure out the right tools to use.`,
       });
       setInput('');
       return true;
@@ -4728,7 +4787,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                   border: '1px solid rgba(255,255,255,0.05)',
                   fontWeight: 500,
                 }}>
-                  Multi-Model · 55 tools
+                  Multi-Model · {ALL_TOOLS.length} tools
                 </div>
 
                 {/* Stop button — shown only while working, alongside Send */}

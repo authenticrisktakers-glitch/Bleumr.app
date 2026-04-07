@@ -1235,12 +1235,7 @@ ipcMain.handle(
   },
 )
 
-// Connector / plugin system
-ipcMain.handle(
-  'orbit:connector:invoke',
-  (_e, pluginId: string, action: string, payload: unknown) => {
-    console.log(`[Connector] ${pluginId}.${action}`, payload)
-    // Register real connectors here as the app grows
-    return { success: false, reason: `Connector "${pluginId}" not registered` }
-  },
-)
+// (Removed: orbit:connector:invoke. The handler was a console.log stub that
+// always returned { success: false }; no real connectors were ever registered.
+// ElectronRPC.devFallback('invokeConnector') still returns a safe mocked
+// failure for any caller that lingers in the engine layer.)
