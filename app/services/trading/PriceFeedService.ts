@@ -28,8 +28,47 @@ class PriceFeedServiceClass {
   private geckoInterval: ReturnType<typeof setInterval> | null = null;
   private connected = false;
   private started = false;
+  // Refcount: how many features (TradingDashboard, AlertService, etc.) want the
+  // feed running right now. Feed only actually runs while count > 0.
+  private subscriberCount = 0;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
+
+  /**
+   * Mark a feature as needing the price feed. Starts the feed if it's the
+   * first acquirer. Call release() when the feature unmounts.
+   *
+   * Returns a release function for ergonomics:
+   *   useEffect(() => PriceFeedService.acquire(['BTC','ETH']), [])
+   */
+  acquire(symbols?: string[]): () => void {
+    this.subscriberCount++;
+    if (symbols && symbols.length) {
+      symbols.forEach(s => this.subscribedSymbols.add(s.toUpperCase()));
+    }
+    if (this.subscriberCount === 1) {
+      this.start(symbols);
+    } else if (this.started && symbols && symbols.length) {
+      // Already running — make sure new symbols get subscribed on the live socket
+      this.subscribe(symbols);
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.release();
+    };
+  }
+
+  /** Decrement refcount and stop the feed if no features need it anymore. */
+  release() {
+    if (this.subscriberCount === 0) return;
+    this.subscriberCount--;
+    if (this.subscriberCount === 0) this.stop();
+  }
+
+  /** Active subscriber count — exposed so AlertService etc. can introspect. */
+  getSubscriberCount(): number { return this.subscriberCount; }
 
   start(symbols?: string[]) {
     if (this.started) return;
@@ -45,10 +84,14 @@ class PriceFeedServiceClass {
     this.started = false;
     this.ws?.close();
     this.ws = null;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.pingInterval) clearInterval(this.pingInterval);
-    if (this.geckoInterval) clearInterval(this.geckoInterval);
-    this.connected = false;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.pingInterval)   { clearInterval(this.pingInterval);   this.pingInterval   = null; }
+    if (this.geckoInterval)  { clearInterval(this.geckoInterval);  this.geckoInterval  = null; }
+    this.reconnectDelay = 1000; // reset backoff so a future start() begins fresh
+    if (this.connected) {
+      this.connected = false;
+      this.statusListeners.forEach(l => { try { l(false); } catch {} });
+    }
   }
 
   // ── Subscriptions ──────────────────────────────────────────────────────

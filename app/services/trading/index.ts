@@ -20,11 +20,19 @@ import { KrakenConnector } from './connectors/KrakenConnector';
 import { PriceFeedService } from './PriceFeedService';
 import { AlertService } from './AlertService';
 
-// Call once at app startup to register all connectors and start services
+// Call once at app startup to register exchange connectors and the alert engine.
+//
+// IMPORTANT: This does NOT eagerly start the price feed anymore. The feed
+// (Binance WebSocket + 30s CoinGecko poll) is now refcounted via
+// PriceFeedService.acquire() / .release() and only runs when:
+//   • TradingDashboard is mounted, or
+//   • AlertService has at least one active alert that needs price ticks.
+//
+// Result: a fresh user with no alerts and the dashboard closed = zero
+// trading-related network or CPU work.
 export function initTrading() {
   ExchangeRegistry.register(new BinanceConnector());
   ExchangeRegistry.register(new CoinbaseConnector());
   ExchangeRegistry.register(new KrakenConnector());
-  PriceFeedService.start();
   AlertService.start();
 }

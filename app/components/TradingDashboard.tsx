@@ -64,6 +64,15 @@ export function TradingDashboard({ onClose }: Props) {
   // ── Effects ────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    // Acquire the price feed for the lifetime of this dashboard. The feed
+    // is refcounted, so closing this component releases it; if AlertService
+    // also holds a reference, the feed keeps running for alert checks. If
+    // nothing else needs it, the WebSocket + 30s poll fully shut down.
+    const releaseFeed = PriceFeedService.acquire();
+    // Reflect the live cache (might already have data from a previous session)
+    setPrices(new Map(PriceFeedService.getAllPrices()));
+    setConnected(PriceFeedService.isConnected());
+
     const unPrice = PriceFeedService.onPrice(() => setPrices(new Map(PriceFeedService.getAllPrices())));
     const unStatus = PriceFeedService.onStatus(setConnected);
     const unPortfolio = PortfolioService.onChange(setPortfolio);
@@ -77,7 +86,7 @@ export function TradingDashboard({ onClose }: Props) {
       }
       setExchanges(ex);
     })();
-    return () => { unPrice(); unStatus(); unPortfolio(); unAlert(); };
+    return () => { unPrice(); unStatus(); unPortfolio(); unAlert(); releaseFeed(); };
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────

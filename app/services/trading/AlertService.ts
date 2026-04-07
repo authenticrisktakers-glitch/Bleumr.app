@@ -14,20 +14,34 @@ class AlertServiceClass {
   private alerts: PriceAlert[] = [];
   private listeners: AlertCallback[] = [];
   private unsubPrice: (() => void) | null = null;
+  // Refcount handle from PriceFeedService — null when feed isn't acquired.
+  private feedRelease: (() => void) | null = null;
 
   constructor() {
     this.alerts = this.load();
   }
 
+  /**
+   * Lazy start: only listen to prices when there are actual alerts to check.
+   * Keeps the price feed (WebSocket + 30s poll) idle for users who never set
+   * up an alert.
+   */
   start() {
+    if (this.unsubPrice) return; // already running
     this.unsubPrice = PriceFeedService.onPrice((symbol, ticker) => {
       this.checkAlerts(symbol, ticker);
     });
+    // Acquire the feed only if there are alerts to monitor
+    if (this.feedRelease == null && this.getActiveAlerts().length > 0) {
+      const symbols = Array.from(new Set(this.alerts.map(a => a.symbol)));
+      this.feedRelease = PriceFeedService.acquire(symbols);
+    }
   }
 
   stop() {
     this.unsubPrice?.();
     this.unsubPrice = null;
+    if (this.feedRelease) { this.feedRelease(); this.feedRelease = null; }
   }
 
   // ── CRUD ───────────────────────────────────────────────────────────────
@@ -58,8 +72,13 @@ class AlertServiceClass {
     };
 
     this.alerts.push(alert);
-    // Subscribe to the symbol if not already
-    PriceFeedService.subscribe([alert.symbol]);
+    // First alert ever → acquire the feed (starts WebSocket + poll). Otherwise
+    // just subscribe the new symbol on the already-running feed.
+    if (this.feedRelease == null) {
+      this.feedRelease = PriceFeedService.acquire([alert.symbol]);
+    } else {
+      PriceFeedService.subscribe([alert.symbol]);
+    }
     this.save();
     return alert;
   }
@@ -67,6 +86,12 @@ class AlertServiceClass {
   deleteAlert(id: string) {
     this.alerts = this.alerts.filter(a => a.id !== id);
     this.save();
+    // No more active alerts → release the feed so it can shut down (unless
+    // TradingDashboard or another consumer still holds a refcount).
+    if (this.getActiveAlerts().length === 0 && this.feedRelease) {
+      this.feedRelease();
+      this.feedRelease = null;
+    }
   }
 
   pauseAlert(id: string) {

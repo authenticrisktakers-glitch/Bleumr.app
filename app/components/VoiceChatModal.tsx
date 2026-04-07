@@ -230,12 +230,15 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     scene.add(accentLight);
 
     // ── Animation loop ────────────────────────────────────────────────────
-    let raf: number;
+    let raf: number = 0;
+    let paused = false;     // tracks tab/visibility — when true, animate() bails out
+    let disposed = false;   // set in cleanup so a late visibilitychange can't restart
     let t = 0;
     let targetRotX = 0, targetRotY = 0;
     let currentRotX = 0, currentRotY = 0;
 
     const animate = () => {
+      if (paused || disposed) return;       // CPU/GPU discipline: stop work when hidden
       raf = requestAnimationFrame(animate);
       const { voiceState: vs, volume: vol } = stateRef.current;
 
@@ -339,12 +342,32 @@ function BlackMatterSphere({ voiceState, volume }: { voiceState: VoiceState; vol
     // Track globally so cursor anywhere on the modal moves the sphere
     window.addEventListener('mousemove', onMouseMove);
 
+    // ── Visibility pause — stop GPU work when tab is hidden ───────────────
+    // Without this the THREE.js sphere keeps rendering at 60 FPS even when
+    // the user is on another tab or another app, burning battery for nothing.
+    const handleVisibility = () => {
+      if (disposed) return;
+      if (document.hidden) {
+        paused = true;
+        cancelAnimationFrame(raf);
+      } else if (paused) {
+        paused = false;
+        animate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    // Honor initial state in case the modal opens while the tab is already hidden
+    if (typeof document !== 'undefined' && document.hidden) paused = true;
+
     // Force an immediate render so it's never blank on open
     renderer.render(scene, camera);
-    animate();
+    if (!paused) animate();
 
     return () => {
+      disposed = true;
+      paused = true;
       cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('mousemove', onMouseMove);
       renderer.dispose();
       geo.dispose();
@@ -403,6 +426,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const visionEnabledRef = useRef(false);
   const guideModeRef   = useRef(false);
   const guideLoopRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const guideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 90s safety auto-stop
+  const guideAbortRef  = useRef<AbortController | null>(null); // aborts in-flight guide fetch on close
   const guideTargetRef = useRef<string>('');           // what we're helping them find
   const guideHistoryRef = useRef<string[]>([]);        // recent guide responses for context
   const guideBusyRef   = useRef(false);                // prevents overlapping guide calls
@@ -439,9 +464,12 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     closedRef.current = true;
     cancelAnimationFrame(animRef.current);
     stopSpeaking();
-    // Stop guide mode
+    // Stop guide mode — clear interval, timeout, and abort any in-flight Groq call
     guideModeRef.current = false;
     if (guideLoopRef.current) { clearInterval(guideLoopRef.current); guideLoopRef.current = null; }
+    if (guideTimeoutRef.current) { clearTimeout(guideTimeoutRef.current); guideTimeoutRef.current = null; }
+    if (guideAbortRef.current) { try { guideAbortRef.current.abort(); } catch {} guideAbortRef.current = null; }
+    guideBusyRef.current = false;
     // Stop continuous capture
     if (stopCaptureRef.current) { stopCaptureRef.current(); stopCaptureRef.current = null; }
     lastFrameRef.current = null;
@@ -470,15 +498,26 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   }, []);
 
   // ── Timed fetch helper — every fetch gets an AbortController + timeout ────
+  // If opts.signal is supplied, it composes with the timeout: aborting either
+  // (timeout fires OR caller aborts via their own signal) cancels the request.
   const timedFetch = async (url: string, opts: RequestInit, timeoutMs: number): Promise<Response> => {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
+    // Forward an external abort (e.g. modal closing) into our internal controller
+    const externalSignal = opts.signal as AbortSignal | undefined;
+    const onExternalAbort = () => ac.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) ac.abort();
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     try {
       const res = await fetch(url, { ...opts, signal: ac.signal });
       clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
       return res;
     } catch (e) {
       clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
       throw e;
     }
   };
@@ -887,6 +926,10 @@ ${!hasVision ? 'YOUR EYES: If the user describes anything physical — a car pro
     // Use VisionGuide state for full context — not isolated prompt
     const guidePrompt = buildGuideTickPrompt(visionGuideRef.current, target);
 
+    // Make the in-flight Groq call abortable so closing the modal kills it instantly
+    const ac = new AbortController();
+    guideAbortRef.current = ac;
+
     try {
       const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -906,10 +949,14 @@ ${!hasVision ? 'YOUR EYES: If the user describes anything physical — a car pro
           max_tokens: 150,
           temperature: 0.5,
         }),
+        signal: ac.signal,
       }, 15000);
 
+      // Modal may have closed while we were awaiting — bail before touching state
+      if (closedRef.current || !guideModeRef.current) { guideBusyRef.current = false; return; }
       if (!res.ok) { guideBusyRef.current = false; return; }
       const d = await res.json();
+      if (closedRef.current || !guideModeRef.current) { guideBusyRef.current = false; return; }
       let direction = (d.choices?.[0]?.message?.content?.trim() ?? '').replace(/\*+/g, '').replace(/\n+/g, ' ').trim();
       if (!direction) { guideBusyRef.current = false; return; }
 
@@ -962,8 +1009,12 @@ ${!hasVision ? 'YOUR EYES: If the user describes anything physical — a car pro
       guideAnalysisTick();
     }, 2000);
 
-    // Safety timeout — stop after 90 seconds to save API calls
-    setTimeout(() => {
+    // Safety timeout — stop after 90 seconds to save API calls.
+    // Stored in a ref so cleanup() can cancel it if the modal closes early.
+    if (guideTimeoutRef.current) clearTimeout(guideTimeoutRef.current);
+    guideTimeoutRef.current = setTimeout(() => {
+      guideTimeoutRef.current = null;
+      if (closedRef.current) return;        // modal already gone — drop everything
       if (guideModeRef.current) {
         console.log('[Guide] Timeout — auto-stopping');
         stopGuideMode();
@@ -984,6 +1035,14 @@ ${!hasVision ? 'YOUR EYES: If the user describes anything physical — a car pro
     if (guideLoopRef.current) {
       clearInterval(guideLoopRef.current);
       guideLoopRef.current = null;
+    }
+    if (guideTimeoutRef.current) {
+      clearTimeout(guideTimeoutRef.current);
+      guideTimeoutRef.current = null;
+    }
+    if (guideAbortRef.current) {
+      try { guideAbortRef.current.abort(); } catch {}
+      guideAbortRef.current = null;
     }
   }, []);
 
