@@ -50,6 +50,17 @@ function saveStore() {
 }
 
 // ── Browser tab manager ───────────────────────────────────────────────────────
+//
+// Tab lifecycle in Bleumr:
+//   • Each tab is a WebContentsView (its own renderer process)
+//   • Inactive tabs are removed from the contentView tree (not visible)
+//   • backgroundThrottling is now ENABLED so Chromium throttles inactive tabs
+//     automatically (lower frame rate, paused timers, suspended animations)
+//   • LRU eviction: at most MAX_OPEN_TABS may be alive simultaneously. When a
+//     new tab pushes us over the cap, the oldest INACTIVE tab is closed and
+//     the renderer is notified via 'orbit:browser:tabEvicted'
+
+const MAX_OPEN_TABS = 20
 
 interface TabState {
   id: string
@@ -58,14 +69,59 @@ interface TabState {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  lastActiveAt: number
 }
 
-const tabs = new Map<string, WebContentsView>()
+interface TabRecord {
+  view: WebContentsView
+  /** Wall-clock timestamp of when this tab was last the active tab. */
+  lastActiveAt: number
+}
+
+const tabs = new Map<string, TabRecord>()
 let activeTabId: string | null = null
 let tabCounter = 0
 let mainWindow: BrowserWindow | null = null
 
+/** Find the oldest tab that ISN'T currently active. Returns null if every tab is active (impossible) or there are no tabs. */
+function findLruInactiveTab(): string | null {
+  let oldestId: string | null = null
+  let oldestTs = Infinity
+  for (const [id, rec] of tabs) {
+    if (id === activeTabId) continue
+    if (rec.lastActiveAt < oldestTs) {
+      oldestTs = rec.lastActiveAt
+      oldestId = id
+    }
+  }
+  return oldestId
+}
+
+/** Close a tab from the main process side, notifying the renderer it was evicted. */
+function evictTab(id: string, reason: string) {
+  const rec = tabs.get(id)
+  if (!rec) return
+  if (mainWindow && mainWindow.contentView.children.includes(rec.view)) {
+    mainWindow.contentView.removeChildView(rec.view)
+  }
+  try { rec.view.webContents.close() } catch { /* ignore */ }
+  tabs.delete(id)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('orbit:browser:tabEvicted', { tabId: id, reason })
+  }
+}
+
 function createTab(url: string): string {
+  // LRU eviction: if we're at the cap, close the oldest inactive tab BEFORE
+  // spinning up another renderer process.
+  if (tabs.size >= MAX_OPEN_TABS) {
+    const lruId = findLruInactiveTab()
+    if (lruId) {
+      console.log(`[Tabs] At cap (${MAX_OPEN_TABS}), evicting LRU tab ${lruId}`)
+      evictTab(lruId, 'lru_cap')
+    }
+  }
+
   const id = `tab_${++tabCounter}`
 
   const view = new WebContentsView({
@@ -73,7 +129,11 @@ function createTab(url: string): string {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false,      // keep rendering active even when tab is hidden
+      // Let Chromium throttle inactive tabs (paused rAF, slowed timers,
+      // suspended animations). The previous `false` setting was the single
+      // biggest CPU/GPU drain in Bleumr — every tab kept rendering at full
+      // speed even when the user couldn't see it.
+      backgroundThrottling: true,
       images: true,
       javascript: true,
       webgl: true,
@@ -123,6 +183,13 @@ function createTab(url: string): string {
     emitBrowserState()
   })
 
+  // Belt-and-braces: re-assert background throttling whenever Chromium
+  // says rendering started, in case a future Electron version flips the
+  // default for new contents.
+  view.webContents.on('did-start-loading', () => {
+    try { view.webContents.setBackgroundThrottling(true) } catch { /* ignore */ }
+  })
+
   view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('orbit:browser:error', {
@@ -141,7 +208,7 @@ function createTab(url: string): string {
     return { action: 'deny' }
   })
 
-  tabs.set(id, view)
+  tabs.set(id, { view, lastActiveAt: Date.now() })
   setActiveTab(id)
   return id
 }
@@ -149,29 +216,37 @@ function createTab(url: string): string {
 function setActiveTab(id: string) {
   if (!mainWindow) return
 
+  // Stamp the OUTGOING tab's last-active time before swapping. This is the
+  // ground truth used by findLruInactiveTab() for eviction decisions.
+  if (activeTabId && activeTabId !== id) {
+    const prev = tabs.get(activeTabId)
+    if (prev) prev.lastActiveAt = Date.now()
+  }
+
   // Hide all non-active views
-  for (const [, view] of tabs) {
-    if (mainWindow.contentView.children.includes(view)) {
-      mainWindow.contentView.removeChildView(view)
+  for (const [, rec] of tabs) {
+    if (mainWindow.contentView.children.includes(rec.view)) {
+      mainWindow.contentView.removeChildView(rec.view)
     }
   }
 
-  const view = tabs.get(id)
-  if (!view) return
+  const rec = tabs.get(id)
+  if (!rec) return
 
-  mainWindow.contentView.addChildView(view)
+  mainWindow.contentView.addChildView(rec.view)
   activeTabId = id
+  rec.lastActiveAt = Date.now()
 
   // Start hidden (1×1 off-screen); the renderer will call orbit:browser:setBounds
   // with the actual viewport rect immediately after switching tabs.
   // This prevents the WebContentsView from flashing at full-window size.
-  view.setBounds({ x: 0, y: -1, width: 1, height: 1 })
+  rec.view.setBounds({ x: 0, y: -1, width: 1, height: 1 })
 
   emitBrowserState()
 }
 
-function getTabState(id: string, view: WebContentsView): TabState {
-  const wc = view.webContents
+function getTabState(id: string, rec: TabRecord): TabState {
+  const wc = rec.view.webContents
   return {
     id,
     url: wc.getURL(),
@@ -179,12 +254,13 @@ function getTabState(id: string, view: WebContentsView): TabState {
     loading: wc.isLoading(),
     canGoBack: wc.canGoBack(),
     canGoForward: wc.canGoForward(),
+    lastActiveAt: rec.lastActiveAt,
   }
 }
 
 function getAllTabsState() {
   return {
-    tabs: [...tabs.entries()].map(([id, view]) => getTabState(id, view)),
+    tabs: [...tabs.entries()].map(([id, rec]) => getTabState(id, rec)),
     activeTabId,
   }
 }
@@ -380,27 +456,27 @@ ipcMain.handle('orbit:browser:loadHTML', (_e, html: string) => {
 })
 
 ipcMain.handle('orbit:browser:navigate', (_e, tabId: string, url: string) => {
-  const view = tabs.get(tabId)
-  if (!view) return { success: false, reason: 'Tab not found' }
-  view.webContents.loadURL(url).catch(() => {})
+  const rec = tabs.get(tabId)
+  if (!rec) return { success: false, reason: 'Tab not found' }
+  rec.view.webContents.loadURL(url).catch(() => {})
   return { success: true }
 })
 
 ipcMain.handle('orbit:browser:reload', (_e, tabId: string) => {
-  const view = tabs.get(tabId)
-  if (!view) return { success: false }
-  view.webContents.reload()
+  const rec = tabs.get(tabId)
+  if (!rec) return { success: false }
+  rec.view.webContents.reload()
   return { success: true }
 })
 
 ipcMain.handle('orbit:browser:close', (_e, tabId: string) => {
-  const view = tabs.get(tabId)
-  if (!view) return { success: false }
+  const rec = tabs.get(tabId)
+  if (!rec) return { success: false }
 
-  if (mainWindow?.contentView.children.includes(view)) {
-    mainWindow.contentView.removeChildView(view)
+  if (mainWindow?.contentView.children.includes(rec.view)) {
+    mainWindow.contentView.removeChildView(rec.view)
   }
-  view.webContents.close()
+  rec.view.webContents.close()
   tabs.delete(tabId)
 
   if (activeTabId === tabId) {
@@ -421,9 +497,14 @@ ipcMain.handle('orbit:browser:setActive', (_e, tabId: string) => {
 // Called when the browser panel is closed so nothing renders behind the platform UI.
 ipcMain.handle('orbit:browser:hideAll', () => {
   if (!mainWindow) return { success: false }
-  for (const [, view] of tabs) {
-    if (mainWindow.contentView.children.includes(view)) {
-      mainWindow.contentView.removeChildView(view)
+  // Stamp the outgoing active tab so LRU eviction has accurate timestamps.
+  if (activeTabId) {
+    const prev = tabs.get(activeTabId)
+    if (prev) prev.lastActiveAt = Date.now()
+  }
+  for (const [, rec] of tabs) {
+    if (mainWindow.contentView.children.includes(rec.view)) {
+      mainWindow.contentView.removeChildView(rec.view)
     }
   }
   activeTabId = null
@@ -437,32 +518,32 @@ ipcMain.handle(
     tabId: string,
     bounds: { x: number; y: number; width: number; height: number },
   ) => {
-    const view = tabs.get(tabId)
-    if (!view) return { success: false }
-    view.setBounds(bounds)
+    const rec = tabs.get(tabId)
+    if (!rec) return { success: false }
+    rec.view.setBounds(bounds)
     return { success: true }
   },
 )
 
 ipcMain.handle('orbit:browser:goBack', (_e, tabId: string) => {
-  const view = tabs.get(tabId)
-  if (view?.webContents.canGoBack()) view.webContents.goBack()
+  const rec = tabs.get(tabId)
+  if (rec?.view.webContents.canGoBack()) rec.view.webContents.goBack()
   return { success: true }
 })
 
 ipcMain.handle('orbit:browser:goForward', (_e, tabId: string) => {
-  const view = tabs.get(tabId)
-  if (view?.webContents.canGoForward()) view.webContents.goForward()
+  const rec = tabs.get(tabId)
+  if (rec?.view.webContents.canGoForward()) rec.view.webContents.goForward()
   return { success: true }
 })
 
 ipcMain.handle('orbit:browser:getState', () => getAllTabsState())
 
 ipcMain.handle('orbit:browser:executeJS', async (_e, tabId: string, code: string) => {
-  const view = tabs.get(tabId)
-  if (!view) return { success: false, reason: 'Tab not found' }
+  const rec = tabs.get(tabId)
+  if (!rec) return { success: false, reason: 'Tab not found' }
   try {
-    const result = await view.webContents.executeJavaScript(code, true)
+    const result = await rec.view.webContents.executeJavaScript(code, true)
     return { success: true, result }
   } catch (err: any) {
     return { success: false, error: String(err?.message ?? err) }
@@ -471,12 +552,40 @@ ipcMain.handle('orbit:browser:executeJS', async (_e, tabId: string, code: string
 
 // Screenshot — captures current tab as base64 PNG for vision analysis
 ipcMain.handle('orbit:browser:screenshot', async (_e, tabId: string) => {
-  const view = tabs.get(tabId)
-  if (!view) return { success: false, reason: 'Tab not found' }
+  const rec = tabs.get(tabId)
+  if (!rec) return { success: false, reason: 'Tab not found' }
   try {
-    const image = await view.webContents.capturePage()
+    const image = await rec.view.webContents.capturePage()
     const base64 = image.toPNG().toString('base64')
     return { success: true, base64 }
+  } catch (err: any) {
+    return { success: false, error: String(err?.message ?? err) }
+  }
+})
+
+// Process metrics — exposes Electron's per-process CPU/memory data so the
+// renderer (or admin dashboard) can show "memory pressure" warnings and let
+// users see exactly what each tab/process is costing.
+ipcMain.handle('orbit:browser:getProcessMetrics', () => {
+  try {
+    const metrics = app.getAppMetrics().map(m => ({
+      pid: m.pid,
+      type: m.type,
+      cpu: {
+        percentCPUUsage: m.cpu?.percentCPUUsage ?? 0,
+      },
+      memory: {
+        workingSetSize: m.memory?.workingSetSize ?? 0,
+        peakWorkingSetSize: m.memory?.peakWorkingSetSize ?? 0,
+      },
+      name: (m as any).name || undefined,
+    }))
+    return {
+      success: true,
+      tabCount: tabs.size,
+      maxTabs: MAX_OPEN_TABS,
+      metrics,
+    }
   } catch (err: any) {
     return { success: false, error: String(err?.message ?? err) }
   }

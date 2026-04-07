@@ -151,6 +151,23 @@ contextBridge.exposeInMainWorld('orbit', {
       ipcRenderer.on('orbit:browser:error', handler)
       return () => ipcRenderer.off('orbit:browser:error', handler)
     },
+    /**
+     * Subscribe to tab eviction events. Fires when the main process auto-closes
+     * a tab to enforce the LRU memory cap. Renderer should drop any UI state
+     * for this tabId. Returns unsubscribe fn.
+     */
+    onTabEvicted: (callback: (data: { tabId: string; reason: string }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, data: unknown) =>
+        callback(data as any)
+      ipcRenderer.on('orbit:browser:tabEvicted', handler)
+      return () => ipcRenderer.off('orbit:browser:tabEvicted', handler)
+    },
+    /**
+     * Snapshot of per-process CPU/memory usage from app.getAppMetrics().
+     * Use to drive a "memory pressure" indicator or admin diagnostics.
+     */
+    getProcessMetrics: () =>
+      ipcRenderer.invoke('orbit:browser:getProcessMetrics'),
   },
 
   // ── System information ────────────────────────────────────────────────────
