@@ -1172,9 +1172,9 @@ For ANY website, landing page, or visual project, follow this workflow:
    • Always link the chosen Google Fonts pairing in the <head>.
    • Always use the chosen palette as CSS variables in :root, then reference them throughout.
 
-5. VERIFY VISUALLY. After writing/modifying any HTML page, call:
-   screenshot_preview({ path: 'index.html', viewport: 'desktop' })
-   The PNG saves to .bleumr-preview/. Look at how the page actually rendered. If spacing, colors, or layout are off, FIX IT and screenshot again. Do not stop at "the file was written" — stop at "the page LOOKS right".
+5. DELIVER A PREVIEW PNG FOR THE USER. After finishing an HTML page, call:
+   save_html_preview({ path: 'index.html', viewport: 'desktop' })
+   This renders the page in an offscreen browser and saves a PNG to .bleumr-preview/ that the USER can open and inspect. IMPORTANT: you cannot see the PNG yourself — there is no vision model in this loop. Treat the screenshot as a deliverable artifact for the human, NOT a self-verification step. If the call fails, fix the HTML based on the error and try again. Otherwise, your job after the save is to tell the user where the PNG is and ask them to look at it.
 
 DESIGN QUALITY BAR — what counts as "done":
 • Real logo (generated, saved to disk, referenced in <img>)
@@ -1182,8 +1182,7 @@ DESIGN QUALITY BAR — what counts as "done":
 • Curated palette applied via CSS variables
 • Curated font pairing loaded from Google Fonts
 • Real icons from Lucide (or matching library)
-• Layout verified via screenshot_preview at desktop viewport
-• Responsive — also screenshot at mobile viewport
+• Preview PNG saved at desktop viewport (and ideally at mobile too) for the user to review
 • No "lorem ipsum" — write real, contextual copy
 
 If the user says "make it pretty" / "make it look professional" / "design it like figma" / "real design" — that's your cue to use ALL of the above. Don't hand-roll a CSS color scheme. Don't paste in placeholder.com URLs. Use the toolkit.
@@ -2894,8 +2893,10 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `${sys.name} ready`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
             }
 
-          } else if (toolCall.function.name === 'screenshot_preview') {
-            // ── DESIGN: capture HTML file as PNG via offscreen browser ──
+          } else if (toolCall.function.name === 'save_html_preview' || toolCall.function.name === 'screenshot_preview') {
+            // ── DESIGN: render HTML file to a PNG and save it for the USER to inspect.
+            // The model has no vision capability — this is a deliverable artifact, not
+            // a self-verification step. (Old name 'screenshot_preview' kept as alias.)
             const orbit = (window as any).orbit;
             const cmdCwd = projectPathRef.current || projectPath;
             const path: string = args.path ?? '';
@@ -2906,10 +2907,9 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             if (!path || !safePath(path)) {
               result = 'Invalid path — must be a relative project path with no ".." or shell metacharacters.';
             } else if (!orbit?.captureHTMLFile || !cmdCwd) {
-              result = 'Screenshot preview only available in the desktop app with a project open.';
+              result = 'save_html_preview only available in the desktop app with a project open.';
             } else {
               const fullPath = path.startsWith('/') ? path : `${cmdCwd}/${path}`;
-              // Save the screenshot next to the HTML file (or in .bleumr-preview/)
               const baseName = path.split('/').pop()?.replace(/\.html?$/, '') ?? 'preview';
               const previewDir = `${cmdCwd}/.bleumr-preview`;
               const savePath = `${previewDir}/${baseName}-${viewport}.png`;
@@ -2917,7 +2917,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               removeThinking();
               addMessage({
                 role: 'activity', content: '', activity: 'thinking',
-                files: [{ path, content: `Rendering ${path} at ${viewport}...`, action: 'read' }],
+                files: [{ path, content: `Rendering ${path} at ${viewport} for preview...`, action: 'read' }],
               });
 
               try {
@@ -2925,19 +2925,34 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                 const capRes = await orbit.captureHTMLFile(fullPath, viewport, savePath);
                 if (capRes?.success) {
                   const dims = viewport === 'mobile' ? '390x844' : viewport === 'tablet' ? '820x1180' : '1440x900';
-                  result = `Screenshot saved to .bleumr-preview/${baseName}-${viewport}.png (${dims}). The page rendered successfully — check the layout, colors, spacing, and content. If anything looks off, edit ${path} and call screenshot_preview again to verify.`;
+                  // Opportunistically add .bleumr-preview/ to .gitignore so screenshots
+                  // don't pollute the user's repo. Best-effort, never blocks the result.
+                  try {
+                    const gitignorePath = `${cmdCwd}/.gitignore`;
+                    const existing = orbit.readFile ? await orbit.readFile(gitignorePath).catch(() => null) : null;
+                    const existingContent: string = (existing && typeof existing === 'object' && 'content' in existing)
+                      ? (existing as any).content || ''
+                      : (typeof existing === 'string' ? existing : '');
+                    if (!existingContent.split('\n').some(l => l.trim() === '.bleumr-preview/' || l.trim() === '.bleumr-preview')) {
+                      const next = existingContent
+                        ? existingContent.replace(/\n*$/, '\n') + '.bleumr-preview/\n'
+                        : '.bleumr-preview/\n';
+                      if (orbit.writeFile) await orbit.writeFile(gitignorePath, next);
+                    }
+                  } catch { /* gitignore is best-effort */ }
+                  result = `Saved preview PNG to .bleumr-preview/${baseName}-${viewport}.png (${dims}). NOTE: you cannot see the PNG yourself — tell the user where it is and ask them to open it. Do not claim the layout looks good; only the user can verify visually.`;
                   removeThinking();
                   addMessage({
                     role: 'activity', content: '', activity: 'analyzing',
-                    files: [{ path: `.bleumr-preview/${baseName}-${viewport}.png`, content: `[PNG ${dims}]`, action: 'read' }],
+                    files: [{ path: `.bleumr-preview/${baseName}-${viewport}.png`, content: `[PNG ${dims}] — open this file to inspect the rendered page`, action: 'read' }],
                   });
                   thinkingId = msgId();
-                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Captured ${baseName}-${viewport}.png`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Saved ${baseName}-${viewport}.png`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
                 } else {
-                  result = `Screenshot failed: ${capRes?.reason || 'unknown error'}. Make sure ${path} exists and is valid HTML.`;
+                  result = `Preview render failed: ${capRes?.reason || 'unknown error'}. Make sure ${path} exists and is valid HTML, then try again.`;
                 }
               } catch (err: any) {
-                result = `Screenshot error: ${err?.message ?? 'unknown'}`;
+                result = `Preview error: ${err?.message ?? 'unknown'}`;
               }
             }
 

@@ -94,7 +94,7 @@ export const ALL_TOOLS = [
   tagged('design', mkTool('get_font_pairing', 'Get a curated Google Fonts pairing (heading + body) tuned to a style. Returns the Google Fonts <link> URL plus ready-to-paste CSS. Styles: modern, classic, playful, tech, editorial, luxury.', { style: 'Font pairing style: modern | classic | playful | tech | editorial | luxury' }, ['style'])),
   tagged('design', mkTool('add_icon_library', 'Install a professional icon library and return import + usage examples. Libraries: lucide (default, 1000+ icons, the shadcn standard), heroicons, phosphor, tabler.', { library: 'Icon library: lucide | heroicons | phosphor | tabler' }, ['library'])),
   tagged('design', mkTool('apply_design_system', 'Install and configure a real production-ready React component library. Systems: shadcn (recommended for modern apps), mantine, chakra, mui, radix-tailwind. Runs the install/setup commands and returns example imports.', { system: 'Design system: shadcn | mantine | chakra | mui | radix-tailwind' }, ['system'])),
-  tagged('design', mkTool('screenshot_preview', 'Render an HTML file in an offscreen browser and capture it as a PNG so you can SEE what you built. Use after writing or modifying any HTML page to verify the layout actually looks right. Returns base64 PNG plus saves to disk.', { path: 'Path to the HTML file inside the project', viewport: 'Viewport: mobile (390x844) | tablet (820x1180) | desktop (1440x900) — default desktop' }, ['path'])),
+  tagged('design', mkTool('save_html_preview', 'Render an HTML file in an offscreen browser and SAVE the result as a PNG into .bleumr-preview/ for the USER to inspect. IMPORTANT: you (the model) cannot see the PNG — there is no vision model in this loop. The PNG is a deliverable artifact for the human, not a self-verification step. Returns the saved path and the rendered viewport size; if rendering failed, returns the error so you can fix the HTML.', { path: 'Path to the HTML file inside the project', viewport: 'Viewport: mobile (390x844) | tablet (820x1180) | desktop (1440x900) — default desktop' }, ['path'])),
 
   tagged('core', mkTool('rollback_file', 'Undo the last change to a file. Restores it to the version before your most recent write. Use when you broke something or want to try a different approach. Can call multiple times to undo multiple changes.', { path: 'File path to roll back' }, ['path'])),
   tagged('core', mkTool('rollback_file_original', 'Nuclear rollback — restore a file to its ORIGINAL state before you touched it at all. Erases all your changes to this file. Use when you\'ve made a mess and need to start fresh.', { path: 'File path to fully restore' }, ['path'])),
@@ -192,11 +192,11 @@ export function pickTools(userMsg: string, hasProject: boolean): any[] {
 
   // Design / branding intent — surface the full design toolkit
   if (msg.match(/website|landing|hero|design|theme|brand|logo|icon|color|palette|font|typograph|ui|layout|figma|template|aesthetic|look|style|gorgeous|beautiful|professional|modern|sleek|premium|minimal|playful|cozy|luxury|elegant|polished|stunning|illustration|graphic/)) {
-    ['generate_image', 'find_stock_photo', 'get_color_palette', 'get_font_pairing', 'add_icon_library', 'apply_design_system', 'screenshot_preview', 'import_image'].forEach(t => selected.add(t));
+    ['generate_image', 'find_stock_photo', 'get_color_palette', 'get_font_pairing', 'add_icon_library', 'apply_design_system', 'save_html_preview', 'import_image'].forEach(t => selected.add(t));
   }
-  // HTML preview verification
-  if (msg.match(/html|preview|screenshot|render|see.*look|how.*look|verify|check.*look|visual/))
-    selected.add('screenshot_preview');
+  // HTML preview snapshot for the user to inspect
+  if (msg.match(/html|preview|screenshot|render|see.*look|how.*look|visual/))
+    selected.add('save_html_preview');
 
   if (selected.size < 10)
     ['create_directory', 'search_in_files', 'find_files', 'file_exists', 'replace_in_file', 'get_project_tree', 'file_info', 'stop_process'].forEach(t => selected.add(t));

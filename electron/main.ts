@@ -7,13 +7,14 @@ import {
   WebContentsView,
   shell,
 } from 'electron'
-import { join } from 'path'
+import { join, resolve as pathResolve, sep as pathSep } from 'path'
 import {
   readFileSync,
   writeFileSync,
   mkdirSync,
   existsSync,
   readdirSync,
+  realpathSync,
 } from 'fs'
 import { autoUpdater } from 'electron-updater'
 
@@ -600,6 +601,21 @@ ipcMain.handle('orbit:system:info', () => ({
   node: process.versions.node,
 }))
 
+/**
+ * Strict hostname allowlist check.
+ * Plain `endsWith('pollinations.ai')` is unsafe — `evilpollinations.ai` passes
+ * because the suffix matches without a dot boundary. This requires either an
+ * exact match OR a proper subdomain (`x.pollinations.ai`).
+ */
+function isHostAllowed(hostname: string, allowedHosts: string[]): boolean {
+  if (typeof hostname !== 'string' || !hostname) return false
+  const lower = hostname.toLowerCase()
+  return allowedHosts.some(h => {
+    const hl = h.toLowerCase()
+    return lower === hl || lower.endsWith('.' + hl)
+  })
+}
+
 // Filesystem — path-restricted to safe user directories only
 const BLOCKED_PATH_PATTERNS = [
   /\/\.ssh\//i, /\\\.ssh\\/i,
@@ -614,18 +630,78 @@ const BLOCKED_PATH_PATTERNS = [
   /id_rsa/i, /id_ed25519/i, /id_ecdsa/i,
 ]
 
+/**
+ * Decide whether a renderer-supplied filesystem path is allowed.
+ *
+ * Hardening applied:
+ *  1. Absolute-resolves the path (handles ".." segments and relative roots).
+ *  2. Resolves any symlinks via realpathSync — both for the target file and
+ *     for each parent that already exists. This prevents "drop a symlink in
+ *     ~/Documents that points at /etc/passwd" attacks.
+ *  3. Uses a directory-boundary-aware prefix check (`x === dir || x.startsWith(dir + sep)`).
+ *     The naive `startsWith(dir)` allowed `~/Desktop_attacker/` to pass when
+ *     `~/Desktop` was on the allowlist.
+ *  4. Re-runs the BLOCKED_PATH_PATTERNS regex against the *resolved* path so
+ *     symlinks pointing at .ssh, .aws, etc. are still rejected.
+ */
 function isPathAllowed(filePath: string): boolean {
-  const allowed = [
+  if (typeof filePath !== 'string' || !filePath) return false
+
+  // Step 1: absolute-resolve any "..", relative roots, etc.
+  let abs: string
+  try {
+    abs = pathResolve(filePath)
+  } catch {
+    return false
+  }
+
+  // Step 2: walk up the path until we find something that exists, then
+  // realpath that. This handles both existing files (full realpath) and
+  // not-yet-created files (realpath of nearest existing parent + remainder).
+  let resolved = abs
+  try {
+    if (existsSync(abs)) {
+      resolved = realpathSync(abs)
+    } else {
+      // Find the nearest existing ancestor and realpath it
+      let cursor = abs
+      const trailing: string[] = []
+      while (cursor && cursor !== pathResolve(cursor, '..')) {
+        if (existsSync(cursor)) {
+          const realCursor = realpathSync(cursor)
+          resolved = trailing.length > 0 ? join(realCursor, ...trailing.reverse()) : realCursor
+          break
+        }
+        const parent = pathResolve(cursor, '..')
+        const tail = cursor.slice(parent.length).replace(/^[/\\]+/, '')
+        if (tail) trailing.push(tail)
+        if (parent === cursor) break
+        cursor = parent
+      }
+    }
+  } catch {
+    // realpath failed — fall back to the absolute path; we'll still check the allowlist
+    resolved = abs
+  }
+
+  // Step 3: directory-boundary-aware allowlist check
+  const allowedDirs = [
     app.getPath('userData'),
     app.getPath('documents'),
     app.getPath('desktop'),
     app.getPath('downloads'),
     app.getPath('home'),
-  ]
-  const norm = filePath.replace(/\\/g, '/')
-  const inAllowed = allowed.some(dir => norm.startsWith(dir.replace(/\\/g, '/')))
+  ].map(d => {
+    try { return realpathSync(d) } catch { return d }
+  })
+
+  const inAllowed = allowedDirs.some(dir => {
+    return resolved === dir || resolved.startsWith(dir + pathSep)
+  })
   if (!inAllowed) return false
-  return !BLOCKED_PATH_PATTERNS.some(p => p.test(filePath))
+
+  // Step 4: re-check blocked patterns against the *resolved* path
+  return !BLOCKED_PATH_PATTERNS.some(p => p.test(resolved))
 }
 
 ipcMain.handle('orbit:fs:readFile', (_e, filePath: string) => {
@@ -773,7 +849,7 @@ ipcMain.handle(
   'orbit:proxyFetch',
   async (_e, url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => {
     try {
-      // Security: only allow HTTPS URLs and a limited set of domains
+      // Security: only allow HTTPS URLs and a strict allowlist of domains
       const parsed = new URL(url)
       const allowedHosts = [
         'html.duckduckgo.com',
@@ -783,7 +859,7 @@ ipcMain.handle(
         'api.pollinations.ai',
         'image.pollinations.ai',
       ]
-      if (parsed.protocol !== 'https:' || !allowedHosts.some(h => parsed.hostname.endsWith(h))) {
+      if (parsed.protocol !== 'https:' || !isHostAllowed(parsed.hostname, allowedHosts)) {
         return { ok: false, status: 403, text: 'Domain not allowed for proxy fetch' }
       }
 
@@ -805,7 +881,87 @@ ipcMain.handle(
   },
 )
 
+// ── Image fetch limits ──────────────────────────────────────────────────────
+// 25 MB hard cap on any image we pull through the main process. Big enough for
+// realistic logos / heros, small enough that a malicious or runaway response
+// can't OOM the main process. Enforced via Content-Length AND streamed bytes.
+const IMAGE_FETCH_MAX_BYTES = 25 * 1024 * 1024
+const IMAGE_FETCH_TIMEOUT_MS = 60_000
+
+/**
+ * Fetch an image with hard size + time limits. Streams the response so a
+ * gigantic file is aborted as soon as it crosses the cap, instead of being
+ * fully buffered into memory.
+ */
+async function fetchImageBounded(
+  imageUrl: string,
+  maxBytes = IMAGE_FETCH_MAX_BYTES,
+): Promise<{ ok: true; bytes: Buffer; contentType: string } | { ok: false; error: string }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: controller.signal,
+    })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+
+    // Reject up-front if Content-Length is already over the cap
+    const declaredLen = parseInt(res.headers.get('content-length') || '', 10)
+    if (Number.isFinite(declaredLen) && declaredLen > maxBytes) {
+      return { ok: false, error: `Image too large: ${declaredLen} bytes (cap ${maxBytes})` }
+    }
+
+    // Stream and abort if we exceed the cap mid-flight
+    if (!res.body) return { ok: false, error: 'Empty response body' }
+    const chunks: Buffer[] = []
+    let total = 0
+    const reader = (res.body as any).getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = Buffer.from(value)
+      total += chunk.length
+      if (total > maxBytes) {
+        try { reader.cancel() } catch { /* ignore */ }
+        return { ok: false, error: `Image exceeded ${maxBytes} bytes mid-stream` }
+      }
+      chunks.push(chunk)
+    }
+    const contentType = res.headers.get('content-type') || 'image/jpeg'
+    return { ok: true, bytes: Buffer.concat(chunks), contentType }
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return { ok: false, error: `Image fetch timeout after ${IMAGE_FETCH_TIMEOUT_MS}ms` }
+    }
+    return { ok: false, error: err?.message || 'Image fetch failed' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 // ── Fetch image as base64 (avoids Cloudflare bot-detection in renderer) ─────
+// Strict allowlist: only fetch images from hosts the user already trusts.
+// Without an allowlist, a compromised renderer could exfiltrate data via DNS
+// or hit internal services on the user's network.
+const FETCH_IMAGE_ALLOWED_HOSTS = [
+  'image.pollinations.ai',
+  'pollinations.ai',
+  'picsum.photos',
+  'images.unsplash.com',
+  'images.pexels.com',
+  'cdn.jsdelivr.net',
+  'raw.githubusercontent.com',
+  'avatars.githubusercontent.com',
+  'lh3.googleusercontent.com',
+  'duckduckgo.com',
+  'icons.duckduckgo.com',
+  'www.google.com',
+  'gstatic.com',
+]
+
 ipcMain.handle(
   'orbit:fetchImage',
   async (_e, imageUrl: string) => {
@@ -814,16 +970,16 @@ ipcMain.handle(
       if (parsed.protocol !== 'https:') {
         return { ok: false, error: 'Only HTTPS allowed' }
       }
-      const res = await fetch(imageUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      })
-      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-      const buffer = await res.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString('base64')
-      const contentType = res.headers.get('content-type') || 'image/jpeg'
-      return { ok: true, base64, contentType }
+      if (!isHostAllowed(parsed.hostname, FETCH_IMAGE_ALLOWED_HOSTS)) {
+        return { ok: false, error: `Host not allowed: ${parsed.hostname}` }
+      }
+      const result = await fetchImageBounded(imageUrl)
+      if (!result.ok) return result
+      return {
+        ok: true,
+        base64: result.bytes.toString('base64'),
+        contentType: result.contentType,
+      }
     } catch (err: any) {
       return { ok: false, error: err.message || 'Image fetch failed' }
     }
@@ -850,26 +1006,26 @@ ipcMain.handle(
         'images.unsplash.com',
         'images.pexels.com',
       ]
-      if (!allowedHosts.some(h => parsed.hostname.endsWith(h))) {
+      if (!isHostAllowed(parsed.hostname, allowedHosts)) {
         return { success: false, reason: `Domain not allowed: ${parsed.hostname}` }
       }
       if (!isPathAllowed(savePath)) {
         return { success: false, reason: 'Save path not permitted' }
       }
-      const res = await fetch(imageUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      })
-      if (!res.ok) return { success: false, reason: `HTTP ${res.status}` }
-      const buffer = Buffer.from(await res.arrayBuffer())
-      // Make sure the parent directory exists
+      // Bounded streamed fetch with hard size + time caps (prevents OOM)
+      const fetchResult = await fetchImageBounded(imageUrl)
+      if (!fetchResult.ok) return { success: false, reason: fetchResult.error }
+      // Make sure the parent directory exists, then write
       try {
         const parent = savePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
         if (parent) mkdirSync(parent, { recursive: true })
       } catch { /* ignore — write will surface the error */ }
-      writeFileSync(savePath, buffer)
-      return { success: true, path: savePath, bytes: buffer.length }
+      try {
+        writeFileSync(savePath, fetchResult.bytes)
+      } catch (writeErr: any) {
+        return { success: false, reason: `Write failed: ${writeErr?.message || 'unknown'}` }
+      }
+      return { success: true, path: savePath, bytes: fetchResult.bytes.length }
     } catch (err: any) {
       return { success: false, reason: err?.message || 'Download failed' }
     }
@@ -877,9 +1033,9 @@ ipcMain.handle(
 )
 
 // ── Render an HTML file in an offscreen window and return a screenshot ─────
-// Used by Code Bleu's screenshot_preview tool so the agent can verify what
-// the page actually looks like after writing HTML/CSS. Saves the resulting
-// PNG into the project at savePath if provided.
+// Used by Code Bleu's save_html_preview tool. The agent has no vision model,
+// so the captured PNG is a deliverable artifact for the USER to inspect, not
+// a self-verification step for the agent. Saves the PNG to savePath if given.
 ipcMain.handle(
   'orbit:fs:captureHTMLFile',
   async (_e, htmlPath: string, viewport?: 'mobile' | 'tablet' | 'desktop', savePath?: string) => {
