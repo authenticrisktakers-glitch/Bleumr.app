@@ -98,28 +98,58 @@ function findLruInactiveTab(): string | null {
   return oldestId
 }
 
-/** Close a tab from the main process side, notifying the renderer it was evicted. */
-function evictTab(id: string, reason: string) {
+/**
+ * Close a tab from the main process side, notifying the renderer it was
+ * evicted. Returns a Promise that resolves once the underlying WebContents
+ * has actually been destroyed — this matters for LRU eviction so we don't
+ * temporarily exceed MAX_OPEN_TABS by creating a replacement before the old
+ * renderer process has released its resources.
+ */
+function evictTab(id: string, reason: string): Promise<void> {
   const rec = tabs.get(id)
-  if (!rec) return
+  if (!rec) return Promise.resolve()
   if (mainWindow && mainWindow.contentView.children.includes(rec.view)) {
     mainWindow.contentView.removeChildView(rec.view)
   }
-  try { rec.view.webContents.close() } catch { /* ignore */ }
+  // Tell the renderer the tab is gone immediately — UI shouldn't wait on
+  // the slower webContents tear-down.
   tabs.delete(id)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('orbit:browser:tabEvicted', { tabId: id, reason })
   }
+
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    try {
+      const wc = rec.view.webContents
+      if (wc.isDestroyed()) { finish(); return }
+      // Resolve on actual destruction so the caller knows the renderer
+      // process slot has been released.
+      wc.once('destroyed', finish)
+      try { wc.close() } catch { /* ignore */ }
+      // Hard fallback: if the destroyed event never fires (Chromium quirk),
+      // resolve after 2s so we don't wedge createTab forever.
+      setTimeout(finish, 2000)
+    } catch {
+      finish()
+    }
+  })
 }
 
-function createTab(url: string): string {
+async function createTab(url: string): Promise<string> {
   // LRU eviction: if we're at the cap, close the oldest inactive tab BEFORE
-  // spinning up another renderer process.
+  // spinning up another renderer process. Wait for the eviction to actually
+  // release its resources so we never momentarily exceed MAX_OPEN_TABS.
   if (tabs.size >= MAX_OPEN_TABS) {
     const lruId = findLruInactiveTab()
     if (lruId) {
       console.log(`[Tabs] At cap (${MAX_OPEN_TABS}), evicting LRU tab ${lruId}`)
-      evictTab(lruId, 'lru_cap')
+      await evictTab(lruId, 'lru_cap')
     }
   }
 
@@ -204,7 +234,9 @@ function createTab(url: string): string {
   // Open new windows / popups as new Bleumr tabs — never leak to system browser
   view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
     if (openUrl && openUrl !== 'about:blank') {
-      createTab(openUrl)
+      // createTab is async (LRU eviction wait), but setWindowOpenHandler is
+      // sync. Fire and forget — the new tab will pop in once eviction settles.
+      void createTab(openUrl)
     }
     return { action: 'deny' }
   })
@@ -339,8 +371,8 @@ app.whenReady().then(() => {
   // Any http/https URL is routed into a new Bleumr browser tab instead.
   mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }) => {
     if (openUrl && (openUrl.startsWith('http://') || openUrl.startsWith('https://'))) {
-      // Route to a Bleumr tab — same behaviour as WebContentsView tabs
-      createTab(openUrl)
+      // Route to a Bleumr tab — fire-and-forget because the open handler is sync.
+      void createTab(openUrl)
     }
     return { action: 'deny' }
   })
@@ -414,45 +446,64 @@ ipcMain.handle('orbit:storage:set', (_e, key: string, value: unknown) => {
 
 ipcMain.handle('orbit:storage:getSecure', (_e, key: string) => {
   const raw = store[`__secure_${key}`]
-  if (!raw || !safeStorage.isEncryptionAvailable()) {
-    return { success: false }
+  if (!raw) {
+    return { success: false, reason: 'not_found', message: `No encrypted value for "${key}"` }
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    return {
+      success: false,
+      reason: 'encryption_unavailable',
+      message: 'OS-level encryption (Keychain / DPAPI / libsecret) is not available on this system',
+    }
   }
   try {
     const decrypted = safeStorage.decryptString(
       Buffer.from(raw as string, 'base64'),
     )
     return { success: true, value: decrypted }
-  } catch {
-    return { success: false }
+  } catch (err: any) {
+    return {
+      success: false,
+      reason: 'decrypt_failed',
+      message: err?.message || 'Decryption failed (key was likely encrypted by a different OS user or after an OS keychain reset)',
+    }
   }
 })
 
 ipcMain.handle('orbit:storage:setSecure', (_e, key: string, value: string) => {
   if (!safeStorage.isEncryptionAvailable()) {
-    return { success: false, reason: 'Encryption unavailable on this system' }
+    return {
+      success: false,
+      reason: 'encryption_unavailable',
+      message: 'OS-level encryption (Keychain / DPAPI / libsecret) is not available on this system',
+    }
   }
   try {
     const encrypted = safeStorage.encryptString(value)
     store[`__secure_${key}`] = Buffer.from(encrypted).toString('base64')
     saveStore()
     return { success: true }
-  } catch {
-    return { success: false }
+  } catch (err: any) {
+    return {
+      success: false,
+      reason: 'encrypt_failed',
+      message: err?.message || 'Encryption failed',
+    }
   }
 })
 
 // Browser tabs
-ipcMain.handle('orbit:browser:open', (_e, url: string) => {
-  const tabId = createTab(url)
+ipcMain.handle('orbit:browser:open', async (_e, url: string) => {
+  const tabId = await createTab(url)
   return { success: true, tabId }
 })
 
 // Load raw HTML into a new tab — bypasses renderer URL sanitizer safely
-ipcMain.handle('orbit:browser:loadHTML', (_e, html: string) => {
+ipcMain.handle('orbit:browser:loadHTML', async (_e, html: string) => {
   // Use loadURL with data: URI directly in the main process — this is safe
   // because the HTML content is generated by our own AI, not from external input
   const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
-  const tabId = createTab(dataUrl)
+  const tabId = await createTab(dataUrl)
   return { success: true, tabId }
 })
 
@@ -540,12 +591,45 @@ ipcMain.handle('orbit:browser:goForward', (_e, tabId: string) => {
 
 ipcMain.handle('orbit:browser:getState', () => getAllTabsState())
 
+// Hard cap on serialized executeJS results. Renderer asks for things like
+// `document.body.innerText` which can easily be tens of MB on a big page,
+// and shoving that through IPC will OOM or hang the channel. Cap, mark as
+// truncated, and return a safe summary for non-string results.
+const EXECUTE_JS_RESULT_CAP = 256 * 1024 // 256 KB serialized
+
+function serializeExecuteJSResult(value: unknown): { serialized: string; truncated: boolean; type: string } {
+  const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+  let str: string
+  if (typeof value === 'string') {
+    str = value
+  } else {
+    try {
+      str = JSON.stringify(value)
+    } catch {
+      str = String(value)
+    }
+  }
+  if (str.length > EXECUTE_JS_RESULT_CAP) {
+    return {
+      serialized: str.slice(0, EXECUTE_JS_RESULT_CAP) + `\n\n[executeJS result truncated — original was ${str.length} chars, kept first ${EXECUTE_JS_RESULT_CAP}]`,
+      truncated: true,
+      type,
+    }
+  }
+  return { serialized: str, truncated: false, type }
+}
+
 ipcMain.handle('orbit:browser:executeJS', async (_e, tabId: string, code: string) => {
   const rec = tabs.get(tabId)
   if (!rec) return { success: false, reason: 'Tab not found' }
   try {
-    const result = await rec.view.webContents.executeJavaScript(code, true)
-    return { success: true, result }
+    const raw = await rec.view.webContents.executeJavaScript(code, true)
+    const { serialized, truncated, type } = serializeExecuteJSResult(raw)
+    // Return BOTH the serialized string (always safe to ship over IPC) and
+    // the original `result` for backwards compat — but only if the raw value
+    // is small enough that returning it won't blow the channel.
+    const safeRaw = truncated ? undefined : raw
+    return { success: true, result: safeRaw, serialized, truncated, type }
   } catch (err: any) {
     return { success: false, error: String(err?.message ?? err) }
   }
@@ -811,6 +895,20 @@ ipcMain.handle('orbit:dialog:showOpenDialog', async (_e, options: Record<string,
 })
 
 // ── Shell command execution (for Code Bleu agent) ──────────────────────────
+const SHELL_STDOUT_CAP = 50_000
+const SHELL_STDERR_CAP = 10_000
+
+/**
+ * Slice a stream output to a cap and, if truncated, append a marker so the
+ * agent (and the user) can tell the output was clipped instead of guessing
+ * that the command ran cleanly to completion.
+ */
+function clipWithMarker(raw: string, cap: number): string {
+  if (raw.length <= cap) return raw
+  const kept = raw.slice(0, cap)
+  return `${kept}\n\n[output truncated — original was ${raw.length} bytes, kept first ${cap}]`
+}
+
 ipcMain.handle('orbit:shell:exec', async (_e, command: string, cwd?: string) => {
   // Safety: only allow execution within an opened project directory
   if (cwd && !isPathAllowed(cwd)) {
@@ -828,10 +926,12 @@ ipcMain.handle('orbit:shell:exec', async (_e, command: string, cwd?: string) => 
     }
 
     exec(command, opts, (error: any, stdout: string, stderr: string) => {
+      const rawOut = stdout?.toString() ?? ''
+      const rawErr = stderr?.toString() ?? ''
       resolve({
         success: !error,
-        stdout: stdout?.toString()?.slice(0, 50000) ?? '',
-        stderr: stderr?.toString()?.slice(0, 10000) ?? '',
+        stdout: clipWithMarker(rawOut, SHELL_STDOUT_CAP),
+        stderr: clipWithMarker(rawErr, SHELL_STDERR_CAP),
         code: error?.code ?? 0,
       })
     })
@@ -845,6 +945,22 @@ ipcMain.handle('bleumr:update:install', () => {
 
 // ── CORS-free proxy fetch — routes HTTP requests through main process ──────
 // Renderer can't fetch DuckDuckGo (CORS blocked), so we proxy through Node.
+const PROXY_FETCH_ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+// Headers a renderer is allowed to set on proxied requests. Anything else is
+// filtered so a compromised renderer can't smuggle in Cookie / Set-Cookie /
+// Origin / arbitrary auth headers under the guise of a "legit" allowed host.
+const PROXY_FETCH_ALLOWED_HEADERS = new Set([
+  'accept',
+  'accept-language',
+  'authorization',
+  'cache-control',
+  'content-type',
+  'user-agent',
+  'x-api-key',
+  'x-goog-api-key',
+])
+const PROXY_FETCH_MAX_BODY_BYTES = 5 * 1024 * 1024 // 5 MB request body cap
+
 ipcMain.handle(
   'orbit:proxyFetch',
   async (_e, url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => {
@@ -863,15 +979,35 @@ ipcMain.handle(
         return { ok: false, status: 403, text: 'Domain not allowed for proxy fetch' }
       }
 
-      // Merge caller headers with a sensible default User-Agent (DDG blocks bot-like UAs)
-      const mergedHeaders: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        ...(options?.headers || {}),
+      const method = (options?.method || 'GET').toUpperCase()
+      if (!PROXY_FETCH_ALLOWED_METHODS.has(method)) {
+        return { ok: false, status: 405, text: `Method not allowed: ${method}` }
       }
+
+      // Filter caller headers through an allowlist. Drops Cookie, Origin,
+      // Referer, and anything else that could be used to smuggle credentials
+      // or impersonate a different origin.
+      const filteredHeaders: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      }
+      for (const [name, val] of Object.entries(options?.headers || {})) {
+        if (typeof val !== 'string') continue
+        if (PROXY_FETCH_ALLOWED_HEADERS.has(name.toLowerCase())) {
+          filteredHeaders[name] = val
+        }
+      }
+
+      // Cap request body size so a runaway renderer can't push gigabytes
+      // through the main process.
+      const body = options?.body
+      if (typeof body === 'string' && Buffer.byteLength(body, 'utf8') > PROXY_FETCH_MAX_BODY_BYTES) {
+        return { ok: false, status: 413, text: `Request body too large (cap ${PROXY_FETCH_MAX_BODY_BYTES} bytes)` }
+      }
+
       const res = await fetch(url, {
-        method: options?.method || 'GET',
-        headers: mergedHeaders,
-        body: options?.body,
+        method,
+        headers: filteredHeaders,
+        body,
       })
       const text = await res.text()
       return { ok: res.ok, status: res.status, text }

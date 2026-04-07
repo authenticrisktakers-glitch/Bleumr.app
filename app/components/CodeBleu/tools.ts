@@ -66,8 +66,8 @@ export const ALL_TOOLS = [
   tagged('build', mkTool('run_build', 'Build the project for production.', { command: 'Custom build command (default: npm run build)' }, [])),
   tagged('build', mkTool('run_lint', 'Run the linter on the project.', { command: 'Custom lint command' }, [])),
   tagged('build', mkTool('run_format', 'Format code with prettier or similar.', { command: 'Custom format command' }, [])),
-  tagged('build', mkTool('start_dev_server', 'Start the development server.', { command: 'Custom dev command (default: npm run dev)' }, [])),
-  tagged('build', mkTool('stop_process', 'Kill a running process by name or PID.', { target: 'Process name or PID' }, ['target'])),
+  tagged('build', mkTool('start_dev_server', 'Start the dev server in the background, capture its PID into .bleumr-dev-server.pid, and pipe its output to .bleumr-dev.log. Use stop_process (with no target, or target="dev") to stop it later — that is much safer than pkill.', { command: 'Custom dev command (default: npm run dev)' }, [])),
+  tagged('build', mkTool('stop_process', 'Kill a running process. With no target — or target="dev" / "dev_server" — kills the most recent dev server tracked by start_dev_server (.bleumr-dev-server.pid). With a numeric PID, kills exactly that PID. With a name, falls back to pkill (use as a last resort: it can match unrelated Node processes).', { target: 'PID number, "dev" for the tracked dev server, or process name (optional)' }, [])),
   tagged('build', mkTool('check_port', 'Check if a port is in use and what process is using it.', { port: 'Port number' }, ['port'])),
   tagged('web', mkTool('web_search', 'Search the web for documentation, solutions, package info, or any current information.', { query: 'Search query' }, ['query'])),
   tagged('web', mkTool('fetch_url', 'Fetch the content of a URL (HTML, JSON, text).', { url: 'URL to fetch', format: 'Expected format: html, json, or text (default text)' }, ['url'])),
@@ -122,8 +122,24 @@ export const SHELL_CMD: Record<string, (a: any) => string> = {
   run_build: (a) => a.command || 'npm run build 2>&1',
   run_lint: (a) => a.command || 'npx eslint . 2>&1 || echo "No linter configured"',
   run_format: (a) => a.command || 'npx prettier --write . 2>&1 || echo "No formatter configured"',
-  start_dev_server: (a) => a.command || 'npm run dev &',
-  stop_process: (a) => /^\d+$/.test(a.target) ? `kill ${a.target}` : `pkill -f '${shellSafe(a.target)}' || echo "Process not found"`,
+  start_dev_server: (a) => {
+    // Background the command, redirect output to a log file, and CAPTURE the PID into a
+    // tracking file so stop_process can kill it cleanly. Without this, the PID is lost
+    // and the only way to stop it is the dangerous `pkill -f node` shotgun.
+    const cmd = a.command || 'npm run dev';
+    return `{ ${cmd} > .bleumr-dev.log 2>&1 & echo $! > .bleumr-dev-server.pid; } && sleep 0.4 && echo "Dev server started — pid $(cat .bleumr-dev-server.pid 2>/dev/null), logs in .bleumr-dev.log. Stop with stop_process (no target)."`;
+  },
+  stop_process: (a) => {
+    const target = (a.target || '').trim();
+    // No target / "dev" / "dev_server" → use the tracked PID file (safe path).
+    if (!target || /^dev(_server)?$/i.test(target)) {
+      return `if [ -f .bleumr-dev-server.pid ]; then PID=$(cat .bleumr-dev-server.pid); if kill "$PID" 2>/dev/null; then rm -f .bleumr-dev-server.pid && echo "Stopped tracked dev server (pid $PID)"; else echo "Tracked PID $PID is not running — clearing the file." && rm -f .bleumr-dev-server.pid; fi; else echo "No tracked dev server (.bleumr-dev-server.pid not found)."; fi`;
+    }
+    // Numeric PID → kill exactly that.
+    if (/^\d+$/.test(target)) return `kill ${target}`;
+    // Name → fall back to pkill (fragile, can match unrelated processes — last resort).
+    return `pkill -f '${shellSafe(target)}' || echo "Process not found"`;
+  },
   check_port: (a) => { const p = parseInt(a.port, 10); return (p > 0 && p < 65536) ? `lsof -i :${p} 2>/dev/null || echo "Port ${p} is free"` : 'echo "Invalid port"'; },
   delete_file: (a) => `rm -f "${shellSafe(a.path)}"`,
   rename_file: (a) => `mv "${shellSafe(a.old_path)}" "${shellSafe(a.new_path)}"`,

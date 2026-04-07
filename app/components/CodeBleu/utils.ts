@@ -24,6 +24,26 @@ export function safePath(name: string): string | null {
   return name;
 }
 
+/**
+ * Validate a glob/grep pattern that will be embedded inside SINGLE quotes
+ * in a shell command. Strips/rejects the single quote (which would close
+ * the literal), all common shell metacharacters, control chars, and caps
+ * the length. Returns null if the pattern is unusable.
+ *
+ * Used by search_in_files and find_files where shellSafe is insufficient
+ * because shellSafe only protects double-quoted contexts.
+ */
+export function shellSafePattern(pattern: unknown, maxLen = 120): string | null {
+  if (typeof pattern !== 'string') return null;
+  const trimmed = pattern.trim();
+  if (!trimmed || trimmed.length > maxLen) return null;
+  // Reject anything containing single quotes, shell metacharacters, or control chars.
+  // Allow: alnum, _, -, ., /, *, ?, [, ], {, }, comma, +, =, @, #, %, ~, ^, !, :, space.
+  // (~ is not a path expander when inside single quotes — safe to allow.)
+  if (/['`$;&|<>\n\r\t\\(\)\x00]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 /** Fetch with timeout — prevents hanging on unresponsive endpoints */
 export function fetchWithTimeout(url: string, options: RequestInit = {}, ms = 15000): Promise<Response> {
   const controller = new AbortController();

@@ -28,7 +28,7 @@ import type { BleumrConfigResult, Hook, Skill, PermissionRuleSet, CheckpointMeta
 import type { CodingSession, AgentMessage } from './CodeBleu/types';
 import { IMPORTANT_FILES, SOURCE_DIRS, IGNORE_DIRS, GROQ_MODELS } from './CodeBleu/constants';
 import {
-  getLang, msgId, shellSafe, safePath, fetchWithTimeout,
+  getLang, msgId, shellSafe, safePath, shellSafePattern, fetchWithTimeout,
   extractSuggestions, pickModel, highlightCode, safeClipboardCopy,
 } from './CodeBleu/utils';
 import { ALL_TOOLS, TOOL_CAT, SHELL_CMD, pickTools } from './CodeBleu/tools';
@@ -95,6 +95,31 @@ function CodeBleuLogo({ size = 28 }: { size?: number }) {
 
 // IS_ELECTRON_ENV kept local — used by component
 const IS_ELECTRON_ENV = typeof window !== 'undefined' && !!(window as any).orbit;
+
+/**
+ * Append entries to .gitignore if they aren't already present. Best-effort,
+ * never throws — used by tools that drop tracking artifacts (.bleumr-preview/,
+ * .bleumr-dev.log, .bleumr-dev-server.pid) into the project root.
+ */
+async function ensureGitignoreEntries(cwd: string | null | undefined, entries: string[]): Promise<void> {
+  if (!cwd || !entries || entries.length === 0) return;
+  const orbit = (window as any).orbit;
+  if (!orbit?.readFile || !orbit?.writeFile) return;
+  try {
+    const gitignorePath = `${cwd}/.gitignore`;
+    const existing = await orbit.readFile(gitignorePath).catch(() => null);
+    const existingContent: string = (existing && typeof existing === 'object' && 'content' in existing)
+      ? (existing as any).content || ''
+      : (typeof existing === 'string' ? existing : '');
+    const present = new Set(existingContent.split('\n').map(l => l.trim()).filter(Boolean));
+    const missing = entries.filter(e => !present.has(e) && !present.has(e.replace(/\/$/, '')));
+    if (missing.length === 0) return;
+    const next = existingContent
+      ? existingContent.replace(/\n*$/, '\n') + missing.join('\n') + '\n'
+      : missing.join('\n') + '\n';
+    await orbit.writeFile(gitignorePath, next);
+  } catch { /* gitignore is best-effort */ }
+}
 
 // highlightCode, PREVIEW_CONSOLE_BRIDGE, buildPreviewFromFiles → ./CodeBleu/utils.ts + preview.ts
 
@@ -599,9 +624,21 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   // Watchdog timer that force-releases isWorking if the loop somehow gets
   // stuck without firing its finally block. Belt-and-suspenders defense
   // against the "agent never stops, I had to press Stop manually" bug.
+  // The watchdog is *activity-based*: every time something useful happens
+  // (a chunk arrives, a tool resolves, a checkpoint is taken) we bump
+  // lastActivityRef. The timer only fires after sustained INACTIVITY, so
+  // a long but actively-streaming agent never gets cut off mid-response.
   const watchdogRef = useRef<any>(null);
+  const lastActivityRef = useRef<number>(0);
+  // Watchdog tunables — kept here so they're easy to spot.
+  const WATCHDOG_INACTIVITY_MS = 5 * 60 * 1000; // 5 min of true silence triggers force-release
+  const WATCHDOG_CHECK_INTERVAL_MS = 30 * 1000; // poll every 30s
   const sessionStartedRef = useRef(false);
   const runBuiltInCommandRef = useRef<((name: string) => boolean) | null>(null);
+  // Self-reference so the finally block can re-trigger sendToAgent for any
+  // pending messages that arrived after the last in-loop drain. Set just
+  // below the sendToAgent definition.
+  const sendToAgentRef = useRef<((messageText: string) => void) | null>(null);
 
   const isElectron = typeof window !== 'undefined' && !!(window as any).orbit;
 
@@ -612,7 +649,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       mountedRef.current = false;
       abortedRef.current = true;
       if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
+        clearInterval(watchdogRef.current);
         watchdogRef.current = null;
       }
       // Best-effort session_end on unmount (e.g. user closes Code Bleu)
@@ -626,6 +663,13 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     };
   }, []);
 
+  // Bumped on every signal of forward progress (stream chunk, tool result,
+  // user-visible message). The activity-based watchdog uses this to decide
+  // whether the loop is genuinely stuck or just busy.
+  const bumpActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+
   // Stable cleanup helper used by every reset path. Closes over refs only,
   // so it never goes stale and never causes TDZ issues. Drains the queue,
   // resolves any pending approval, kills the watchdog and clears the
@@ -633,7 +677,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   const resetAgentLifecycle = useCallback((opts?: { abort?: boolean }) => {
     pendingUserMessagesRef.current = [];
     if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current);
+      clearInterval(watchdogRef.current);
       watchdogRef.current = null;
     }
     if (pendingApprovalRef.current) {
@@ -1111,20 +1155,29 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     setIsWorking(true);
     abortedRef.current = false;
 
-    // ── Watchdog: belt-and-suspenders auto-release ────────────────────────
-    // If the loop somehow gets stuck without firing its finally block (a
-    // bug we are actively trying to eliminate), this timer fires after 15
-    // minutes and force-releases isWorking so the user is never trapped.
-    // Cleared in the finally block on normal exit.
-    if (watchdogRef.current) clearTimeout(watchdogRef.current);
-    watchdogRef.current = setTimeout(() => {
-      console.warn('[CodeBleu] Watchdog fired — agent loop ran past 15min, force-releasing.');
+    // ── Activity-based watchdog ───────────────────────────────────────────
+    // The old watchdog was a 15-minute hard cap, which would happily
+    // murder a long-but-actively-streaming response. The new one polls
+    // every 30s and only fires if NOTHING has happened (no chunks, no
+    // tool results, no user messages) for WATCHDOG_INACTIVITY_MS. This
+    // means a healthy long task can run indefinitely, but a truly stuck
+    // loop still gets force-released so the user is never trapped.
+    if (watchdogRef.current) clearInterval(watchdogRef.current);
+    bumpActivity();
+    watchdogRef.current = setInterval(() => {
+      // If a stream chunk or tool call landed recently, reset the clock.
+      const idle = Date.now() - (lastActivityRef.current || 0);
+      if (idle < WATCHDOG_INACTIVITY_MS) return;
+      console.warn(`[CodeBleu] Watchdog fired — ${Math.round(idle / 1000)}s of inactivity, force-releasing.`);
+      if (watchdogRef.current) {
+        clearInterval(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       agentRunningRef.current = false;
       abortedRef.current = true;
       setIsWorking(false);
       setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
-      watchdogRef.current = null;
-    }, 15 * 60 * 1000);
+    }, WATCHDOG_CHECK_INTERVAL_MS);
 
     // Hoisted out of try{} so the finally block can persist it back to
     // prevConversationRef for the next turn. Initialised inside try once
@@ -1508,6 +1561,8 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             apiKey!,
             requestBody,
             (chunk) => {
+              // H13: any token landing is forward progress — keep the watchdog asleep.
+              bumpActivity();
               if (!streamedAnyText) {
                 // First text token — remove thinking, create streaming message
                 removeThinking();
@@ -1729,6 +1784,25 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             }
             conversationMessages.push({ role: 'user', content: nudge });
             continue;
+          }
+
+          // ── Nudge limit exhausted — surface partial state honestly ──
+          // We've nudged forceToolUse twice and the model still won't call a
+          // tool. Don't pretend everything is fine — tell the user explicitly
+          // what we tried and where we got stuck so they can rephrase or step in.
+          if (forceToolUse && toolNudgeCount >= 2) {
+            removeThinking();
+            const stuckId = msgId();
+            const filesWrittenNote = filesWrittenThisLoop > 0
+              ? ` I did write ${filesWrittenThisLoop} file${filesWrittenThisLoop === 1 ? '' : 's'} earlier this turn.`
+              : '';
+            const projectNote = createdProjectThisLoop && filesWrittenThisLoop === 0
+              ? ` The project folder was created but no files were written into it yet.`
+              : '';
+            const stuckMsg = `I'm stuck — I described what I'd do but the model isn't actually invoking the tools after two nudges.${filesWrittenNote}${projectNote} Could you try rephrasing the request, or tell me to "just do it" and I'll try again?`;
+            setMessages(prev => [...prev, { id: stuckId, role: 'assistant' as const, content: '', timestamp: Date.now() }]);
+            await typewriterAnimate(stuckMsg, stuckId);
+            break;
           }
 
           const respLower = responseText.toLowerCase();
@@ -2514,17 +2588,30 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
           } else if (toolCall.function.name === 'search_in_files') {
             // ── SEARCH IN FILES (grep) ──
             if (!args.pattern) { result = 'Error: search_in_files requires a pattern.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
+            // Pattern is embedded inside single quotes — shellSafe is insufficient
+            // (it only protects double-quoted contexts). Use shellSafePattern which
+            // also rejects single quotes and other shell metacharacters.
+            const safePattern = shellSafePattern(args.pattern);
+            if (!safePattern) {
+              result = 'Error: search_in_files pattern is empty, too long, or contains shell metacharacters (\', `, $, ;, &, |, <, >, parens, control chars).';
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue;
+            }
+            const safeFileType = args.file_type ? shellSafePattern(args.file_type, 16) : null;
+            if (args.file_type && !safeFileType) {
+              result = 'Error: search_in_files file_type contains invalid characters.';
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue;
+            }
             const orbit = (window as any).orbit;
             const cmdCwd = projectPathRef.current || projectPath;
             if (orbit?.shellExec && cmdCwd) {
-              const ext = args.file_type ? `--include='*.${shellSafe(args.file_type)}'` : '--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --include="*.py" --include="*.rs" --include="*.go"';
-              const cmd = `grep -rn '${shellSafe(args.pattern)}' . ${ext} 2>/dev/null | head -40`;
+              const ext = safeFileType ? `--include='*.${safeFileType}'` : '--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --include="*.py" --include="*.rs" --include="*.go"';
+              const cmd = `grep -rn '${safePattern}' . ${ext} 2>/dev/null | head -40`;
               const res = await orbit.shellExec(cmd, cmdCwd);
               result = res.stdout || 'No matches found.';
             } else {
               // Fallback: search in loaded project files
               try {
-                const matches = projectFiles.filter(f => f.name.match(new RegExp(args.file_type || '.*')));
+                const matches = projectFiles.filter(f => f.name.match(new RegExp(safeFileType || '.*')));
                 result = `Searched ${matches.length} file names. Use run_command with grep for content search.`;
               } catch { result = 'Invalid file type pattern.'; }
             }
@@ -2535,17 +2622,27 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
 
           } else if (toolCall.function.name === 'find_files') {
             // ── FIND FILES (glob) ──
-            updateThinking(`Finding ${args.pattern || '*'}...`);
-            const pattern = args.pattern || '*';
+            const rawPattern = args.pattern || '*';
+            // Pattern is embedded inside single quotes in `find -name '...'` —
+            // shellSafe is insufficient. Use shellSafePattern which rejects single
+            // quotes and shell metacharacters.
+            const safePattern = shellSafePattern(rawPattern);
+            if (!safePattern) {
+              result = 'Error: find_files pattern is empty, too long, or contains shell metacharacters (\', `, $, ;, &, |, <, >, parens, control chars).';
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue;
+            }
+            updateThinking(`Finding ${safePattern}...`);
             const orbit = (window as any).orbit;
             const cmdCwd = projectPathRef.current || projectPath;
             if (orbit?.shellExec && cmdCwd) {
-              const cmd = `find . -name '${shellSafe(pattern)}' -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null | head -50`;
+              const cmd = `find . -name '${safePattern}' -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null | head -50`;
               const res = await orbit.shellExec(cmd, cmdCwd);
               result = res.stdout || 'No matching files found.';
             } else {
-              const matches = projectFiles.filter(f => f.name.match(new RegExp(pattern.replace(/\*/g, '.*'))));
-              result = matches.map(f => f.path).join('\n') || 'No matches.';
+              try {
+                const matches = projectFiles.filter(f => f.name.match(new RegExp(safePattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'))));
+                result = matches.map(f => f.path).join('\n') || 'No matches.';
+              } catch { result = 'Invalid pattern.'; }
             }
             removeThinking();
             addMessage({ role: 'activity', content: '', activity: 'analyzing', files: [{ path: `Find: ${pattern}`, content: result.slice(0, 2000), action: 'read' }] });
@@ -2927,19 +3024,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                   const dims = viewport === 'mobile' ? '390x844' : viewport === 'tablet' ? '820x1180' : '1440x900';
                   // Opportunistically add .bleumr-preview/ to .gitignore so screenshots
                   // don't pollute the user's repo. Best-effort, never blocks the result.
-                  try {
-                    const gitignorePath = `${cmdCwd}/.gitignore`;
-                    const existing = orbit.readFile ? await orbit.readFile(gitignorePath).catch(() => null) : null;
-                    const existingContent: string = (existing && typeof existing === 'object' && 'content' in existing)
-                      ? (existing as any).content || ''
-                      : (typeof existing === 'string' ? existing : '');
-                    if (!existingContent.split('\n').some(l => l.trim() === '.bleumr-preview/' || l.trim() === '.bleumr-preview')) {
-                      const next = existingContent
-                        ? existingContent.replace(/\n*$/, '\n') + '.bleumr-preview/\n'
-                        : '.bleumr-preview/\n';
-                      if (orbit.writeFile) await orbit.writeFile(gitignorePath, next);
-                    }
-                  } catch { /* gitignore is best-effort */ }
+                  await ensureGitignoreEntries(cmdCwd, ['.bleumr-preview/']);
                   result = `Saved preview PNG to .bleumr-preview/${baseName}-${viewport}.png (${dims}). NOTE: you cannot see the PNG yourself — tell the user where it is and ask them to open it. Do not claim the layout looks good; only the user can verify visually.`;
                   removeThinking();
                   addMessage({
@@ -3053,6 +3138,13 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                   ? `${toolLabel} succeeded.\n${output ? output.slice(0, 8000) : '(no output)'}${errors ? `\nWarnings:\n${errors.slice(0, 2000)}` : ''}`
                   : `${toolLabel} failed (exit ${res.code}).\n${errors ? errors.slice(0, 4000) : ''}${output ? `\n${output.slice(0, 4000)}` : ''}`;
 
+                // After a successful start_dev_server, drop the tracking artifacts
+                // (.bleumr-dev-server.pid, .bleumr-dev.log) into .gitignore so the
+                // user's repo stays clean. Best-effort.
+                if (res.success && toolCall.function.name === 'start_dev_server') {
+                  await ensureGitignoreEntries(cmdCwd, ['.bleumr-dev-server.pid', '.bleumr-dev.log']);
+                }
+
                 removeThinking();
                 addMessage({
                   role: 'activity', content: '', activity: res.success ? 'analyzing' : 'writing',
@@ -3082,6 +3174,8 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             role: 'tool', tool_call_id: toolCall.id, content: cappedResult,
           });
           if (result) toolResultsLog.push(result.slice(0, 500));
+          // H13: a tool just resolved — that is forward progress, reset the watchdog clock.
+          bumpActivity();
 
           // ── Post-tool-use lifecycle hook ──
           if (hooksRef.current.length > 0) {
@@ -3150,6 +3244,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
           try {
             await streamGroqResponse(apiKey, closingBody, (chunk) => {
               closingStreamed = true;
+              bumpActivity();
               setMessages(prev => {
                 const idx = prev.findIndex(m => m.id === closingId);
                 if (idx === -1) return prev;
@@ -3268,18 +3363,49 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
       denyFeedbackRef.current = null;
       // Clear the watchdog now that we're cleanly exiting the loop
       if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
+        clearInterval(watchdogRef.current);
         watchdogRef.current = null;
       }
-      // Drop any pending mid-loop messages — they'll be lost, but the user
-      // will see them in the chat history and can retry. Better than letting
-      // them silently start a new loop after the current one ends.
-      pendingUserMessagesRef.current = [];
+      // Capture any messages the user typed in the final stretch of the loop
+      // (after the last in-iteration drain). We must NOT silently drop them —
+      // the user would see "I asked but the agent never answered". Snapshot
+      // them, clear the ref, then re-trigger sendToAgent in a fresh task once
+      // running locks are released.
+      const leftover = pendingUserMessagesRef.current.splice(0);
       // Always release running locks — a stuck "running" state is worse than a brief race
       agentRunningRef.current = false;
       setIsWorking(false);
+      // Race window: between capturing `leftover` above and releasing the
+      // running lock, the user may have clicked an ask_user option button or
+      // typed something. handleSuggestionClick checks agentRunningRef and
+      // queues the click into pendingUserMessagesRef instead of starting a
+      // new turn. Drain the ref one more time after the lock is released so
+      // those messages join the replay batch instead of being lost. (This
+      // is the H9 ask_user race fix on top of the H1 leftover-replay fix.)
+      const lateLeftover = pendingUserMessagesRef.current.splice(0);
+      const allLeftover = leftover.concat(lateLeftover);
+      // Replay any leftover messages as a brand-new agent turn. Joined with
+      // double-newline so the model sees them as one continuous follow-up.
+      // Skip if the user pressed Stop, switched sessions, or unmounted —
+      // those are explicit "I don't want this anymore" signals.
+      if (
+        allLeftover.length > 0 &&
+        !abortedRef.current &&
+        !isStale &&
+        mountedRef.current &&
+        sendToAgentRef.current
+      ) {
+        const joined = allLeftover.join('\n\n');
+        const replay = sendToAgentRef.current;
+        setTimeout(() => {
+          try { replay(joined); } catch { /* swallow — best-effort replay */ }
+        }, 0);
+      }
     }
   }, [isWorking, messages, projectContext, projectFiles, apiKey, addMessage, readProjectFile, writeProjectFile, listProjectDir, typewriterAnimate, autoApprove, attachedImages, planMode, bleumrConfig]);
+
+  // Wire the self-reference so the finally block can replay leftover messages.
+  sendToAgentRef.current = sendToAgent;
 
   // Wrapper that reads from input state
   const handleSend = useCallback(() => {
@@ -3610,6 +3736,14 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
       streaming: false,
     })));
 
+    // Detect post-checkpoint files that were written AFTER this snapshot —
+    // they're still on disk but won't be in `data.files`. We don't delete
+    // them (too dangerous; the user may have edited them by hand) but we
+    // surface them in the summary so the user knows the rewind isn't a
+    // perfect filesystem revert.
+    const checkpointPaths = new Set(data.files.map(f => f.path));
+    const orphanedFiles = writtenFiles.filter(f => !checkpointPaths.has(f.path));
+
     // Restore in-memory written files map
     setWrittenFiles(data.files);
 
@@ -3630,14 +3764,18 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
 
     setCheckpointPanelOpen(false);
 
-    // Add a system note so the user knows what just happened
-    const summary = data.files.length === 0
+    // Add a system note so the user knows what just happened, including
+    // any orphaned post-checkpoint files left on disk.
+    const baseSummary = data.files.length === 0
       ? `Rewound to checkpoint from ${formatCheckpointTime(data.timestamp)}: "${data.prompt.slice(0, 80)}". Restored ${data.messages.length} messages.`
       : `Rewound to checkpoint from ${formatCheckpointTime(data.timestamp)}: "${data.prompt.slice(0, 80)}". Restored ${data.messages.length} messages and ${restoredCount} file${restoredCount === 1 ? '' : 's'}${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`;
+    const orphanNote = orphanedFiles.length > 0
+      ? `\n\nNote: ${orphanedFiles.length} file${orphanedFiles.length === 1 ? '' : 's'} written AFTER this checkpoint ${orphanedFiles.length === 1 ? 'is' : 'are'} still on disk and ${orphanedFiles.length === 1 ? 'was' : 'were'} not removed: ${orphanedFiles.slice(0, 5).map(f => f.path.split('/').pop()).join(', ')}${orphanedFiles.length > 5 ? `, +${orphanedFiles.length - 5} more` : ''}. Delete them manually if you want a clean rewind.`
+      : '';
     setTimeout(() => {
-      addMessage({ role: 'assistant', content: summary });
+      addMessage({ role: 'assistant', content: baseSummary + orphanNote });
     }, 100);
-  }, [activeSessionId, addMessage, resetAgentLifecycle]);
+  }, [activeSessionId, addMessage, resetAgentLifecycle, writtenFiles]);
 
   // ── Delete a checkpoint ──
   const removeCheckpoint = useCallback((checkpointId: string) => {
@@ -3828,7 +3966,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
     denyFeedbackRef.current = null;
     pendingUserMessagesRef.current = [];
     if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current);
+      clearInterval(watchdogRef.current);
       watchdogRef.current = null;
     }
     setIsWorking(false);
