@@ -630,9 +630,16 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   // a long but actively-streaming agent never gets cut off mid-response.
   const watchdogRef = useRef<any>(null);
   const lastActivityRef = useRef<number>(0);
-  // Watchdog tunables — kept here so they're easy to spot.
+  // ── Code Bleu loop tunables (L1) ─────────────────────────────────────
+  // Centralised here so the magic numbers used throughout the agentic
+  // loop are visible at a glance. Don't sprinkle these inline.
   const WATCHDOG_INACTIVITY_MS = 5 * 60 * 1000; // 5 min of true silence triggers force-release
   const WATCHDOG_CHECK_INTERVAL_MS = 30 * 1000; // poll every 30s
+  const MAX_AGENT_ITERATIONS = 20;              // max tool-call rounds per turn before forced exit
+  const RUN_COMMAND_TIMEOUT_MS = 60 * 1000;     // per-shell-command hard cap (run_command tool)
+  const MAX_TOOL_RESULT_BYTES = 4000;           // max bytes of tool result we feed back to the model per call
+  const MAX_TOOL_NUDGES = 2;                    // forceToolUse nudges before surfacing the stuck-state branch
+  const MAX_EMPTY_RESPONSE_STREAK = 3;          // bail after N consecutive empty model responses
   const sessionStartedRef = useRef(false);
   const runBuiltInCommandRef = useRef<((name: string) => boolean) | null>(null);
   // Self-reference so the finally block can re-trigger sendToAgent for any
@@ -785,7 +792,11 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       } else if (dirHandle) {
         return await readFileFromHandle(dirHandle, path);
       }
-    } catch { }
+    } catch (err) {
+      // L2: callers treat empty string as "missing", but a real read error is
+      // worth a breadcrumb so future debugging sessions don't have to guess.
+      console.warn(`[CodeBleu] readProjectFile failed for "${path}":`, err);
+    }
     return '';
   }, [dirHandle, isElectronProject, projectPath]);
 
@@ -797,7 +808,12 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       } else if (dirHandle) {
         return await writeFileFromHandle(dirHandle, path, content);
       }
-    } catch { }
+    } catch (err) {
+      // L2: a write failure is much more user-visible than a read failure —
+      // log it so we can correlate "the agent says it wrote a file but it
+      // didn't show up" reports to the underlying error.
+      console.warn(`[CodeBleu] writeProjectFile failed for "${path}":`, err);
+    }
     return false;
   }, [dirHandle, isElectronProject, projectPath]);
 
@@ -1415,7 +1431,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
 
       // ── Agentic loop — keeps going while AI calls tools ──
       let iterations = 0;
-      const maxIterations = 20;
+      const maxIterations = MAX_AGENT_ITERATIONS;
       const toolResultsLog: string[] = [];
       let lastAssistantText = '';
       let createdProjectThisLoop = false; // Track if we just created a project (need to keep writing files)
@@ -1752,7 +1768,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             }
 
             // Safety: too many empty responses in a row — bail
-            if (emptyResponseStreak >= 3) {
+            if (emptyResponseStreak >= MAX_EMPTY_RESPONSE_STREAK) {
               const doneId = msgId();
               setMessages(prev => [...prev, {
                 id: doneId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now(),
@@ -1797,7 +1813,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
           // We've nudged forceToolUse twice and the model still won't call a
           // tool. Don't pretend everything is fine — tell the user explicitly
           // what we tried and where we got stuck so they can rephrase or step in.
-          if (forceToolUse && toolNudgeCount >= 2) {
+          if (forceToolUse && toolNudgeCount >= MAX_TOOL_NUDGES) {
             removeThinking();
             const stuckId = msgId();
             const filesWrittenNote = filesWrittenThisLoop > 0
@@ -2001,7 +2017,13 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               if (existingContent) {
                 preacher.snapshot(args.path, existingContent, 'write', `Before write_file by agent`);
               }
-            } catch {} // Don't block write if snapshot fails
+            } catch (snapErr) {
+              // L3: don't block the write, but DO log — a missed snapshot
+              // means rollback won't work, and the user will only find out
+              // when they try to undo a bad write. Surfacing this to the
+              // console gives us a chance to fix it before that happens.
+              console.warn(`[CodeBleu] write_file snapshot failed for "${args.path}":`, snapErr);
+            }
 
             await new Promise(r => setTimeout(r, 200));
 
@@ -2200,9 +2222,10 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
 
               let cmdSucceeded = false;
               try {
-                // 60s timeout to prevent commands from hanging the agent loop forever
+                // RUN_COMMAND_TIMEOUT_MS — per-shell-command hard cap to keep
+                // the loop from hanging forever on a runaway process.
                 const shellPromise = orbit.shellExec(command, cmdCwd || undefined);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Command timed out after 60 seconds')), 60000));
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Command timed out after ${Math.round(RUN_COMMAND_TIMEOUT_MS / 1000)} seconds`)), RUN_COMMAND_TIMEOUT_MS));
                 const res = await Promise.race([shellPromise, timeoutPromise]) as any;
                 const output = res.stdout || '';
                 const errors = res.stderr || '';
@@ -3157,7 +3180,13 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                   const fullPath = targetPath.startsWith('/') ? targetPath : `${cmdCwd}/${targetPath}`;
                   const snap = await orbit.readFile(fullPath).catch(() => '');
                   if (snap) preacher.snapshot(targetPath, snap, toolCall.function.name === 'delete_file' ? 'delete' : 'rename', `Before ${toolCall.function.name}`);
-                } catch {}
+                } catch (snapErr) {
+                  // L3: same reasoning as the write_file snapshot — failing
+                  // silently here strips rollback safety from delete/rename/
+                  // move without leaving any trace, which is exactly the
+                  // class of bug we want to surface as early as possible.
+                  console.warn(`[CodeBleu] ${toolCall.function.name} snapshot failed for "${targetPath}":`, snapErr);
+                }
               }
             }
 
@@ -3228,7 +3257,7 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
           }
 
           // Cap tool results to prevent context explosion across iterations
-          const cappedResult = result.length > 4000 ? result.slice(0, 4000) + '\n... (truncated)' : result;
+          const cappedResult = result.length > MAX_TOOL_RESULT_BYTES ? result.slice(0, MAX_TOOL_RESULT_BYTES) + '\n... (truncated)' : result;
           conversationMessages.push({
             role: 'tool', tool_call_id: toolCall.id, content: cappedResult,
           });

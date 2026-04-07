@@ -15,6 +15,7 @@ import {
   existsSync,
   readdirSync,
   realpathSync,
+  chmodSync,
 } from 'fs'
 import { autoUpdater } from 'electron-updater'
 
@@ -47,6 +48,12 @@ function loadStore() {
 function saveStore() {
   try {
     writeFileSync(storePath, JSON.stringify(store, null, 2), 'utf-8')
+    // L4: tighten permissions on the preferences file to 0600. The file
+    // contains safeStorage-encrypted secrets, so it's already protected by
+    // the OS keychain — but defense in depth means non-owner users on the
+    // same machine shouldn't be able to read the ciphertext either.
+    // Best-effort: chmod isn't meaningful on Windows so we just swallow.
+    try { chmodSync(storePath, 0o600) } catch { /* ignore — Windows etc. */ }
   } catch { /* ignore */ }
 }
 
