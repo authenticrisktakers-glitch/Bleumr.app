@@ -6,6 +6,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getDeviceFingerprint, getDeviceFingerprintSync } from './DeviceFingerprint';
 import { getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY } from './SupabaseConfig';
+import { onPageVisibilityChange, isPageHidden } from '../hooks/useVisibilityPause';
 
 const IS_ELECTRON = typeof window !== 'undefined' && !!(window as any).orbit;
 
@@ -123,8 +124,23 @@ export function trackSuccess(service: string, action: string, model?: string, la
 }
 
 // ── Session heartbeat ──────────────────────────────────
+//
+// The heartbeat keeps the admin dashboard's "active sessions" panel honest.
+// It used to fire every 30 s for the entire lifetime of the page — even when
+// the user was on another tab — burning a Supabase request, a database write,
+// and a tiny but non-zero chunk of CPU/network for nothing.
+//
+// New behaviour:
+//   • Heartbeat is paused while the tab is hidden (document.hidden === true)
+//   • When the user comes back we fire ONE immediate update so the dashboard
+//     instantly knows they're active again, then resume the 60 s cadence
+//   • Cadence bumped from 30 s → 60 s (still well under typical "stale" cutoff)
+//   • If the heartbeat ever fires while hidden (race condition), we skip the
+//     network call entirely
+const HEARTBEAT_INTERVAL_MS = 60_000;
 let sessionRegistered = false;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let heartbeatVisibilityUnsub: (() => void) | null = null;
 let localRequestCount = 0;
 let localErrorCount = 0;
 
@@ -134,6 +150,33 @@ function getUserName(): string {
     if (raw) { const p = JSON.parse(raw); return p.name || ''; }
   } catch {}
   return '';
+}
+
+async function sendHeartbeat() {
+  // Belt-and-braces: never write a heartbeat while hidden
+  if (isPageHidden()) return;
+  try {
+    await getClient().from('active_sessions').update({
+      last_seen_at: new Date().toISOString(),
+      request_count: localRequestCount,
+      error_count: localErrorCount,
+      tier: getTier(),
+      user_name: getUserName(),
+    }).eq('session_id', SESSION_ID);
+  } catch (_) {
+    // Telemetry must never break the app
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatInterval) return;
+  heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (!heartbeatInterval) return;
+  clearInterval(heartbeatInterval);
+  heartbeatInterval = null;
 }
 
 export function registerSession() {
@@ -153,18 +196,21 @@ export function registerSession() {
 
   getClient().from('active_sessions').upsert(sessionData, { onConflict: 'session_id' }).then(() => {});
 
-  // Heartbeat every 30s
-  heartbeatInterval = setInterval(async () => {
-    try {
-      await getClient().from('active_sessions').update({
-        last_seen_at: new Date().toISOString(),
-        request_count: localRequestCount,
-        error_count: localErrorCount,
-        tier: getTier(),
-        user_name: getUserName(),
-      }).eq('session_id', SESSION_ID);
-    } catch (_) {}
-  }, 30000);
+  // Only run the heartbeat if the tab is visible right now. If we were opened
+  // in a background tab, defer until the user actually focuses us.
+  if (!isPageHidden()) startHeartbeat();
+
+  // Pause/resume the heartbeat with tab visibility so we don't keep writing
+  // to Supabase from a backgrounded tab the user has forgotten about.
+  heartbeatVisibilityUnsub = onPageVisibilityChange({
+    onHide: () => stopHeartbeat(),
+    onShow: () => {
+      // Immediate "hi I'm back" update so the dashboard reflects activity
+      // without waiting for the next 60 s tick.
+      sendHeartbeat();
+      startHeartbeat();
+    },
+  });
 }
 
 export function incrementRequestCount() { localRequestCount++; }

@@ -12,6 +12,7 @@
 import { SecureStorage } from './SecureStorage';
 import { getDeviceFingerprint } from './DeviceFingerprint';
 import { trackError } from './Analytics';
+import { onPageVisibilityChange, isPageHidden } from '../hooks/useVisibilityPause';
 
 export type SubscriptionTier = 'free' | 'pro' | 'stellur';
 
@@ -78,36 +79,77 @@ async function fetchTierLimits() {
   }
 }
 
+// Cooldown state — cached locally so we don't spam the server
+const COOLDOWN_CACHE_KEY = 'orbit_cooldown_state';
+
+// ── Cooldown poller ──────────────────────────────────────────────────────
+//
+// Watches the central rate-limit endpoint to detect cooldowns triggered by
+// OTHER users on the same shared tier. Used to be a fire-and-forget
+// `setInterval` at module-eval time — orphaned (no handle), no pause logic,
+// fired forever even when the tab was in the background.
+//
+// New behaviour:
+//   • Cadence bumped from 30 s → 60 s (cooldowns are minutes-long, not seconds)
+//   • Pauses while the tab is hidden
+//   • On resume, runs one immediate check so the user sees the latest
+//     cooldown state before they try to send anything
+//   • Skips the network call defensively if it ever ticks while hidden
+const COOLDOWN_POLL_INTERVAL_MS = 60_000;
+let cooldownPollInterval: ReturnType<typeof setInterval> | null = null;
+
+async function pollCooldownState() {
+  if (isPageHidden()) return;
+  try {
+    const tierRaw = localStorage.getItem(TIER_STORAGE_KEY);
+    const tier = tierRaw ? (JSON.parse(tierRaw) as { tier: string }).tier || 'free' : 'free';
+    const fp = localStorage.getItem('bleumr_device_fp') || '';
+    const params = new URLSearchParams({ tier });
+    if (fp) params.set('device_fp', fp);
+    const res = await fetch(`${RATE_LIMIT_URL}?${params.toString()}`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    if (res.status === 429) {
+      const data = await res.json();
+      if (data.cooldown && data.cooldown_until) {
+        localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify({
+          tier, cooldown_until: data.cooldown_until, reason: data.reason || 'Cooldown active',
+        }));
+      }
+    } else if (res.ok) {
+      localStorage.removeItem(COOLDOWN_CACHE_KEY);
+    }
+  } catch {}
+}
+
+function startCooldownPoll() {
+  if (cooldownPollInterval) return;
+  cooldownPollInterval = setInterval(pollCooldownState, COOLDOWN_POLL_INTERVAL_MS);
+}
+
+function stopCooldownPoll() {
+  if (!cooldownPollInterval) return;
+  clearInterval(cooldownPollInterval);
+  cooldownPollInterval = null;
+}
+
 // Fire on load
 if (typeof window !== 'undefined') {
   fetchTierLimits();
-  // Poll server every 30s to pick up cooldowns triggered by other users
-  setInterval(async () => {
-    try {
-      const tierRaw = localStorage.getItem(TIER_STORAGE_KEY);
-      const tier = tierRaw ? (JSON.parse(tierRaw) as { tier: string }).tier || 'free' : 'free';
-      const fp = localStorage.getItem('bleumr_device_fp') || '';
-      const params = new URLSearchParams({ tier });
-      if (fp) params.set('device_fp', fp);
-      const res = await fetch(`${RATE_LIMIT_URL}?${params.toString()}`, {
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-      });
-      if (res.status === 429) {
-        const data = await res.json();
-        if (data.cooldown && data.cooldown_until) {
-          localStorage.setItem(COOLDOWN_CACHE_KEY, JSON.stringify({
-            tier, cooldown_until: data.cooldown_until, reason: data.reason || 'Cooldown active',
-          }));
-        }
-      } else if (res.ok) {
-        localStorage.removeItem(COOLDOWN_CACHE_KEY);
-      }
-    } catch {}
-  }, 30000);
-}
+  // Only start polling when the tab is visible. If we boot in a background
+  // tab, defer until the user focuses us.
+  if (!isPageHidden()) startCooldownPoll();
 
-// Cooldown state — cached locally so we don't spam the server
-const COOLDOWN_CACHE_KEY = 'orbit_cooldown_state';
+  onPageVisibilityChange({
+    onHide: () => stopCooldownPoll(),
+    onShow: () => {
+      // Run an immediate check so the user sees the freshest cooldown state
+      // before the next 60 s tick fires.
+      pollCooldownState();
+      startCooldownPoll();
+    },
+  });
+}
 
 interface CooldownState {
   tier: string;
