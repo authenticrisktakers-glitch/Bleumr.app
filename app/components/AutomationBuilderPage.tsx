@@ -3,7 +3,7 @@
 // Architecture: List view (all flows) ⇄ Editor view (canvas with draggable nodes).
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Pause, Play, Share2, X, Trash2, Search, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Pause, Play, Share2, X, Trash2, Search, Check, Locate } from 'lucide-react';
 import {
   loadFlows, saveFlow, deleteFlow, createFlow, runFlow,
   NODE_LIBRARY, getNodeDef,
@@ -78,9 +78,10 @@ function NodeCard({ node, selected, onSelect, onPositionChange, onDelete }: Node
     const dy = e.clientY - dragRef.current.startY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragRef.current.moved = true;
     if (dragRef.current.moved) {
+      // No clamping — nodes can move freely; the recenter button + canvas pan recover any off-screen blocks.
       onPositionChange(
-        Math.max(8, dragRef.current.nodeX + dx),
-        Math.max(8, dragRef.current.nodeY + dy),
+        dragRef.current.nodeX + dx,
+        dragRef.current.nodeY + dy,
       );
     }
   };
@@ -452,6 +453,58 @@ function FlowEditor({ flow, onUpdate, onBack }: EditorProps) {
   const [editingName, setEditingName] = useState(false);
   const [runLog, setRunLog] = useState<string[] | null>(null);
 
+  // Canvas pan state — drag empty space to scroll the whole node graph.
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panDragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    // Only pan when the user grabs the bare canvas (not a node).
+    if (e.target !== e.currentTarget) return;
+    setSelectedNodeId(null);
+    panDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent) => {
+    if (!panDragRef.current) return;
+    const dx = e.clientX - panDragRef.current.startX;
+    const dy = e.clientY - panDragRef.current.startY;
+    setPan({ x: panDragRef.current.panX + dx, y: panDragRef.current.panY + dy });
+  };
+
+  const handleCanvasPointerUp = (e: React.PointerEvent) => {
+    panDragRef.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
+  };
+
+  // Recenter / fit-to-view — recovers nodes that have drifted off screen.
+  const recenter = useCallback(() => {
+    if (flow.nodes.length === 0) {
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    const NODE_W = 144, NODE_H = 122;
+    const minX = Math.min(...flow.nodes.map(n => n.x));
+    const minY = Math.min(...flow.nodes.map(n => n.y));
+    const maxX = Math.max(...flow.nodes.map(n => n.x + NODE_W));
+    const maxY = Math.max(...flow.nodes.map(n => n.y + NODE_H));
+    const bbW = maxX - minX;
+    const bbH = maxY - minY;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const cw = rect?.width ?? (typeof window !== 'undefined' ? window.innerWidth : 400);
+    const ch = rect?.height ?? (typeof window !== 'undefined' ? window.innerHeight : 800);
+    setPan({
+      x: (cw - bbW) / 2 - minX,
+      y: Math.max(80, (ch - bbH) / 2 - minY),
+    });
+  }, [flow.nodes]);
+
   // Patch helpers
   const patchNode = useCallback((id: string, patch: Partial<FlowNode>) => {
     onUpdate({
@@ -572,10 +625,13 @@ function FlowEditor({ flow, onUpdate, onBack }: EditorProps) {
 
       {/* ── Canvas ── */}
       <div
-        className="relative flex-1 overflow-hidden"
-        onPointerDown={(e) => {
-          if (e.target === e.currentTarget) setSelectedNodeId(null);
-        }}
+        ref={canvasRef}
+        className="relative flex-1 overflow-hidden touch-none"
+        style={{ cursor: panDragRef.current ? 'grabbing' : 'grab' }}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerUp}
       >
         {/* Empty state */}
         {flow.nodes.length === 0 && (
@@ -586,48 +642,100 @@ function FlowEditor({ flow, onUpdate, onBack }: EditorProps) {
           </div>
         )}
 
-        {/* Connecting lines (subtle dotted, between vertically adjacent nodes) */}
-        {flow.nodes.length > 1 && (
-          <svg
-            className="absolute inset-0 pointer-events-none"
-            style={{ width: '100%', height: '100%' }}
-          >
-            {(() => {
-              const sorted = [...flow.nodes].sort((a, b) => a.y - b.y);
-              const lines: JSX.Element[] = [];
-              for (let i = 0; i < sorted.length - 1; i++) {
-                const from = sorted[i];
-                const to = sorted[i + 1];
-                const x1 = from.x + 72;
-                const y1 = from.y + 122;
-                const x2 = to.x + 72;
-                const y2 = to.y;
-                lines.push(
-                  <line
-                    key={`${from.id}-${to.id}`}
-                    x1={x1} y1={y1} x2={x2} y2={y2}
-                    stroke="rgba(255,255,255,0.12)"
-                    strokeWidth={1}
-                    strokeDasharray="3 5"
-                  />
-                );
-              }
-              return lines;
-            })()}
-          </svg>
-        )}
+        {/* Pan-translated layer — holds rope strings + nodes together so they stay aligned. */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px)`,
+            transformOrigin: '0 0',
+            willChange: 'transform',
+          }}
+        >
+          {/* Connecting ropes (loose white curves between vertically adjacent nodes) */}
+          {flow.nodes.length > 1 && (
+            <svg
+              className="absolute pointer-events-none overflow-visible"
+              style={{ left: 0, top: 0, width: 1, height: 1 }}
+            >
+              {(() => {
+                const sorted = [...flow.nodes].sort((a, b) => a.y - b.y);
+                const ropes: JSX.Element[] = [];
+                for (let i = 0; i < sorted.length - 1; i++) {
+                  const from = sorted[i];
+                  const to = sorted[i + 1];
+                  const x1 = from.x + 72;
+                  const y1 = from.y + 122;
+                  const x2 = to.x + 72;
+                  const y2 = to.y;
+                  const midX = (x1 + x2) / 2;
+                  const midY = (y1 + y2) / 2;
+                  // Sag amount — heavier rope when nodes are far apart horizontally.
+                  const dxAbs = Math.abs(x2 - x1);
+                  const dyAbs = Math.abs(y2 - y1);
+                  const sag = Math.max(22, dxAbs * 0.35 + dyAbs * 0.08);
+                  const d = `M ${x1} ${y1} Q ${midX} ${midY + sag} ${x2} ${y2}`;
+                  ropes.push(
+                    <g key={`${from.id}-${to.id}`}>
+                      {/* Soft outer glow */}
+                      <path
+                        d={d}
+                        stroke="rgba(255,255,255,0.08)"
+                        strokeWidth={6}
+                        strokeLinecap="round"
+                        fill="none"
+                      />
+                      {/* Main rope */}
+                      <path
+                        d={d}
+                        stroke="rgba(255,255,255,0.55)"
+                        strokeWidth={2.25}
+                        strokeLinecap="round"
+                        fill="none"
+                      />
+                      {/* End knot */}
+                      <circle cx={x2} cy={y2} r={2.5} fill="rgba(255,255,255,0.65)" />
+                    </g>
+                  );
+                }
+                return ropes;
+              })()}
+            </svg>
+          )}
 
-        {/* Nodes */}
-        {flow.nodes.map(node => (
-          <NodeCard
-            key={node.id}
-            node={node}
-            selected={selectedNodeId === node.id}
-            onSelect={() => setSelectedNodeId(node.id)}
-            onPositionChange={(x, y) => patchNode(node.id, { x, y })}
-            onDelete={() => removeNode(node.id)}
-          />
-        ))}
+          {/* Nodes (re-enable pointer events on the children only) */}
+          <div className="absolute inset-0 pointer-events-none">
+            {flow.nodes.map(node => (
+              <div key={node.id} className="pointer-events-auto">
+                <NodeCard
+                  node={node}
+                  selected={selectedNodeId === node.id}
+                  onSelect={() => setSelectedNodeId(node.id)}
+                  onPositionChange={(x, y) => patchNode(node.id, { x, y })}
+                  onDelete={() => removeNode(node.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recenter / fit-to-view button — pulls drifting nodes back into view */}
+        {flow.nodes.length > 0 && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={recenter}
+            className="absolute z-20 left-4 bottom-[max(env(safe-area-inset-bottom),24px)] w-11 h-11 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+            style={{
+              background: 'rgba(20,20,28,0.85)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
+            }}
+            title="Recenter view"
+          >
+            <Locate className="w-[17px] h-[17px] text-white/80" strokeWidth={2.2} />
+          </button>
+        )}
 
         {/* Run log toast (visible while running) */}
         {runLog && runLog.length > 0 && (
