@@ -587,6 +587,15 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   // loses all knowledge of which files it just created. Capped to the last 30
   // messages on save to prevent unbounded growth across long sessions.
   const prevConversationRef = useRef<any[]>([]);
+  // Messages typed by the user while the agent loop is actively running.
+  // Drained at the top of each iteration and injected as user messages so
+  // the agent reacts on the next API call. This is what makes "live chat
+  // while the agent is working" possible without aborting the current task.
+  const pendingUserMessagesRef = useRef<string[]>([]);
+  // Watchdog timer that force-releases isWorking if the loop somehow gets
+  // stuck without firing its finally block. Belt-and-suspenders defense
+  // against the "agent never stops, I had to press Stop manually" bug.
+  const watchdogRef = useRef<any>(null);
   const sessionStartedRef = useRef(false);
   const runBuiltInCommandRef = useRef<((name: string) => boolean) | null>(null);
 
@@ -598,6 +607,10 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     return () => {
       mountedRef.current = false;
       abortedRef.current = true;
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       // Best-effort session_end on unmount (e.g. user closes Code Bleu)
       if (hooksRef.current.length > 0 && sessionStartedRef.current) {
         const orbit = (window as any).orbit;
@@ -607,6 +620,31 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
         }
       }
     };
+  }, []);
+
+  // Stable cleanup helper used by every reset path. Closes over refs only,
+  // so it never goes stale and never causes TDZ issues. Drains the queue,
+  // resolves any pending approval, kills the watchdog and clears the
+  // remembered conversation. Optionally aborts the in-flight loop.
+  const resetAgentLifecycle = useCallback((opts?: { abort?: boolean }) => {
+    pendingUserMessagesRef.current = [];
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    if (pendingApprovalRef.current) {
+      const r = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { r(false); } catch { /* ignore */ }
+    }
+    denyFeedbackRef.current = null;
+    prevConversationRef.current = [];
+    lastToolContextRef.current = '';
+    if (opts?.abort) {
+      abortedRef.current = true;
+      agentRunningRef.current = false;
+      loopGenRef.current++;
+    }
   }, []);
 
   // Keep projectPath ref in sync
@@ -952,9 +990,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       setMessages([]);
       // Drop conversation context — switching project means the previous
       // tool history points at files in a different folder
-      prevConversationRef.current = [];
-      lastToolContextRef.current = '';
-      denyFeedbackRef.current = null;
+      resetAgentLifecycle();
 
       addMessage({ role: 'assistant', content: `Opening ${handle.name}... scanning files.` });
 
@@ -967,7 +1003,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
         addMessage({ role: 'assistant', content: `Failed to open folder: ${err?.message ?? 'Unknown error'}` });
       }
     }
-  }, [addMessage, analyzeProject]);
+  }, [addMessage, analyzeProject, resetAgentLifecycle]);
 
   // ── Open folder (Electron) ──
   const openFolderElectron = useCallback(async () => {
@@ -988,9 +1024,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       setMessages([]);
       // Drop conversation context — switching project means the previous
       // tool history points at files in a different folder
-      prevConversationRef.current = [];
-      lastToolContextRef.current = '';
-      denyFeedbackRef.current = null;
+      resetAgentLifecycle();
 
       addMessage({ role: 'assistant', content: `Opening ${folderName}... scanning files.` });
 
@@ -1006,7 +1040,7 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     } catch (err: any) {
       addMessage({ role: 'assistant', content: `Failed to open folder: ${err?.message ?? 'Unknown error'}` });
     }
-  }, [addMessage, analyzeProject]);
+  }, [addMessage, analyzeProject, resetAgentLifecycle]);
 
   const openFolder = isElectron ? openFolderElectron : openFolderBrowser;
 
@@ -1072,6 +1106,21 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     });
     setIsWorking(true);
     abortedRef.current = false;
+
+    // ── Watchdog: belt-and-suspenders auto-release ────────────────────────
+    // If the loop somehow gets stuck without firing its finally block (a
+    // bug we are actively trying to eliminate), this timer fires after 15
+    // minutes and force-releases isWorking so the user is never trapped.
+    // Cleared in the finally block on normal exit.
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    watchdogRef.current = setTimeout(() => {
+      console.warn('[CodeBleu] Watchdog fired — agent loop ran past 15min, force-releasing.');
+      agentRunningRef.current = false;
+      abortedRef.current = true;
+      setIsWorking(false);
+      setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
+      watchdogRef.current = null;
+    }, 15 * 60 * 1000);
 
     // Hoisted out of try{} so the finally block can persist it back to
     // prevConversationRef for the next turn. Initialised inside try once
@@ -1255,6 +1304,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
       let createdProjectThisLoop = false; // Track if we just created a project (need to keep writing files)
       let filesWrittenThisLoop = 0;       // Track file writes — don't stop until at least 1 after create_project
       let emptyResponseStreak = 0;        // Safety: bail after 3 consecutive empty responses
+      let toolNudgeCount = 0;             // Reliability: nudge model up to 2x when forceToolUse=true but model returned text-only
 
       // Show initial thinking status
       let thinkingId = msgId();
@@ -1274,7 +1324,12 @@ If they ask a coding question (not building), answer naturally and helpfully —
       };
 
       const removeThinking = () => {
-        setMessages(prev => prev.filter(m => m.id !== thinkingId));
+        // Remove the current thinking indicator AND any orphan thinking indicators
+        // that may have been left behind by earlier iterations or async races.
+        setMessages(prev => prev.filter(m =>
+          m.id !== thinkingId &&
+          !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)
+        ));
       };
 
       while (iterations++ < maxIterations) {
@@ -1288,6 +1343,24 @@ If they ask a coding question (not building), answer naturally and helpfully —
           await typewriterAnimate('Stopped.', stopId);
           break;
         }
+
+        // ── Drain mid-loop user messages (live chat) ──────────────────────
+        // Anything the user typed since the last iteration gets folded into
+        // the conversation as real user turns. This is what makes "talk to
+        // the agent while it's working" actually work — the model sees the
+        // new requests on its next API call and responds to them naturally.
+        if (pendingUserMessagesRef.current.length > 0) {
+          const queued = pendingUserMessagesRef.current.splice(0);
+          for (const msg of queued) {
+            conversationMessages.push({ role: 'user', content: msg });
+          }
+          // Reset safety counters — the user just steered the conversation,
+          // so empty-response and tool-nudge streaks are no longer relevant.
+          emptyResponseStreak = 0;
+          toolNudgeCount = 0;
+          lastUserMsgRef.current = queued[queued.length - 1];
+        }
+
         updateThinking(iterations === 1 ? 'Thinking about your request...' : 'Planning next steps...');
 
         // ── Credit budget gate — Code Bleu costs 3 credits per tool iteration ──
@@ -1413,32 +1486,53 @@ If they ask a coding question (not building), answer naturally and helpfully —
           if (streamMsgId) setMessages(prev => prev.filter(m => m.id !== streamMsgId));
           streamedAnyText = false;
 
-          if (fetchErr?.message?.includes('400') || fetchErr?.message?.includes('tool_use_failed')) {
-            console.warn('[CodeBleu] Stream 400 — retrying with core tools:', fetchErr.message);
+          const errMsg = fetchErr?.message || '';
+          const isToolError = errMsg.includes('400') || errMsg.includes('tool_use_failed');
+          const isTimeout = errMsg.includes('timeout') || errMsg.includes('Stream connect') || errMsg.includes('Stream idle');
+          const isNetworkErr = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('ECONNREFUSED');
+
+          if (isToolError) {
+            console.warn('[CodeBleu] Stream 400 — retrying with core tools:', errMsg);
             const CORE_NAMES = ['read_file', 'write_file', 'run_command', 'list_directory', 'ask_user', 'create_project', 'create_directory'];
             const coreTools = ALL_TOOLS.filter(t => CORE_NAMES.includes(t.function.name));
             try {
+              // Keep tool_choice: 'required' on first retry so the agent still calls tools.
               const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify({ ...requestBody, tools: coreTools, tool_choice: 'auto' }),
+                body: JSON.stringify({
+                  ...requestBody,
+                  tools: coreTools,
+                  tool_choice: forceToolUse ? 'required' : 'auto',
+                }),
               });
               assistantMsg = data.choices?.[0]?.message;
             } catch {
-              // Core tools failed — text-only, prevent narration
-              console.error('[CodeBleu] Core tools failed, text-only fallback');
-              const textBody = { ...requestBody };
-              delete textBody.tools;
-              delete textBody.tool_choice;
-              textBody.messages = textBody.messages.map((m: any) =>
-                m.role === 'system' ? { ...m, content: 'You are Code Bleu. Tools temporarily unavailable. Tell the user to try again. Do NOT describe tool calls.' } : m
-              );
-              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify(textBody),
-              });
-              assistantMsg = data.choices?.[0]?.message;
+              // Core tools still failed — try ONE more time with tool_choice: 'auto'
+              console.warn('[CodeBleu] Core required failed, trying core auto');
+              try {
+                const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                  body: JSON.stringify({ ...requestBody, tools: coreTools, tool_choice: 'auto' }),
+                });
+                assistantMsg = data.choices?.[0]?.message;
+              } catch {
+                // Core tools failed completely — text-only, prevent narration
+                console.error('[CodeBleu] Core tools failed, text-only fallback');
+                const textBody = { ...requestBody };
+                delete textBody.tools;
+                delete textBody.tool_choice;
+                textBody.messages = textBody.messages.map((m: any) =>
+                  m.role === 'system' ? { ...m, content: 'You are Code Bleu. Tools temporarily unavailable. Tell the user to try again. Do NOT describe tool calls.' } : m
+                );
+                const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                  body: JSON.stringify(textBody),
+                });
+                assistantMsg = data.choices?.[0]?.message;
+              }
             }
 
             // Show fallback response with typewriter since we couldn't stream
@@ -1447,6 +1541,34 @@ If they ask a coding question (not building), answer naturally and helpfully —
               setMessages(prev => [...prev, { id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now() }]);
               await typewriterAnimate(assistantMsg.content.trim(), fbId);
               streamedAnyText = true;
+            }
+          } else if (isTimeout || isNetworkErr) {
+            // Streaming stalled or network glitch — retry once via non-streaming path.
+            console.warn('[CodeBleu] Stream timeout/network — retrying via non-streaming:', errMsg);
+            removeThinking();
+            const retryId = msgId();
+            setMessages(prev => [...prev, {
+              id: retryId, role: 'activity' as const,
+              content: 'Connection stalled — retrying...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            try {
+              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                body: JSON.stringify(requestBody),
+              });
+              setMessages(prev => prev.filter(m => m.id !== retryId));
+              assistantMsg = data.choices?.[0]?.message;
+              if (assistantMsg?.content?.trim()) {
+                const fbId = msgId();
+                setMessages(prev => [...prev, { id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now() }]);
+                await typewriterAnimate(assistantMsg.content.trim(), fbId);
+                streamedAnyText = true;
+              }
+            } catch (retryErr: any) {
+              setMessages(prev => prev.filter(m => m.id !== retryId));
+              throw retryErr;
             }
           } else {
             throw fetchErr;
@@ -1459,7 +1581,10 @@ If they ask a coding question (not building), answer naturally and helpfully —
         usageBudget.consume(codeAction, codeBleuTier);
 
         const hasToolCalls = assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0;
-        if (hasToolCalls) emptyResponseStreak = 0; // Reset empty streak on successful tool use
+        if (hasToolCalls) {
+          emptyResponseStreak = 0; // Reset empty streak on successful tool use
+          toolNudgeCount = 0;      // Reset tool nudge counter — we got tools back
+        }
 
         // Finalize the streamed message
         if (streamedAnyText && streamMsgId) {
@@ -1528,6 +1653,25 @@ If they ask a coding question (not building), answer naturally and helpfully —
             }]);
             await typewriterAnimate(summary, doneId);
             break;
+          }
+
+          // ── CRITICAL FIX: forceToolUse=true but model only returned text ──
+          // This is the "stuck on Setting up the project folder" bug.
+          // Model says "I'll create the project..." but never calls create_project.
+          // Push the assistant text + a nudge user message and retry up to 2 times.
+          if (forceToolUse && toolNudgeCount < 2) {
+            toolNudgeCount++;
+            conversationMessages.push({ role: 'assistant', content: responseText });
+            // Build a strong, specific nudge based on what was clearly requested
+            let nudge = 'You said you would do that, but you did not actually call any tool. Call the tool now — do not describe what you will do, just call it.';
+            const hasProj = !!projectContext || !!projectPathRef.current;
+            if (!hasProj && /\b(make|build|create|new) (a |an |the )?(\w+ )?(app|game|website|site|page|tool|project|landing)/i.test(text)) {
+              nudge = `You need to actually CALL create_project right now. Do NOT just say you will create it — invoke the create_project tool with a name parameter. After it succeeds, call write_file for each file you need to create. Stop describing — start calling tools.`;
+            } else if (hasProj && createdProjectThisLoop && filesWrittenThisLoop === 0) {
+              nudge = `Call write_file now to actually write the files. Use absolute paths starting with ${projectPathRef.current}/. Do not describe — call the tool.`;
+            }
+            conversationMessages.push({ role: 'user', content: nudge });
+            continue;
           }
 
           const respLower = responseText.toLowerCase();
@@ -2762,6 +2906,10 @@ If they ask a coding question (not building), answer naturally and helpfully —
         errorContent = 'No API key configured. Add your Groq key in Settings to start coding.';
       } else if (errMsg === 'OFFLINE') {
         errorContent = 'Looks like the connection dropped — I tried a few times but couldn\'t reach the AI service. Your project files are still loaded and safe. Check your internet connection and try again.';
+      } else if (errMsg.includes('Stream connect timeout')) {
+        errorContent = 'The AI service took too long to respond (over 60s). This usually means Groq is overloaded — try again in a few seconds.';
+      } else if (errMsg.includes('Stream idle timeout')) {
+        errorContent = 'The AI service stopped sending data mid-response. Your message was received — please try sending it again.';
       } else if (errMsg.includes('429') || errMsg.includes('rate')) {
         errorContent = 'Hit the rate limit on the AI service. Give it a few seconds and try again.';
       } else if (errMsg.includes('401')) {
@@ -2810,6 +2958,15 @@ If they ask a coding question (not building), answer naturally and helpfully —
         try { resolve(false); } catch { /* ignore */ }
       }
       denyFeedbackRef.current = null;
+      // Clear the watchdog now that we're cleanly exiting the loop
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+      // Drop any pending mid-loop messages — they'll be lost, but the user
+      // will see them in the chat history and can retry. Better than letting
+      // them silently start a new loop after the current one ends.
+      pendingUserMessagesRef.current = [];
       // Always release running locks — a stuck "running" state is worse than a brief race
       agentRunningRef.current = false;
       setIsWorking(false);
@@ -2857,6 +3014,28 @@ If they ask a coding question (not building), answer naturally and helpfully —
         return;
       }
     }
+
+    // ── LIVE CHAT: queue messages while the agent is actively running ──
+    // Instead of forcing the user to wait for the loop to finish (or press
+    // Stop manually), accept their message immediately, drop it in the chat,
+    // and queue it. The running loop drains the queue at the top of each
+    // iteration and reacts on the next API call.
+    if (agentRunningRef.current) {
+      addMessage({ role: 'user', content: text });
+      pendingUserMessagesRef.current.push(text);
+      lastUserMsgRef.current = text;
+      setInput('');
+      inputRef.current?.focus();
+      // Visual cue so the user knows the agent saw it
+      addMessage({
+        role: 'activity',
+        activity: 'thinking',
+        content: 'Got it — folding that into the current task...',
+        streaming: false,
+      });
+      return;
+    }
+
     setInput('');
     inputRef.current?.focus();
     sendToAgent(text);
@@ -2878,8 +3057,18 @@ If they ask a coding question (not building), answer naturally and helpfully —
       return;
     }
 
+    // ── Live-chat queueing: if the agent is still running, add the
+    // suggestion as a queued user message instead of trying to start a new
+    // loop (which the early-return guard would block anyway).
+    if (agentRunningRef.current) {
+      addMessage({ role: 'user', content: option });
+      pendingUserMessagesRef.current.push(option);
+      lastUserMsgRef.current = option;
+      return;
+    }
+
     sendToAgent(option);
-  }, [sendToAgent]);
+  }, [sendToAgent, addMessage]);
 
   // ── Image/file upload ──
   const handleAttachFiles = useCallback(async () => {
@@ -2993,21 +3182,8 @@ If they ask a coding question (not building), answer naturally and helpfully —
     sessionStartedRef.current = false;
 
     // Abort any running agent loop + invalidate stale generation
-    abortedRef.current = true;
-    agentRunningRef.current = false;
-    loopGenRef.current++;
+    resetAgentLifecycle({ abort: true });
     setIsWorking(false);
-
-    // Wipe conversation context — the new session has its own history and
-    // tool results; carrying the old ones over would confuse the agent.
-    prevConversationRef.current = [];
-    lastToolContextRef.current = '';
-    denyFeedbackRef.current = null;
-    if (pendingApprovalRef.current) {
-      const r = pendingApprovalRef.current;
-      pendingApprovalRef.current = null;
-      try { r(false); } catch { /* ignore */ }
-    }
 
     setMessages(session.messages);
     setProjectName(session.projectName);
@@ -3021,27 +3197,15 @@ If they ask a coding question (not building), answer naturally and helpfully —
     setWrittenFiles([]);
     // Load checkpoints for this session
     setCheckpoints(loadCheckpoints(session.id));
-  }, []);
+  }, [fireSessionEnd, resetAgentLifecycle]);
 
   const startNewSession = useCallback(() => {
     // Fire session_end for the outgoing session
     fireSessionEnd();
 
     // Abort any running agent loop + invalidate stale generation
-    abortedRef.current = true;
-    agentRunningRef.current = false;
-    loopGenRef.current++;
+    resetAgentLifecycle({ abort: true });
     setIsWorking(false);
-
-    // Wipe conversation context — fresh session starts from zero
-    prevConversationRef.current = [];
-    lastToolContextRef.current = '';
-    denyFeedbackRef.current = null;
-    if (pendingApprovalRef.current) {
-      const r = pendingApprovalRef.current;
-      pendingApprovalRef.current = null;
-      try { r(false); } catch { /* ignore */ }
-    }
 
     saveCurrentSession();
     setMessages([]);
@@ -3062,7 +3226,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
     sessionStartedRef.current = false;
     setCheckpoints([]);
     setCheckpointPanelOpen(false);
-  }, [saveCurrentSession, fireSessionEnd]);
+  }, [saveCurrentSession, fireSessionEnd, resetAgentLifecycle]);
 
   const deleteSession = useCallback((sessionId: string) => {
     setSessions(prev => prev.filter(s => s.id !== sessionId));
@@ -3082,16 +3246,9 @@ If they ask a coding question (not building), answer naturally and helpfully —
       setCheckpoints([]);
       // Wipe conversation context too — the deleted session's tool history
       // would point at files that may no longer exist
-      prevConversationRef.current = [];
-      lastToolContextRef.current = '';
-      denyFeedbackRef.current = null;
-      if (pendingApprovalRef.current) {
-        const r = pendingApprovalRef.current;
-        pendingApprovalRef.current = null;
-        try { r(false); } catch { /* ignore */ }
-      }
+      resetAgentLifecycle();
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, resetAgentLifecycle]);
 
   // ── Reset (saves current session first) ──
   const handleReset = useCallback(() => {
@@ -3099,20 +3256,8 @@ If they ask a coding question (not building), answer naturally and helpfully —
     fireSessionEnd();
 
     // Abort any running agent loop first + invalidate stale generation
-    abortedRef.current = true;
-    agentRunningRef.current = false;
-    loopGenRef.current++;
+    resetAgentLifecycle({ abort: true });
     setIsWorking(false);
-
-    // Wipe conversation context — fresh start
-    prevConversationRef.current = [];
-    lastToolContextRef.current = '';
-    denyFeedbackRef.current = null;
-    if (pendingApprovalRef.current) {
-      const r = pendingApprovalRef.current;
-      pendingApprovalRef.current = null;
-      try { r(false); } catch { /* ignore */ }
-    }
 
     saveCurrentSession();
     setMessages([]);
@@ -3132,7 +3277,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
     sessionStartedRef.current = false;
     setCheckpoints([]);
     setCheckpointPanelOpen(false);
-  }, [saveCurrentSession, fireSessionEnd]);
+  }, [saveCurrentSession, fireSessionEnd, resetAgentLifecycle]);
 
   // ── Checkpoint restore — load a snapshot back into current state ──
   const restoreCheckpoint = useCallback(async (checkpointId: string) => {
@@ -3143,22 +3288,10 @@ If they ask a coding question (not building), answer naturally and helpfully —
       return;
     }
 
-    // Abort any running loop
-    abortedRef.current = true;
-    agentRunningRef.current = false;
-    loopGenRef.current++;
+    // Abort any running loop + wipe conversation context — checkpoint restore
+    // is a hard rewind, the tool history from after this point is no longer valid
+    resetAgentLifecycle({ abort: true });
     setIsWorking(false);
-
-    // Wipe conversation context — checkpoint restore is a hard rewind, the
-    // tool history from after this point is no longer valid
-    prevConversationRef.current = [];
-    lastToolContextRef.current = '';
-    denyFeedbackRef.current = null;
-    if (pendingApprovalRef.current) {
-      const r = pendingApprovalRef.current;
-      pendingApprovalRef.current = null;
-      try { r(false); } catch { /* ignore */ }
-    }
 
     // Restore messages (filter to user/assistant only since that's what was stored)
     setMessages(data.messages.map(m => ({
@@ -3196,7 +3329,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
     setTimeout(() => {
       addMessage({ role: 'assistant', content: summary });
     }, 100);
-  }, [activeSessionId, addMessage]);
+  }, [activeSessionId, addMessage, resetAgentLifecycle]);
 
   // ── Delete a checkpoint ──
   const removeCheckpoint = useCallback((checkpointId: string) => {
@@ -3385,6 +3518,11 @@ If they ask a coding question (not building), answer naturally and helpfully —
       try { resolve(false); } catch { /* ignore */ }
     }
     denyFeedbackRef.current = null;
+    pendingUserMessagesRef.current = [];
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
     setIsWorking(false);
     // Clear any lingering thinking indicators
     setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
@@ -4147,10 +4285,11 @@ If they ask a coding question (not building), answer naturally and helpfully —
                   Multi-Model · 55 tools
                 </div>
 
-                {/* Stop / Send button */}
-                {isWorking ? (
+                {/* Stop button — shown only while working, alongside Send */}
+                {isWorking && (
                   <button
                     onClick={handleInterrupt}
+                    title="Stop the agent"
                     style={{
                       background: 'rgba(239,68,68,0.15)',
                       border: '1px solid rgba(239,68,68,0.25)',
@@ -4165,22 +4304,26 @@ If they ask a coding question (not building), answer naturally and helpfully —
                   >
                     <StopCircle size={13} /> Stop
                   </button>
-                ) : (
-                  <button
-                    onClick={handleSend}
-                    disabled={!input.trim()}
-                    style={{
-                      background: input.trim() ? '#6366f1' : 'rgba(255,255,255,0.05)',
-                      border: 'none', borderRadius: 8, padding: '6px 8px',
-                      cursor: input.trim() ? 'pointer' : 'default',
-                      color: input.trim() ? 'white' : 'rgba(255,255,255,0.15)',
-                      display: 'flex', alignItems: 'center',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <Send size={14} />
-                  </button>
                 )}
+
+                {/* Send button — always available so users can chat mid-task */}
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  title={isWorking ? 'Add a message — the agent will fold it into the current task' : 'Send'}
+                  style={{
+                    background: input.trim()
+                      ? (isWorking ? '#8b5cf6' : '#6366f1')
+                      : 'rgba(255,255,255,0.05)',
+                    border: 'none', borderRadius: 8, padding: '6px 8px',
+                    cursor: input.trim() ? 'pointer' : 'default',
+                    color: input.trim() ? 'white' : 'rgba(255,255,255,0.15)',
+                    display: 'flex', alignItems: 'center',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <Send size={14} />
+                </button>
               </div>
             </div>
           </div>

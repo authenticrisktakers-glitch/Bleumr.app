@@ -42,6 +42,11 @@ export async function groqFetch(
  * Stream a Groq API response — text arrives token-by-token,
  * tool calls are accumulated silently in the background.
  * Uses AbortController for cancellable fetch.
+ *
+ * Reliability:
+ *  - 60s connect timeout (from request start to first byte / response headers)
+ *  - 45s idle timeout (between any two chunks once streaming starts)
+ *  - Aborts cleanly via abortRef so the agent loop can never hang forever
  */
 export async function streamGroqResponse(
   apiKey: string,
@@ -53,12 +58,31 @@ export async function streamGroqResponse(
   const controller = new AbortController();
   if (abortRef?.current) controller.abort();
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify(streamBody),
-    signal: controller.signal,
-  });
+  // Connect timeout — fires if Groq doesn't even return response headers
+  const CONNECT_TIMEOUT_MS = 60_000;
+  const IDLE_TIMEOUT_MS = 45_000;
+  let connectTimer: any = setTimeout(() => {
+    try { controller.abort(); } catch { /* ignore */ }
+  }, CONNECT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify(streamBody),
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    clearTimeout(connectTimer);
+    if (e?.name === 'AbortError' && !abortRef?.current) {
+      throw new Error('Stream connect timeout — the model took too long to respond. Please try again.');
+    }
+    throw e;
+  }
+  // Got response headers — clear connect timeout
+  clearTimeout(connectTimer);
+  connectTimer = null;
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -72,11 +96,32 @@ export async function streamGroqResponse(
   const toolCalls: any[] = [];
   let usage: any = null;
 
+  // Idle timeout — fires if no chunks arrive for IDLE_TIMEOUT_MS
+  let idleTimer: any = null;
+  const resetIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      try { controller.abort(); } catch { /* ignore */ }
+    }, IDLE_TIMEOUT_MS);
+  };
+  resetIdle();
+
+  let timedOut = false;
   try {
     while (true) {
       if (abortRef?.current) { controller.abort(); reader.cancel(); break; }
-      const { done, value } = await reader.read();
+      let readResult: ReadableStreamReadResult<Uint8Array>;
+      try {
+        readResult = await reader.read();
+      } catch (readErr: any) {
+        if (readErr?.name === 'AbortError' && !abortRef?.current) {
+          timedOut = true;
+        }
+        throw readErr;
+      }
+      const { done, value } = readResult;
       if (done) break;
+      resetIdle();
 
       const chunk = decoder.decode(value, { stream: true });
       const rawLines = (lineBuf + chunk).split('\n');
@@ -113,7 +158,23 @@ export async function streamGroqResponse(
       }
     }
   } catch (e: any) {
-    if (e?.name !== 'AbortError') throw e;
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (e?.name === 'AbortError') {
+      // Distinguish user abort from idle timeout
+      if (timedOut || !abortRef?.current) {
+        // We aborted ourselves due to idle timeout — only throw if we have NO partial output
+        if (!textContent && toolCalls.length === 0) {
+          throw new Error('Stream idle timeout — the model stopped responding mid-stream. Please try again.');
+        }
+        // Otherwise fall through and return what we have
+      }
+      // User-initiated abort — silently return whatever we have
+    } else {
+      throw e;
+    }
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (connectTimer) clearTimeout(connectTimer);
   }
 
   const message: any = { role: 'assistant', content: textContent || null };
