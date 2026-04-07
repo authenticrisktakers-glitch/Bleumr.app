@@ -8,3 +8,12 @@ export { parseHooks, runHooks } from './HooksService';
 export type { Hook, HookTrigger } from './HooksService';
 export { parseSkills, matchSkillCommand, getSkillPrompt } from './SkillsService';
 export type { Skill } from './SkillsService';
+export {
+  parsePermissions, resolvePermission, formatDenyResult, formatAskMessage, hasCustomPermissions,
+} from './PermissionsService';
+export type { PermissionVerdict, PermissionRule, PermissionRuleSet } from './PermissionsService';
+export {
+  loadCheckpoints, loadCheckpoint, createCheckpoint, deleteCheckpoint, clearCheckpoints,
+  formatCheckpointTime,
+} from './CheckpointService';
+export type { CheckpointMeta, CheckpointData, CheckpointFile } from './CheckpointService';

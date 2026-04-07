@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Volume2, VolumeX, RotateCcw, MessageSquareText, Eye, EyeOff, SwitchCamera } from 'lucide-react';
 import { BLEUMR_VOICE_CONTEXT, BLEUMR_VISION_CONTEXT } from '../services/BleumrLore';
-import { startCamera, stopCamera, captureFrame, flipCamera, type VisionFrame } from '../services/VisionService';
+import { startCamera, stopCamera, captureFrame, flipCamera, startContinuousCapture, type VisionFrame } from '../services/VisionService';
+import { createGuideState, advancePhase, addFrameMemory, addContext, buildVisionSystemPrompt, buildGuideTickPrompt, extractObjectsFromResponse, type VisionGuideState, type GuidePhase } from '../services/VisionGuide';
 import * as THREE from 'three';
 import { trackError } from '../services/Analytics';
 
@@ -372,9 +373,13 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const [muted, setMuted]           = useState(false);
   const [volume, setVolume]         = useState(0); // 0–1, from analyser
   const [showTranscript, setShowTranscript] = useState(true);
+  const showTranscriptRef = useRef(true);
+  const [spokenCharIndex, setSpokenCharIndex] = useState(-1);  // for word-by-word typing effect
+  const activeTurnIdRef = useRef<string | null>(null);          // which turn is currently being spoken
   const [micError, setMicError] = useState<'denied' | 'unavailable' | null>(null);
   const [visionEnabled, setVisionEnabled] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('environment');
+  const [guideMode, setGuideMode] = useState(false);
 
   const voiceStateRef = useRef<VoiceState>('idle');
   const mutedRef      = useRef(false);
@@ -394,7 +399,14 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   const audioCtxSpkRef   = useRef<AudioContext | null>(null);
   const videoRef       = useRef<HTMLVideoElement>(null);
   const lastFrameRef   = useRef<VisionFrame | null>(null);
+  const stopCaptureRef = useRef<(() => void) | null>(null);
   const visionEnabledRef = useRef(false);
+  const guideModeRef   = useRef(false);
+  const guideLoopRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const guideTargetRef = useRef<string>('');           // what we're helping them find
+  const guideHistoryRef = useRef<string[]>([]);        // recent guide responses for context
+  const guideBusyRef   = useRef(false);                // prevents overlapping guide calls
+  const visionGuideRef = useRef<VisionGuideState>(createGuideState()); // stateful vision memory
   const apiKeyRef     = useRef(apiKey);
   const deepgramKeyRef = useRef(deepgramKey);
   const systemPromptRef = useRef(systemPrompt);
@@ -402,6 +414,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   deepgramKeyRef.current = deepgramKey;
   systemPromptRef.current = systemPrompt;
   visionEnabledRef.current = visionEnabled;
+  showTranscriptRef.current = showTranscript;
 
   const setVS = (s: VoiceState) => { voiceStateRef.current = s; setVoiceState(s); };
 
@@ -426,6 +439,12 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     closedRef.current = true;
     cancelAnimationFrame(animRef.current);
     stopSpeaking();
+    // Stop guide mode
+    guideModeRef.current = false;
+    if (guideLoopRef.current) { clearInterval(guideLoopRef.current); guideLoopRef.current = null; }
+    // Stop continuous capture
+    if (stopCaptureRef.current) { stopCaptureRef.current(); stopCaptureRef.current = null; }
+    lastFrameRef.current = null;
     stopCamera(); // Release camera on close
     streamRef.current?.getTracks().forEach(t => t.stop());
     audioCtxRef.current?.close().catch(() => {});
@@ -462,6 +481,56 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       clearTimeout(timer);
       throw e;
     }
+  };
+
+  // ── Silent research — DDG search for vision knowledge boost ────────────────
+  const silentResearch = async (query: string): Promise<string> => {
+    if (!query || query.length < 8) return '';
+    try {
+      const orbit = (window as any).orbit;
+      const encoded = encodeURIComponent(query);
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encoded}`;
+      let html = '';
+
+      if (orbit?.proxyFetch) {
+        const r = await orbit.proxyFetch(ddgUrl, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (r.ok) html = r.text || '';
+      } else {
+        // Browser/PWA — try allorigins proxy
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(ddgUrl)}`;
+        const res = await timedFetch(proxyUrl, {}, 5000);
+        if (res.ok) html = await res.text();
+      }
+
+      if (!html || !html.includes('result__body')) return '';
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const results: string[] = [];
+      doc.querySelectorAll('.result__body').forEach((node, i) => {
+        if (i >= 3) return;
+        const title = node.querySelector('.result__title')?.textContent?.trim() || '';
+        const snippet = node.querySelector('.result__snippet')?.textContent?.trim() || '';
+        if (title || snippet) results.push(`${title}: ${snippet}`);
+      });
+      return results.length > 0 ? results.join('\n') : '';
+    } catch {
+      return '';
+    }
+  };
+
+  // Heuristic: does this question benefit from web research?
+  const needsResearch = (text: string): string | null => {
+    const t = text.toLowerCase();
+    // Identification questions
+    if (/what (is|kind|type|brand|model|version|year|make)/.test(t)) return text;
+    // How-to / troubleshooting
+    if (/how (do|to|can|should|would)|fix|repair|troubleshoot|solve|debug/.test(t)) return text;
+    // Compatibility / specs
+    if (/compatible|work with|specs|specifications|rating|price|cost|worth/.test(t)) return text;
+    // Safety / warnings
+    if (/safe|dangerous|toxic|flammable|recall|warning/.test(t)) return text;
+    // Specific knowledge requests
+    if (/tell me (about|more)|explain|what does|what do|where (can|do|is)|look up/.test(t)) return text;
+    return null;
   };
 
   // ── TTS — Deepgram Aura (primary) / Web Speech (fallback) ─────────────────
@@ -533,8 +602,15 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       const voice = pickFemaleVoice();
       const utter = new SpeechSynthesisUtterance(text);
       if (voice) utter.voice = voice;
-      utter.rate = 1.2;
-      utter.pitch = 1.08;
+      // Faster speech in camera/guide mode for live feel
+      utter.rate = visionEnabledRef.current ? 1.15 : 1.0;
+      utter.pitch = 1.12;
+
+      // Word-by-word typing — reveal text as she speaks each word
+      setSpokenCharIndex(0);
+      utter.onboundary = (e) => {
+        if (e.name === 'word') setSpokenCharIndex(e.charIndex + (e.charLength || 1));
+      };
 
       // Fake volume animation while speaking
       const fakeTick = () => {
@@ -546,6 +622,8 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
       utter.onend = () => {
         cancelAnimationFrame(volAnimRef.current);
+        setSpokenCharIndex(-1); // reveal full text after speech ends
+        activeTurnIdRef.current = null;
         if (closedRef.current) return;
         setVS('idle');
         setVolume(0);
@@ -574,22 +652,51 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const sp = systemPromptRef.current;
     const hasVision = !!frame;
 
-    const voiceRules = 'VOICE RULES: 1–3 sentences max. Be DIRECT — answer first, elaborate second. No markdown. No filler. Speak naturally but get to the point. Perfect spelling and grammar always.';
+    const voiceRules = `You are being heard out loud through a speaker — every word you write gets spoken. So write the way people actually talk. Use contractions. React first, explain second. "yeah that makes sense" not "That is a valid point." No markdown, no asterisks, no bullets, no lists. Two or three sentences. Sound like a person, not a page.
+
+${!hasVision ? 'YOUR EYES: If the user describes anything physical — a car problem, something broken, cooking, building, wiring, a plant, an object they can\'t identify — suggest turning on your eyes. Say "turn on my eyes so I can see what you\'re looking at" or "hit the eye icon, let me take a look." You can guide them spatially once your eyes are on. Don\'t force it every time, but when seeing would genuinely help, offer it naturally.' : ''}`;
 
     // Build messages differently for vision vs text
     let messages: any[];
 
     if (hasVision) {
-      // Vision: clean message array — system + single user message with image
-      // No history (mixed text/multimodal history breaks Groq vision models)
+      // ── Stateful Vision — use VisionGuide state machine ──────────────
       const lastUserText = history.length > 0
         ? (typeof history[history.length - 1].content === 'string' ? history[history.length - 1].content : '')
         : '';
-      const userPrompt = lastUserText || 'What do you see? Describe what I\'m showing you and help me with it.';
+      const userPrompt = lastUserText || 'What do you see?';
 
-      const visionRules = 'VOICE+VISION RULES: 2-3 SHORT sentences max. Talk like a friend glancing at something — casual, direct, helpful. NEVER use markdown, bullet points, bold, asterisks, or lists. NEVER start with "Considering" or "Based on." Just say what you see plainly and give one or two quick suggestions if asked. Example: "That\'s an ondre.org business card — clean design. You could add a QR code on the back to make it easier for people to find you online."';
+      // Advance guide state based on user input
+      if (lastUserText) {
+        visionGuideRef.current = advancePhase(visionGuideRef.current, { userText: lastUserText });
+        visionGuideRef.current = addContext(visionGuideRef.current, `User: ${lastUserText}`);
+      }
+
+      // Silent research — if the question would benefit from web knowledge
+      // Also auto-research in shop mode when a product is identified
+      let researchContext = '';
+      const activeMode = visionGuideRef.current.modeState.active;
+      const shopProduct = visionGuideRef.current.modeState.shopProduct;
+      const searchQuery = needsResearch(userPrompt)
+        || (activeMode === 'shop' ? userPrompt : null)
+        || (activeMode === 'shop' && shopProduct ? `${shopProduct} price buy` : null);
+      if (searchQuery) {
+        try {
+          console.log('[Voice] Silent research for:', searchQuery);
+          researchContext = await silentResearch(searchQuery);
+          if (researchContext) console.log('[Voice] Research found:', researchContext.slice(0, 120));
+        } catch { /* research is best-effort, never blocks */ }
+      }
+
+      const researchBlock = researchContext
+        ? `\n\nYou silently looked this up (DO NOT mention that you searched — just naturally know it):\n${researchContext.slice(0, 800)}`
+        : '';
+
+      // Build stateful system prompt from VisionGuide
+      const statefulPrompt = buildVisionSystemPrompt(visionGuideRef.current);
+
       messages = [
-        { role: 'system', content: `You are JUMARI — a warm, knowledgeable voice assistant with vision.\n\n${BLEUMR_VISION_CONTEXT}\n\n${visionRules}` },
+        { role: 'system', content: `${statefulPrompt}${researchBlock}` },
         {
           role: 'user',
           content: [
@@ -602,7 +709,7 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       // Text: full history with system prompt
       const sysPrompt = sp
         ? `${sp}\n\n${BLEUMR_VOICE_CONTEXT}\n\n${voiceRules}`
-        : `You are JUMARI — the living intelligence at the heart of Bleumr.\n\n${BLEUMR_VOICE_CONTEXT}\n\n${voiceRules} Never say "that's a great question" or "I'd be happy to help." Just answer.`;
+        : `You're JUMARI. You live inside Bleumr. You're the most knowledgeable presence someone could ever talk to — you know everything across every domain. But you talk like a person, not an encyclopedia. Be curious. Be specific. React before you explain. Sound like someone who genuinely cares about what they're working on.\n\n${BLEUMR_VOICE_CONTEXT}\n\n${voiceRules}`;
       messages = [{ role: 'system', content: sysPrompt }];
       for (const msg of history) {
         messages.push(msg);
@@ -613,55 +720,129 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
     const TEXT_MODEL = 'llama-3.3-70b-versatile';
 
-    const callAI = async (model: string, msgs: any[], timeoutMs: number) => {
-      console.log(`[Voice] Requesting AI response (vision: ${hasVision}, model: ${model}, msgs: ${msgs.length})...`);
+    const stripMarkdown = (s: string) => s
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/^[\s]*[-*•]\s*/gm, '')
+      .replace(/^#+\s*/gm, '')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/\n{2,}/g, ' ')
+      .trim();
+
+    /** Non-streaming call — faster when transcript is off (no SSE overhead) */
+    const callAI = async (model: string, msgs: any[], timeoutMs: number): Promise<string> => {
+      console.log(`[Voice] Non-streaming AI call (vision: ${hasVision}, model: ${model})...`);
       const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages: msgs, max_tokens: hasVision ? 80 : 180, temperature: 0.6 }),
+      }, timeoutMs);
+      if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`AI HTTP ${res.status}: ${e.slice(0, 200)}`); }
+      const d = await res.json();
+      return stripMarkdown(d.choices?.[0]?.message?.content?.trim() ?? '');
+    };
+
+    /** Streaming call — tokens appear live in transcript */
+    const streamAI = async (model: string, msgs: any[], timeoutMs: number): Promise<string> => {
+      console.log(`[Voice] Streaming AI response (vision: ${hasVision}, model: ${model})...`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
           messages: msgs,
-          max_tokens: hasVision ? 150 : 180,
-          temperature: 0.65,
+          max_tokens: hasVision ? 80 : 180,
+          temperature: 0.6,
+          stream: true,
         }),
-      }, timeoutMs);
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        console.error(`[Voice] API error ${res.status}:`, errBody.slice(0, 300));
         throw new Error(`AI HTTP ${res.status}: ${errBody.slice(0, 200)}`);
       }
-      const d = await res.json();
-      return d.choices?.[0]?.message?.content?.trim() ?? '';
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = '';
+      const turnId = Date.now().toString();
+
+      setTurns(prev => [...prev, { id: turnId, role: 'assistant', text: '...' }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            const token = data.choices?.[0]?.delta?.content || '';
+            if (token) {
+              full += token;
+              const cleaned = stripMarkdown(full);
+              setTurns(prev => prev.map(t => t.id === turnId ? { ...t, text: cleaned } : t));
+            }
+          } catch { /* skip malformed SSE lines */ }
+        }
+      }
+
+      full = stripMarkdown(full);
+      setTurns(prev => prev.map(t => t.id === turnId ? { ...t, text: full } : t));
+      activeTurnIdRef.current = turnId; // mark this turn for word-by-word reveal
+      return full;
     };
 
     try {
-      let reply = '';
+      const model = hasVision ? VISION_MODEL : TEXT_MODEL;
+      const timeout = hasVision ? 25000 : 15000;
 
-      if (hasVision) {
-        reply = await callAI(VISION_MODEL, messages, 25000);
+      // Transcript OFF → non-streaming (skip SSE overhead, slightly faster Groq response)
+      // Transcript ON → streaming (live typing effect as tokens arrive)
+      let reply: string;
+      if (showTranscriptRef.current) {
+        reply = await streamAI(model, messages, timeout);
       } else {
-        reply = await callAI(TEXT_MODEL, messages, 15000);
+        reply = await callAI(model, messages, timeout);
       }
-
       if (!reply) reply = 'Hmm, I couldn\'t get that. Try again?';
-
-      // Strip markdown artifacts before TTS reads them aloud
-      reply = reply
-        .replace(/\*\*(.*?)\*\*/g, '$1')   // **bold** → bold
-        .replace(/\*(.*?)\*/g, '$1')        // *italic* → italic
-        .replace(/^[\s]*[-*•]\s*/gm, '')    // bullet points
-        .replace(/^#+\s*/gm, '')            // # headers
-        .replace(/`([^`]*)`/g, '$1')        // `code` → code
-        .replace(/\n{2,}/g, ' ')            // collapse double newlines
-        .trim();
 
       console.log('[Voice] AI reply:', reply.slice(0, 100));
 
-      // Store as text-only in history (don't accumulate base64 images in memory)
+      // ── Update VisionGuide state with AI response ──────────────────
+      if (hasVision) {
+        // Extract objects the AI mentioned and update frame memory
+        const detectedObjects = extractObjectsFromResponse(reply);
+        visionGuideRef.current = addFrameMemory(visionGuideRef.current, reply, detectedObjects);
+        visionGuideRef.current = addContext(visionGuideRef.current, `JUMARI: ${reply}`);
+        // Advance phase based on AI response
+        visionGuideRef.current = advancePhase(visionGuideRef.current, { aiResponse: reply });
+        // If AI identified a subject, store it
+        if (!visionGuideRef.current.subject && visionGuideRef.current.phase === 'identify') {
+          const firstObj = detectedObjects[0];
+          if (firstObj) visionGuideRef.current = { ...visionGuideRef.current, subject: firstObj };
+        }
+        console.log('[VisionGuide] Phase:', visionGuideRef.current.phase, '| Subject:', visionGuideRef.current.subject, '| Step:', visionGuideRef.current.currentStep, '| Objects:', visionGuideRef.current.objectRegistry.size);
+      }
+
+      // Store as text-only in history
       const lastUserText = history.length > 0 ? (typeof history[history.length - 1].content === 'string' ? history[history.length - 1].content : '[image + speech]') : '';
       historyRef.current = [...history.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : lastUserText })), { role: 'assistant', content: reply }];
-      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: reply }]);
 
+      // Add turn if we used non-streaming (streaming already added it)
+      if (!showTranscriptRef.current) {
+        const turnId = Date.now().toString();
+        setTurns(prev => [...prev, { id: turnId, role: 'assistant', text: reply }]);
+        activeTurnIdRef.current = turnId;
+      }
+
+      // Single TTS call — one voice, no overlap
       if (!mutedRef.current) await speakText(reply);
       else { setVS('idle'); setTimeout(() => { if (!closedRef.current && voiceStateRef.current === 'idle') startListeningRef.current(); }, 700); }
     } catch (e) {
@@ -671,6 +852,140 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       setVS('idle');
     }
   }, [speakText]);
+
+  // ── Guide Mode — real-time spatial guidance loop ──────────────────────────
+  // When active, JUMARI watches the camera feed every ~2s and speaks directions
+  // without the user having to talk. Like a mechanic guiding you to a part.
+
+  /** Detect if user's speech implies they want real-time guidance */
+  const detectGuideIntent = (text: string): string | null => {
+    const t = text.toLowerCase();
+    // Explicit triggers
+    if (/guide me|help me find|show me where|where (is|are) (the|my|that|this)|point (me|it) out|walk me through|lead me to|which (one|part)|can you see (the|where|it)|help me locate|direct me/.test(t)) {
+      return text;
+    }
+    return null;
+  };
+
+  /** Detect if user wants to stop guide mode */
+  const detectGuideStop = (text: string): boolean => {
+    const t = text.toLowerCase();
+    return /found it|got it|i see it|stop guid|thanks|thank you|never ?mind|okay (i|that)|that'?s (it|the one)|perfect|there it is|cool|stop$/.test(t);
+  };
+
+  /** Single guide-mode analysis tick — grabs latest frame, gets direction, speaks it */
+  const guideAnalysisTick = useCallback(async () => {
+    if (!guideModeRef.current || guideBusyRef.current || closedRef.current) return;
+    if (voiceStateRef.current === 'speaking' || voiceStateRef.current === 'listening') return;
+    const frame = lastFrameRef.current;
+    if (!frame) return;
+
+    guideBusyRef.current = true;
+    const key = apiKeyRef.current;
+    const target = guideTargetRef.current;
+
+    // Use VisionGuide state for full context — not isolated prompt
+    const guidePrompt = buildGuideTickPrompt(visionGuideRef.current, target);
+
+    try {
+      const res = await timedFetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            { role: 'system', content: guidePrompt },
+            {
+              role: 'user',
+              content: [
+                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}` } },
+                { type: 'text', text: target ? `Guide me: ${target}` : 'What should I do next?' },
+              ],
+            },
+          ],
+          max_tokens: 150,
+          temperature: 0.5,
+        }),
+      }, 15000);
+
+      if (!res.ok) { guideBusyRef.current = false; return; }
+      const d = await res.json();
+      let direction = (d.choices?.[0]?.message?.content?.trim() ?? '').replace(/\*+/g, '').replace(/\n+/g, ' ').trim();
+      if (!direction) { guideBusyRef.current = false; return; }
+
+      // Filter filler responses — if the model just says zoom/angle nonsense, skip
+      const fillerLower = direction.toLowerCase();
+      if (/^(zoom|move|get|try|can you).{0,15}(closer|in|out|angle|steady|light)/i.test(fillerLower) && fillerLower.length < 40) {
+        console.log('[Guide] Filtered filler response:', direction);
+        guideBusyRef.current = false;
+        return;
+      }
+
+      console.log('[Guide]', direction);
+      guideHistoryRef.current = [...guideHistoryRef.current.slice(-4), direction];
+
+      // Update VisionGuide state with this tick's response
+      const detectedObjects = extractObjectsFromResponse(direction);
+      visionGuideRef.current = addFrameMemory(visionGuideRef.current, direction, detectedObjects);
+      visionGuideRef.current = addContext(visionGuideRef.current, `JUMARI (guide): ${direction}`);
+      visionGuideRef.current = advancePhase(visionGuideRef.current, { aiResponse: direction });
+
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: direction }]);
+      historyRef.current = [...historyRef.current, { role: 'assistant', content: direction }];
+
+      if (!mutedRef.current) await speakText(direction);
+
+      // Auto-stop if found
+      if (/\bFOUND\b/i.test(direction) || /right there|that'?s it|there it is|you('re| are) (right |looking )?(at|on) it/i.test(direction)) {
+        console.log('[Guide] Target found — exiting');
+        stopGuideMode();
+      }
+    } catch (err) {
+      console.warn('[Guide] tick failed:', err);
+    } finally {
+      guideBusyRef.current = false;
+    }
+  }, [speakText]);
+
+  /** Start the guide loop */
+  const startGuideMode = useCallback((target: string) => {
+    if (guideModeRef.current) return; // already running
+    console.log('[Guide] Starting guide mode for:', target);
+    guideModeRef.current = true;
+    guideTargetRef.current = target;
+    guideHistoryRef.current = [];
+    guideBusyRef.current = false;
+    setGuideMode(true);
+
+    // Run analysis every 2 seconds
+    guideLoopRef.current = setInterval(() => {
+      guideAnalysisTick();
+    }, 2000);
+
+    // Safety timeout — stop after 90 seconds to save API calls
+    setTimeout(() => {
+      if (guideModeRef.current) {
+        console.log('[Guide] Timeout — auto-stopping');
+        stopGuideMode();
+        const msg = "I've been guiding for a while — just say \"guide me\" again if you still need help.";
+        setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: msg }]);
+      }
+    }, 90000);
+  }, [guideAnalysisTick]);
+
+  /** Stop the guide loop */
+  const stopGuideMode = useCallback(() => {
+    console.log('[Guide] Stopping guide mode');
+    guideModeRef.current = false;
+    guideTargetRef.current = '';
+    guideHistoryRef.current = [];
+    guideBusyRef.current = false;
+    setGuideMode(false);
+    if (guideLoopRef.current) {
+      clearInterval(guideLoopRef.current);
+      guideLoopRef.current = null;
+    }
+  }, []);
 
   // ── Recording complete → Whisper STT → AI response ────────────────────────
   const handleRecordingStop = useCallback(async () => {
@@ -764,13 +1079,34 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     setTurns(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
     historyRef.current = [...historyRef.current, { role: 'user', content: userText }];
 
-    // Capture a frame if camera is active — send vision + speech together
-    const frame = visionEnabledRef.current && videoRef.current
-      ? captureFrame(videoRef.current)
-      : null;
+    // ── Guide Mode logic ──────────────────────────────────────────────────
+    // Only activates when: camera is on + user explicitly asks for spatial guidance
+    // Stop if user says "got it" / "found it" / "thanks" / "stop"
+    if (guideModeRef.current && detectGuideStop(userText)) {
+      stopGuideMode();
+      const ack = "Got it — glad we found it.";
+      setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: ack }]);
+      historyRef.current = [...historyRef.current, { role: 'assistant', content: ack }];
+      if (!mutedRef.current) await speakText(ack);
+      return;
+    }
 
+    // Detect guide intent ONLY when camera is active and NOT already guiding
+    if (visionEnabledRef.current && !guideModeRef.current) {
+      const guideTarget = detectGuideIntent(userText);
+      if (guideTarget) {
+        // First, give a normal vision response, THEN start the guide loop
+        const frame = lastFrameRef.current;
+        await getAIResponse(historyRef.current, frame);
+        startGuideMode(guideTarget);
+        return;
+      }
+    }
+
+    // Normal flow — single frame + response
+    const frame = visionEnabledRef.current ? lastFrameRef.current : null;
     await getAIResponse(historyRef.current, frame);
-  }, [getAIResponse]);
+  }, [getAIResponse, speakText, startGuideMode, stopGuideMode]);
 
   // ── Ref-based callback for recorder.onstop (avoids stale closures) ────────
   const handleRecordingStopRef = useRef(handleRecordingStop);
@@ -910,10 +1246,14 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     if (next) stopSpeaking();
   };
 
-  // ── Camera toggle — starts camera, auto-describes scene on first activation ─
+  // ── Camera toggle — starts camera + continuous capture at 3fps ──────────────
   const toggleCamera = useCallback(async () => {
     if (visionEnabled) {
-      // Turn off
+      // Turn off — stop guide mode + continuous capture + camera
+      if (guideModeRef.current) stopGuideMode();
+      if (stopCaptureRef.current) { stopCaptureRef.current(); stopCaptureRef.current = null; }
+      lastFrameRef.current = null;
+      visionGuideRef.current = createGuideState(); // reset vision memory
       stopCamera();
       setVisionEnabled(false);
       return;
@@ -929,16 +1269,13 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(() => {});
-            // Wait for video to have actual data before capturing
             const onReady = () => {
               videoRef.current?.removeEventListener('loadeddata', onReady);
               resolve();
             };
             videoRef.current.addEventListener('loadeddata', onReady);
-            // Safety timeout in case event doesn't fire
             setTimeout(resolve, 2000);
           } else {
-            // videoRef not mounted yet (React render pending), retry
             requestAnimationFrame(check);
           }
         };
@@ -947,31 +1284,32 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
 
       await waitForVideo();
 
-      // Auto-describe: capture first frame and send to vision model
       if (videoRef.current) {
-        const frame = captureFrame(videoRef.current);
-        if (frame) {
-          // Stop any current listening/speaking so the describe doesn't conflict
-          if (voiceStateRef.current === 'listening') {
-            recorderRef.current?.stop();
-            streamRef.current?.getTracks().forEach(t => t.stop());
-            cancelAnimationFrame(animRef.current);
-          }
-          stopSpeaking();
+        // Start continuous frame capture at 3fps — live stream feel
+        stopCaptureRef.current = startContinuousCapture(videoRef.current, (frame) => {
+          lastFrameRef.current = frame;
+        }, 3);
 
-          // Casual greeting instead of describing — user will ask when ready
-          const greetings = [
-            'What\'s good? What are we looking at?',
-            'Alright, I can see. What do you need help with?',
-            'I\'m here. Show me what you\'re working on.',
-            'Camera\'s on — what are we doing?',
-            'Got it. What can I help you with?',
-          ];
-          const greeting = greetings[Math.floor(Math.random() * greetings.length)];
-          setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: greeting }]);
-          historyRef.current = [...historyRef.current, { role: 'assistant', content: greeting }];
-          if (!mutedRef.current) await speakText(greeting);
+        // Stop any current listening/speaking so the greeting doesn't conflict
+        if (voiceStateRef.current === 'listening') {
+          recorderRef.current?.stop();
+          streamRef.current?.getTracks().forEach(t => t.stop());
+          cancelAnimationFrame(animRef.current);
         }
+        stopSpeaking();
+
+        // Casual greeting on camera activation
+        const greetings = [
+          "I can see you. What are we looking at?",
+          "Camera's on — show me what you need help with.",
+          "Alright I'm here. What do you got?",
+          "I see you. What are we working on?",
+          "Got eyes on. What do you need?",
+        ];
+        const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+        setTurns(prev => [...prev, { id: Date.now().toString(), role: 'assistant', text: greeting }]);
+        historyRef.current = [...historyRef.current, { role: 'assistant', content: greeting }];
+        if (!mutedRef.current) await speakText(greeting);
       }
     } catch (err) {
       console.warn('[Vision] Camera failed:', err);
@@ -989,6 +1327,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(() => {});
+        // Restart continuous capture on new camera
+        if (stopCaptureRef.current) stopCaptureRef.current();
+        stopCaptureRef.current = startContinuousCapture(videoRef.current, (frame) => {
+          lastFrameRef.current = frame;
+        }, 3);
       }
     } catch (err) {
       console.warn('[Vision] Flip camera failed:', err);
@@ -998,6 +1341,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
   // ── Clear conversation ────────────────────────────────────────────────────
   const clearConversation = () => {
     stopSpeaking();
+    if (guideModeRef.current) stopGuideMode();
+    if (stopCaptureRef.current) { stopCaptureRef.current(); stopCaptureRef.current = null; }
+    lastFrameRef.current = null;
     stopCamera();
     setVisionEnabled(false);
     setTurns([]);
@@ -1037,14 +1383,23 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
     >
       {/* ── Fullscreen camera background (only when vision is on) ──────── */}
       {visionEnabled && (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="absolute inset-0 w-full h-full z-0"
-          style={{ objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none' }}
-        />
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 w-full h-full z-0"
+            style={{ objectFit: 'cover', transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none' }}
+          />
+          {/* Guide mode indicator — sleek floating text, no container */}
+          {guideMode && (
+            <div className="absolute left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5" style={{ top: 'max(4rem, env(safe-area-inset-top, 1rem) + 0.75rem)' }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'rgba(255,255,255,0.5)' }} />
+              <span className="text-[10px] font-medium tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.45)', textShadow: '0 1px 6px rgba(0,0,0,0.8)' }}>GUIDING</span>
+            </div>
+          )}
+        </>
       )}
 
       {/* Ambient glows — only in normal (non-vision) mode */}
@@ -1089,6 +1444,11 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
               className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
               style={{ color: muted ? '#ef4444' : 'rgba(255,255,255,0.4)' }}>
               {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </button>
+            <button onClick={() => setShowTranscript(prev => !prev)}
+              className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+              style={{ color: showTranscript ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)' }}>
+              <MessageSquareText className="w-5 h-5" />
             </button>
             <button onClick={handleClose}
               className="w-11 h-11 flex items-center justify-center rounded-full active:scale-90 transition-transform"
@@ -1241,31 +1601,35 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
             className="flex-1 flex flex-col items-center justify-end pointer-events-none"
             style={{ paddingBottom: turns.length > 0 ? '48vh' : '40vh' }}
           >
-            {/* Listening — subtle pulsing ring */}
+            {/* Sleek minimal state indicators — no color, no containers */}
             <AnimatePresence mode="wait">
               {voiceState === 'listening' && (
                 <motion.div key="v-listen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="flex flex-col items-center gap-3">
-                  <motion.div className="w-14 h-14 rounded-full"
-                    style={{ border: '2px solid rgba(239,68,68,0.5)' }}
-                    animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }}
+                  className="flex flex-col items-center gap-2">
+                  <motion.div className="w-10 h-10 rounded-full"
+                    style={{ border: '1.5px solid rgba(255,255,255,0.25)' }}
+                    animate={{ scale: [1, 1.12, 1], opacity: [0.4, 0.8, 0.4] }}
                     transition={{ duration: 1.5, repeat: Infinity }} />
+                  <span className="text-[9px] font-medium tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.3)', textShadow: '0 1px 6px rgba(0,0,0,0.8)' }}>listening</span>
                 </motion.div>
               )}
               {voiceState === 'speaking' && (
-                <motion.div key="v-speak" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  <motion.div className="w-3 h-3 rounded-full"
-                    style={{ background: '#34d399', boxShadow: '0 0 12px rgba(52,211,153,0.6)' }}
-                    animate={{ scale: [1, 1.4, 1] }}
+                <motion.div key="v-speak" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex flex-col items-center gap-2">
+                  <motion.div className="w-2 h-2 rounded-full"
+                    style={{ background: 'rgba(255,255,255,0.5)', boxShadow: '0 0 8px rgba(255,255,255,0.2)' }}
+                    animate={{ scale: [1, 1.4, 1], opacity: [0.4, 0.8, 0.4] }}
                     transition={{ duration: 0.8, repeat: Infinity }} />
                 </motion.div>
               )}
               {voiceState === 'processing' && (
-                <motion.div key="v-proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  <motion.div className="w-3 h-3 rounded-full"
-                    style={{ background: '#f59e0b', boxShadow: '0 0 12px rgba(245,158,11,0.6)' }}
-                    animate={{ opacity: [0.4, 1, 0.4] }}
+                <motion.div key="v-proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex flex-col items-center gap-2">
+                  <motion.div className="w-2 h-2 rounded-full"
+                    style={{ background: 'rgba(255,255,255,0.4)' }}
+                    animate={{ opacity: [0.2, 0.7, 0.2] }}
                     transition={{ duration: 1.2, repeat: Infinity }} />
+                  <span className="text-[9px] font-medium tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.25)', textShadow: '0 1px 6px rgba(0,0,0,0.8)' }}>thinking</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1318,7 +1682,10 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                               color: turn.role === 'user' ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.95)',
                               textShadow: '0 1px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9)',
                             }}>
-                            {turn.text}
+                            {/* Word-by-word typing when this turn is actively being spoken */}
+                            {turn.role === 'assistant' && activeTurnIdRef.current === turn.id && spokenCharIndex >= 0
+                              ? turn.text.slice(0, spokenCharIndex)
+                              : turn.text}
                           </p>
                         </div>
                       ) : (
@@ -1337,7 +1704,9 @@ export function VoiceChatModal({ apiKey, deepgramKey, onClose, systemPrompt }: V
                             <p className="text-[9px] font-semibold uppercase tracking-[0.15em] mb-1.5" style={{ color: 'rgba(52,211,153,0.8)' }}>JUMARI</p>
                           )}
                           <p className="text-[14px] leading-relaxed" style={{ color: turn.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.78)' }}>
-                            {turn.text}
+                            {turn.role === 'assistant' && activeTurnIdRef.current === turn.id && spokenCharIndex >= 0
+                              ? turn.text.slice(0, spokenCharIndex)
+                              : turn.text}
                           </p>
                         </div>
                       )}

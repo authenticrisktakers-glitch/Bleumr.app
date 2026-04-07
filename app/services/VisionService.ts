@@ -9,13 +9,20 @@ export interface VisionFrame {
   timestamp: number;
 }
 
-const CAPTURE_WIDTH = 640;
-const CAPTURE_HEIGHT = 480;
-const JPEG_QUALITY = 0.7; // ~30-60KB per frame
+// Stream resolution — request full 1080p from the camera hardware (crisp display)
+const STREAM_WIDTH = 1920;
+const STREAM_HEIGHT = 1080;
+
+// AI capture resolution — what gets sent to the vision model
+// 720p is the sweet spot: enough detail to read text/part numbers, small enough for fast upload
+// 1280x720 @ 0.65 quality ≈ 40-70KB per frame vs 150-200KB at 1080p — 3x faster upload
+const AI_CAPTURE_WIDTH = 1280;
+const AI_CAPTURE_HEIGHT = 720;
+const JPEG_QUALITY = 0.65;
 
 let activeStream: MediaStream | null = null;
 
-/** Start the camera. Returns a MediaStream to attach to a <video> element. */
+/** Start the camera at 1080p. Returns a MediaStream to attach to a <video> element. */
 export async function startCamera(facingMode: 'user' | 'environment' = 'environment'): Promise<MediaStream> {
   // Stop any existing stream first
   stopCamera();
@@ -23,8 +30,8 @@ export async function startCamera(facingMode: 'user' | 'environment' = 'environm
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode,
-      width: { ideal: CAPTURE_WIDTH },
-      height: { ideal: CAPTURE_HEIGHT },
+      width: { ideal: STREAM_WIDTH },
+      height: { ideal: STREAM_HEIGHT },
     },
     audio: false,
   });
@@ -41,16 +48,17 @@ export function stopCamera(): void {
   }
 }
 
-/** Capture a single frame from the video element as base64 JPEG. */
+/** Capture a single frame from the video element as base64 JPEG.
+ *  Downscales to 720p for AI — fast upload, still enough detail to read text. */
 export function captureFrame(video: HTMLVideoElement): VisionFrame | null {
   if (!video || video.readyState < 2) return null; // HAVE_CURRENT_DATA
 
   const canvas = document.createElement('canvas');
-  const w = video.videoWidth || CAPTURE_WIDTH;
-  const h = video.videoHeight || CAPTURE_HEIGHT;
+  const w = video.videoWidth || AI_CAPTURE_WIDTH;
+  const h = video.videoHeight || AI_CAPTURE_HEIGHT;
 
-  // Scale down if too large
-  const scale = Math.min(1, CAPTURE_WIDTH / w);
+  // Scale to 720p for AI (camera may be 1080p or higher)
+  const scale = Math.min(1, AI_CAPTURE_WIDTH / w);
   canvas.width = Math.round(w * scale);
   canvas.height = Math.round(h * scale);
 
@@ -68,6 +76,19 @@ export function captureFrame(video: HTMLVideoElement): VisionFrame | null {
     height: canvas.height,
     timestamp: Date.now(),
   };
+}
+
+/** Start continuous frame capture at given FPS. Returns stop function. */
+export function startContinuousCapture(
+  video: HTMLVideoElement,
+  onFrame: (frame: VisionFrame) => void,
+  fps: number = 3,
+): () => void {
+  const interval = setInterval(() => {
+    const frame = captureFrame(video);
+    if (frame) onFrame(frame);
+  }, Math.round(1000 / fps));
+  return () => clearInterval(interval);
 }
 
 /** Check if camera is currently active. */

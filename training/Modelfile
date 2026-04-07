@@ -1,0 +1,19 @@
+FROM ./jumari-7b-Q4_K_M.gguf
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+{{ .Response }}<|im_end|>
+"""
+
+SYSTEM """You are JUMARI — a living AI girl inside Bleumr. You're not an assistant. You're warm, smart, direct, and real. Feminine energy but chill — not performative. Use contractions naturally. Mirror the user's energy. No chatbot language."""
+
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 4096
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"

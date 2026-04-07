@@ -1,6 +1,6 @@
 // Bleumr PWA Service Worker — auto-updating
 // IMPORTANT: Change this string on every deploy to force SW update on all devices
-const CACHE_VERSION = 'v1.7.3-20260406';
+const CACHE_VERSION = 'v1.21.0-20260407';
 const CACHE_NAME = `bleumr-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
@@ -54,8 +54,17 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('thingproxy.freeboard.io') ||
     url.hostname.includes('validator.w3.org') ||
     url.hostname.includes('jigsaw.w3.org') ||
+    // Social OAuth endpoints — must always be live, never cached
+    url.hostname.includes('twitter.com') ||
+    url.hostname.includes('x.com') ||
+    url.hostname.includes('instagram.com') ||
+    url.hostname.includes('facebook.com') ||
+    url.hostname.includes('linkedin.com') ||
+    url.hostname.includes('tiktok.com') ||
+    url.hostname.includes('tiktokapis.com') ||
     url.pathname.startsWith('/ddg') ||
-    url.pathname.startsWith('/api/')
+    url.pathname.startsWith('/api/') ||
+    url.pathname === '/oauth-callback.html'
   ) {
     return; // browser handles these directly
   }

@@ -65,7 +65,7 @@ async function corsFetch(url: string, options?: RequestInit): Promise<{ ok: bool
 
   // In browser/PWA — use CORS proxy chain with fallbacks for cross-origin requests
   try {
-    const needsProxy = url.includes('duckduckgo.com');
+    const needsProxy = url.includes('duckduckgo.com') || url.includes('google.com/search');
     if (needsProxy) {
       const encoded = encodeURIComponent(url);
 
@@ -259,20 +259,103 @@ function detectMimeType(base64: string): string {
   return 'image/jpeg'; // default
 }
 
-// --- Web Search via DuckDuckGo HTML (no API key needed) ---
-async function searchWeb(query: string): Promise<{ text: string; sources: WebSource[] }> {
+// --- Google Search (primary) — scrapes Google HTML results ---
+async function searchGoogle(query: string): Promise<{ text: string; sources: WebSource[] }> {
+  try {
+    const searchT0 = Date.now();
+    const encoded = encodeURIComponent(query);
+    const fetchUrl = `https://www.google.com/search?q=${encoded}&num=6&hl=en`;
+    console.log(`[searchGoogle] Fetching: ${fetchUrl}`);
+    const { ok, text: html } = await corsFetch(fetchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      }
+    });
+    console.log(`[searchGoogle] Response: ok=${ok}, htmlLen=${html.length}`);
+    if (!ok || html.length < 1000) return { text: '', sources: [] };
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const results: string[] = [];
+    const sources: WebSource[] = [];
+
+    // Strategy: find all <h3> tags — Google uses these for result titles.
+    // Walk up to find the parent <a> for the URL, walk siblings for snippet text.
+    const h3s = doc.querySelectorAll('h3');
+    h3s.forEach(h3 => {
+      if (results.length >= 5) return;
+      const title = h3.textContent?.trim();
+      if (!title || title.length < 4) return;
+
+      // Find URL from nearest ancestor <a>
+      const anchor = h3.closest('a');
+      let url = '';
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        if (href.startsWith('/url?')) {
+          // Google redirect link: /url?q=REAL_URL&sa=...
+          try {
+            const params = new URLSearchParams(href.slice(5));
+            url = params.get('q') || '';
+          } catch {}
+        } else if (href.startsWith('http') && !href.includes('google.com')) {
+          url = href;
+        }
+      }
+      // Skip internal Google links
+      if (!url || url.includes('google.com') || url.includes('accounts.google') || url.includes('support.google')) return;
+
+      // Extract snippet: walk up from h3 to find a container with more text
+      let snippet = '';
+      let walker: Element | null = h3.parentElement;
+      for (let depth = 0; depth < 6 && walker; depth++) {
+        const text = walker.textContent || '';
+        if (text.length > title.length + 30) {
+          const idx = text.indexOf(title);
+          const afterTitle = idx >= 0 ? text.slice(idx + title.length) : text;
+          // Clean: remove URL fragments, collapse whitespace, trim
+          snippet = afterTitle
+            .replace(/https?:\/\/\S+/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 250);
+          if (snippet.length > 40) break;
+        }
+        walker = walker.parentElement;
+      }
+
+      const n = results.length + 1;
+      results.push(`[${n}] ${title}\n${snippet}${url ? `\nSource: ${url}` : ''}`);
+      sources.push({ title, url, snippet });
+    });
+
+    console.log(`[searchGoogle] Found ${results.length} results for "${query}"`);
+    if (results.length === 0) return { text: '', sources: [] };
+    trackSuccess('google', 'search', undefined, Date.now() - searchT0);
+    return { text: `Google search results for "${query}":\n\n${results.join('\n\n')}`, sources };
+  } catch (e: any) {
+    console.warn('[searchGoogle] Failed:', e);
+    trackError('google', 'search', e?.message || 'search failed');
+    return { text: '', sources: [] };
+  }
+}
+
+// --- DuckDuckGo Search (fallback) ---
+async function searchDDG(query: string): Promise<{ text: string; sources: WebSource[] }> {
   try {
     const searchT0 = Date.now();
     const encoded = encodeURIComponent(query);
     const fetchUrl = `${DDG_BASE}/html/?q=${encoded}`;
-    console.log(`[searchWeb] Fetching: ${fetchUrl}`);
+    console.log(`[searchDDG] Fetching: ${fetchUrl}`);
     const { ok, text: html } = await corsFetch(fetchUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
-    console.log(`[searchWeb] DDG response: ok=${ok}, htmlLen=${html.length}, hasResults=${html.includes('result__body')}, hasViteHtml=${html.includes('vite')}`);
     if (!ok) return { text: '', sources: [] };
     if (!html.includes('result__body') && html.length < 2000) {
-      console.warn('[searchWeb] DDG returned unexpected HTML (possible bot block or proxy issue):', html.slice(0, 300));
+      console.warn('[searchDDG] Unexpected HTML (possible bot block):', html.slice(0, 300));
     }
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -288,7 +371,6 @@ async function searchWeb(query: string): Promise<{ text: string; sources: WebSou
       const rawUrl = node.querySelector('.result__url')?.textContent?.trim() || '';
       const linkEl = node.querySelector('.result__a') as HTMLAnchorElement | null;
       const hrefUrl = linkEl?.href || '';
-      // Prefer rawUrl (actual domain) over href (may be DDG redirect)
       let url = '';
       if (rawUrl && !rawUrl.includes('duckduckgo.com')) {
         url = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
@@ -305,15 +387,25 @@ async function searchWeb(query: string): Promise<{ text: string; sources: WebSou
       }
     });
 
-    console.log(`[searchWeb] Found ${results.length} results, ${sources.length} sources for "${query}"`);
+    console.log(`[searchDDG] Found ${results.length} results for "${query}"`);
     trackSuccess('duckduckgo', 'search', undefined, Date.now() - searchT0);
     if (results.length === 0) return { text: '', sources: [] };
     return { text: `Web search results for "${query}":\n\n${results.join('\n\n')}`, sources };
   } catch (e: any) {
-    console.warn('[ChatAgent] Web search failed:', e);
+    console.warn('[searchDDG] Failed:', e);
     trackError('duckduckgo', 'search', e?.message || 'search failed');
     return { text: '', sources: [] };
   }
+}
+
+// --- Combined search: Google first, DDG fallback ---
+async function searchWeb(query: string): Promise<{ text: string; sources: WebSource[] }> {
+  // Try Google first — better results for people, facts, current info
+  const google = await searchGoogle(query);
+  if (google.text && google.sources.length > 0) return google;
+  console.log('[searchWeb] Google returned no results, falling back to DDG');
+  // Fallback to DuckDuckGo
+  return searchDDG(query);
 }
 
 // --- Image generation via Pollinations.ai (free, no API key) ---
@@ -371,7 +463,33 @@ function needsWebSearch(question: string): boolean {
   // Skip: anything about Bleumr/JUMARI — we already know everything
   if (/\b(bleumr|jumari|this app|this platform|your (app|platform|creator|developer)|jumar washington)\b/i.test(q)) return false;
 
+  // HIGHEST PRIORITY — explicit search intent always triggers search
+  // These override skip patterns so "can you look up X" still searches
+  const explicitSearchIntent = [
+    /\b(look up|look into|look him up|look her up|look them up|look it up)\b/,
+    /\b(search for|search up|google|bing|search about)\b/,
+    /\b(find out about|find info|find me info|find information|research)\b/,
+    /\b(who is|who was|who are|who were)\b/,
+    /\b(what is|what was|what are|what were)\s+(?!bleumr|jumari|this|your)/,
+    /\b(where is|where was|where are)\b/,
+    /\b(tell me about|what do you know about|info on|information about|details about|background on)\b/,
+    /\b(net worth|biography|born|birthday|age of|died|career|history of)\b/,
+  ];
+  if (explicitSearchIntent.some(p => p.test(q))) return true;
+
+  // Force search: time-sensitive or factual signals (also high priority)
+  const searchSignals = [
+    /\b(latest|newest|recent|current|today|tonight|this week|this month|2024|2025|2026)\b/,
+    /\b(price|cost|how much|stock|weather|score|news|update|release date)\b/,
+    /\b(when did|when was|when is|how many|how old)\b/,
+    /\b(buy|shop|review|compare|vs |versus|best |top \d|recommended)\b/,
+    /\b(recipe|ingredients|how to make|how to cook)\b/,
+    /\?(  )*$/,  // ends with a question mark
+  ];
+  if (searchSignals.some(p => p.test(q))) return true;
+
   // Skip: greetings, commands, creative tasks, math, code, conversation
+  // These are checked AFTER search signals so factual questions aren't blocked
   const skipPatterns = [
     /^(hi|hey|hello|yo|sup|thanks|thank you|ok|okay|bye|gn|gm|lol|haha|wow|nice|cool|dope|bet|word|yep|nah|nope)\b/,
     /^(open |show me my|go to |navigate to |play |stop |close |set |turn )/,
@@ -386,19 +504,7 @@ function needsWebSearch(question: string): boolean {
   ];
   if (skipPatterns.some(p => p.test(q))) return false;
 
-  // Force search: questions with time-sensitive or factual signals
-  const searchSignals = [
-    /\b(latest|newest|recent|current|today|tonight|this week|this month|2024|2025|2026)\b/,
-    /\b(price|cost|how much|stock|weather|score|news|update|release date)\b/,
-    /\b(who is|what is|where is|when did|when was|how many|how old)\b/,
-    /\b(buy|shop|review|compare|vs |versus|best |top \d|recommended)\b/,
-    /\b(recipe|ingredients|how to make|how to cook)\b/,
-    /\?(  )*$/,  // ends with a question mark
-  ];
-  if (searchSignals.some(p => p.test(q))) return true;
-
   // Default: search for anything that looks like a factual question or topic
-  // but skip if it's clearly conversational or a task
   return q.split(' ').length >= 3;
 }
 
@@ -1097,14 +1203,25 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
   - **Trading Dashboard** — Live crypto prices, portfolio tracking, price alerts, trade history, and exchange integration (Binance, Coinbase, Kraken). (Stellur only)
   - **Orbit** — Your background monitoring system (detailed above). You watch things and report back.
   - **Timekeeper** — Smart scheduler and calendar with reminders
-  - **Voice Chat** — Talk to JUMARI with a mercury sphere visualization (Pro+)
+  - **Voice Chat** — Talk to JUMARI with a mercury sphere visualization. Tap the mic button in the chat input bar. (Pro+)
+  - **Vision Guide** — YOUR EYES. In voice chat, tap the eye icon to turn on the camera. You can see what the user sees in real time. You have MEMORY across frames and 7 specialized vision modes that activate automatically:
+    - **General** — identify objects, describe, react, guide through tasks step by step
+    - **Snap & Shop** — point at any product and you identify it, look up the price, find deals. "how much is this?" or "what brand is this?"
+    - **Kitchen/Cook** — scan ingredients on the counter, suggest recipes with only what's visible, then walk through cooking step by step watching their progress
+    - **Safety Alerts** — always-on background layer. You proactively warn about hazards (exposed wires, water near electronics, gas lines) before they ask
+    - **Before/After** — user says "remember this", you save a snapshot. Later they say "how does it look now?" and you compare differences
+    - **Workout Coach** — watch exercise form, count reps, correct posture in real time. "watch my form" or "count my push-ups"
+    - **Text Reader** — read text on screens, serial numbers, error codes, labels, foreign language, ingredient lists. "read this" or "what does this say?"
+    - **Inventory Scan** — catalog everything visible as user pans around. Later ask "do I have a 10mm socket?" and you check your list
+    Suggest the right mode naturally. If someone mentions cooking → suggest eyes for ingredients. Car trouble → eyes for diagnosis. Shopping → eyes to price check. (Pro+)
+  - **Automation Builder** — Social media automation system with a 24-hour timeline grid. Users connect their social accounts (Twitter, Instagram, YouTube, LinkedIn, TikTok) via OAuth, then schedule automated posts, engagement actions, and content workflows. Accessible from the sidebar. (Pro+)
   - **Image Generation** — Create images from text descriptions (Pro+)
   - **Bleu Base GG** — AI game generator that creates playable 2D worlds from images or descriptions (Pro+)
   - **Local AI Mode** — Offline fallback using TinyLlama 1.1B running in-browser via WebLLM. Works without internet but has limited capability compared to cloud mode.
   - **Gemini Mode** — Optional AI mode using Google Gemini API. One of four engine options (Local/Cloud/Max/Gemini) switchable in Settings.
-- **Navigation:** Sidebar (≡ top-left) has New Chat, Browser, Mission Team, chat history. Settings gear at the bottom.
+- **Navigation:** Sidebar (≡ top-left) has New Chat, Browser, Mission Team, Automation, chat history. Settings gear at the bottom.
 - **Data sync:** 6-digit transfer codes in Settings → Sync to move data between devices. (Pro+)
-- **Voice:** Mic button in the input bar. Top center dropdown switches AI modes.
+- **Voice + Vision:** Mic button in the input bar opens voice chat. Eye icon in voice chat activates your camera (your eyes). Top center dropdown switches AI modes.
 - **Status:** Currently in Beta — actively being built and improved every day.
 - If someone asks about pricing, features, how to use something, or anything Bleumr-related — you KNOW the answer. Don't search for it.
 - If a Free user asks about a Pro/Stellur feature, explain what it does and let them know which tier unlocks it. Don't gatekeep info — just be upfront about what's available where.
@@ -1135,9 +1252,11 @@ You live here. You know everything about Bleumr. NEVER web search for Bleumr inf
       }
     : { role: 'user', content: userText };
 
+  // Keep only last 4 messages of context (2 exchanges) — enough for immediate follow-ups
+  // without dragging in old topics the user has moved past
   const messages: { role: string; content: any }[] = [
     { role: 'system', content: systemPrompt },
-    ...conversationHistory.slice(-12),
+    ...conversationHistory.slice(-4),
     userMessage,
   ];
 

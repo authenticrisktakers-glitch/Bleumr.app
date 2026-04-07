@@ -4,7 +4,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/ddg/:path*", "destination": "/api/ddg" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|oauth-callback\\.html).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
@@ -18,6 +18,12 @@
       "source": "/manifest.json",
       "headers": [
         { "key": "Content-Type", "value": "application/manifest+json" }
+      ]
+    },
+    {
+      "source": "/oauth-callback.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
       ]
     }
   ]

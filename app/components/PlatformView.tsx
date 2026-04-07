@@ -33,6 +33,7 @@ interface Message {
   generatedImage?: string;
   brainEntryId?: string;
   pdfDownload?: { url: string; filename: string };
+  vote?: 'up' | 'down' | null;
 }
 
 interface PlatformViewProps {
@@ -60,6 +61,7 @@ interface PlatformViewProps {
   onOpenApps?: () => void;
   onOpenGameGen?: () => void;
   onOpenOrbits?: () => void;
+  onOpenAutomation?: () => void;
   orbitUnreadCount?: number;
   orbitThreadIds?: Set<string>;
   orbitTotalCount?: number;
@@ -70,6 +72,8 @@ interface PlatformViewProps {
   onStopAgent?: () => void;
   /** Open a URL inside Bleumr's browser tab instead of externally */
   onNavigateInternal?: (url: string) => void;
+  /** Persist vote to storage */
+  onVote?: (msgId: string, vote: 'up' | 'down') => void;
 }
 
 // ── Progressive reveal hook — reveals text with conversational pacing ───────
@@ -144,6 +148,7 @@ const MessageRow = memo(function MessageRow({
   onRetry,
   onFollowUp,
   onNavigateInternal,
+  onVote,
 }: {
   msg: Message;
   isLatestAssistant?: boolean;
@@ -151,10 +156,12 @@ const MessageRow = memo(function MessageRow({
   onRetry?: () => void;
   onFollowUp?: (q: string) => void;
   onNavigateInternal?: (url: string) => void;
+  onVote?: (msgId: string, vote: 'up' | 'down') => void;
 }) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = React.useState(false);
-  const [feedbackGiven, setFeedbackGiven] = React.useState<'up' | 'down' | null>(null);
+  // Initialize from stored vote so buttons persist across sessions
+  const [feedbackGiven, setFeedbackGiven] = React.useState<'up' | 'down' | null>(msg.vote ?? null);
 
   // ── Compute display text (before hooks — never conditional) ────────────
   let rawDisplay = msg.content;
@@ -241,17 +248,16 @@ const MessageRow = memo(function MessageRow({
                             const src = msg.sources?.[idx];
                             if (!src) return part;
                             const domain = (() => { try { return new URL(src.url).hostname.replace('www.', ''); } catch { return ''; } })();
+                            const Tag = IS_ELECTRON ? 'a' : 'span';
                             return (
-                              <a
+                              <Tag
                                 key={`${i}-${j}`}
-                                href={src.url}
-                                onClick={(e) => { e.preventDefault(); handleNavigate(src.url); }}
-                                className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0 rounded-md bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.12] text-[10px] text-slate-400 hover:text-white transition-colors align-baseline no-underline cursor-pointer"
-                                title={src.title}
+                                {...(IS_ELECTRON ? { href: src.url, onClick: (e: any) => { e.preventDefault(); handleNavigate(src.url); } } : {})}
+                                className={`inline-flex items-center justify-center w-4 h-4 mx-0.5 rounded-full bg-white/[0.06] align-middle ${IS_ELECTRON ? 'hover:bg-white/[0.14] cursor-pointer' : 'select-none'}`}
+                                title={src.title || domain}
                               >
-                                <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} alt="" className="w-3 h-3 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                {domain.split('.').slice(-2, -1)[0] || domain}
-                              </a>
+                                <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} alt="" className="w-2.5 h-2.5 rounded-full" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                              </Tag>
                             );
                           });
                         });
@@ -384,6 +390,7 @@ const MessageRow = memo(function MessageRow({
                       <button
                         onClick={() => {
                           setFeedbackGiven('up');
+                          onVote?.(msg.id, 'up');
                           if (msg.brainEntryId) reportFeedback(msg.brainEntryId, 'thumbs_up');
                           trackSuccess('feedback', 'thumbs_up');
                         }}
@@ -398,6 +405,7 @@ const MessageRow = memo(function MessageRow({
                       <button
                         onClick={() => {
                           setFeedbackGiven('down');
+                          onVote?.(msg.id, 'down');
                           if (msg.brainEntryId) reportFeedback(msg.brainEntryId, 'thumbs_down');
                           trackError('feedback', 'thumbs_down', msg.content?.slice(0, 100));
                         }}
@@ -419,7 +427,9 @@ const MessageRow = memo(function MessageRow({
                 <div className="flex gap-1.5 mt-2">
                   {msg.sources.map((src, i) => {
                     const domain = (() => { try { return new URL(src.url).hostname.replace('www.', ''); } catch { return src.url; } })();
-                    return (
+                    const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+                    const fallbackSvg = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23334155'/><text x='8' y='12' text-anchor='middle' font-size='10' fill='white'>${domain.charAt(0).toUpperCase()}</text></svg>`;
+                    return IS_ELECTRON ? (
                       <a
                         key={i}
                         href={src.url}
@@ -427,13 +437,16 @@ const MessageRow = memo(function MessageRow({
                         title={src.title || domain}
                         className="w-6 h-6 rounded-full bg-white/[0.06] hover:bg-white/[0.14] flex items-center justify-center transition-colors cursor-pointer"
                       >
-                        <img
-                          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-                          alt={domain}
-                          className="w-3.5 h-3.5 rounded-sm"
-                          onError={(e) => { (e.target as HTMLImageElement).src = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23334155'/><text x='8' y='12' text-anchor='middle' font-size='10' fill='white'>${domain.charAt(0).toUpperCase()}</text></svg>`; }}
-                        />
+                        <img src={faviconUrl} alt={domain} className="w-3.5 h-3.5 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).src = fallbackSvg; }} />
                       </a>
+                    ) : (
+                      <span
+                        key={i}
+                        title={src.title || domain}
+                        className="w-6 h-6 rounded-full bg-white/[0.06] flex items-center justify-center select-none"
+                      >
+                        <img src={faviconUrl} alt={domain} className="w-3.5 h-3.5 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).src = fallbackSvg; }} />
+                      </span>
                     );
                   })}
                 </div>
@@ -489,6 +502,7 @@ export const PlatformView = memo(function PlatformView({
   onOpenApps,
   onOpenGameGen,
   onOpenOrbits,
+  onOpenAutomation,
   orbitUnreadCount = 0,
   orbitThreadIds,
   orbitTotalCount = 0,
@@ -498,6 +512,7 @@ export const PlatformView = memo(function PlatformView({
   agentCurrentAction = '',
   onStopAgent,
   onNavigateInternal,
+  onVote,
 }: PlatformViewProps) {
   // ── Mini in-app browser (PWA) — opens source pages without leaving chat ──
   const [miniBrowserUrl, setMiniBrowserUrl] = useState<string | null>(null);
@@ -696,6 +711,7 @@ export const PlatformView = memo(function PlatformView({
         onOpenApps={onOpenApps}
         onOpenGameGen={onOpenGameGen}
         onOpenOrbits={onOpenOrbits}
+        onOpenAutomation={onOpenAutomation}
         orbitUnreadCount={orbitUnreadCount}
         orbitThreadIds={orbitThreadIds}
         orbitTotalCount={orbitTotalCount}
@@ -845,6 +861,7 @@ export const PlatformView = memo(function PlatformView({
                         : undefined}
                       onFollowUp={msg.role === 'assistant' && !isAgentWorking ? (q) => onSubmit(q) : undefined}
                       onNavigateInternal={onNavigateInternal}
+                      onVote={onVote}
                     />
                   );
                 });

@@ -18,8 +18,11 @@ import {
   extractCodeMemories, getCodeContext,
   parseHooks, runHooks,
   parseSkills, matchSkillCommand, getSkillPrompt,
+  parsePermissions, resolvePermission, formatDenyResult, hasCustomPermissions,
+  createCheckpoint, loadCheckpoints, loadCheckpoint, deleteCheckpoint, clearCheckpoints,
+  formatCheckpointTime,
 } from '../services/CodeBleu';
-import type { BleumrConfigResult, Hook, Skill } from '../services/CodeBleu';
+import type { BleumrConfigResult, Hook, Skill, PermissionRuleSet, CheckpointMeta } from '../services/CodeBleu';
 
 // ─── Extracted Code Bleu Engine Modules ──────────────────────────────────────
 import type { CodingSession, AgentMessage } from './CodeBleu/types';
@@ -537,6 +540,10 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   // ── State ──
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [input, setInput] = useState('');
+  const [slashPaletteOpen, setSlashPaletteOpen] = useState(false);
+  const [slashPaletteIndex, setSlashPaletteIndex] = useState(0);
+  const [checkpoints, setCheckpoints] = useState<CheckpointMeta[]>([]);
+  const [checkpointPanelOpen, setCheckpointPanelOpen] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -566,13 +573,28 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   const lastToolContextRef = useRef('');
   const hooksRef = useRef<Hook[]>([]);
   const skillsRef = useRef<Skill[]>([]);
+  const permissionsRef = useRef<PermissionRuleSet>(parsePermissions(''));
+  const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
+  const sessionStartedRef = useRef(false);
+  const runBuiltInCommandRef = useRef<((name: string) => boolean) | null>(null);
 
   const isElectron = typeof window !== 'undefined' && !!(window as any).orbit;
 
   // Unmount cleanup — stops ghost state updates from lingering async loops
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; abortedRef.current = true; };
+    return () => {
+      mountedRef.current = false;
+      abortedRef.current = true;
+      // Best-effort session_end on unmount (e.g. user closes Code Bleu)
+      if (hooksRef.current.length > 0 && sessionStartedRef.current) {
+        const orbit = (window as any).orbit;
+        const cwd = projectPathRef.current;
+        if (orbit?.shellExec && cwd) {
+          runHooks('session_end', {}, hooksRef.current, orbit.shellExec, cwd).catch(() => null);
+        }
+      }
+    };
   }, []);
 
   // Keep projectPath ref in sync
@@ -797,19 +819,28 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     const config = await loadBleumrConfig(readFile);
     setBleumrConfig(config);
     if (config) {
-      // Parse hooks and skills from config file
+      // Parse hooks, skills, and permissions from config file
       hooksRef.current = parseHooks(config.content);
       skillsRef.current = parseSkills(config.content);
+      permissionsRef.current = parsePermissions(config.content);
 
       setMessages(prev => prev.filter(m => m.id !== scanId));
       addMessage({
         role: 'activity', content: '', activity: 'reading',
         files: [{ path: config.source, content: config.content.slice(0, 2000), action: 'read' }],
       });
+      if (hasCustomPermissions(permissionsRef.current)) {
+        addMessage({
+          role: 'activity', content: '', activity: 'thinking',
+          files: [{ path: 'permissions', content: 'BLEUMR.md permissions active', action: 'read' }],
+        });
+      }
       setMessages(prev => [...prev, {
         id: scanId, role: 'activity' as const, content: '',
         activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
       }]);
+    } else {
+      permissionsRef.current = parsePermissions(''); // reset to defaults
     }
 
     // 3. Build project context summary
@@ -974,6 +1005,36 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       if (skillPrompt) text = skillPrompt;
     }
 
+    // ── Fire session_start hook (once per Code Bleu session) ──
+    if (!sessionStartedRef.current && hooksRef.current.length > 0) {
+      sessionStartedRef.current = true;
+      const orbit = (window as any).orbit;
+      const hookCwd = projectPathRef.current || projectPath;
+      if (orbit?.shellExec && hookCwd) {
+        runHooks('session_start', {}, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+      }
+    }
+
+    // ── Create checkpoint BEFORE this prompt runs — snapshot current state for rewind ──
+    // Skip checkpoints for permission-approval clicks (they're not real prompts)
+    if (text !== 'Allow once' && text !== 'Deny') {
+      const sid = activeSessionId ?? `session_${Date.now()}`;
+      // Read messages snapshot via setState callback to avoid stale closure
+      let snapshotMessages: any[] = [];
+      setMessages(prev => { snapshotMessages = prev; return prev; });
+      const meta = createCheckpoint(
+        sid,
+        text,
+        snapshotMessages,
+        writtenFiles,
+        projectPathRef.current,
+        projectName,
+      );
+      if (meta && activeSessionId === sid) {
+        setCheckpoints(prev => [meta, ...prev.slice(0, 19)]);
+      }
+    }
+
     // Capture and clear attached images
     const currentImages = [...attachedImages];
     setAttachedImages([]);
@@ -1003,20 +1064,21 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
         // If project was just created this loop and no files written yet, keep the "build from scratch" prompt
         const isNewlyCreatedProject = createdProjectThisLoop && filesWrittenThisLoop === 0;
         if (isNewlyCreatedProject && projectPathRef.current) {
-          return `You are CODE Bleu, a coding agent inside Bleumr. You just created project "${projectName || projectPathRef.current?.split('/').pop()}".
+          return `You are CODE Bleu, a senior coding agent inside Bleumr. You just created project "${projectName || projectPathRef.current?.split('/').pop()}".
 
 ${permissionMode}
 
 Now write ALL the files for this project. Use write_file with ABSOLUTE paths starting with ${projectPathRef.current}/
 
-As you work, talk to the user naturally between tool calls:
-- Before writing files, briefly share your plan: what files you'll create and why.
-- After writing each file, tell the user what you just created and what it does.
+Think out loud as you work — you're pair-programming with the user:
+- FIRST, share your architecture plan: "I'll create [N] files. Here's the structure: [brief breakdown]. Let me start with [file] since [reason]."
+- After writing each file, briefly explain what it does: "That's the main entry point — it sets up the router and mounts the app."
+- Between files, connect the dots: "Now I'll create the API routes that the frontend calls..."
 - Focus on quality — write clean, well-structured, production-ready code.
 - Write COMPLETE file content — no placeholders, no "TODO" comments.
 - Write each file ONCE with care. Plan ALL files before starting.
-- After ALL files are written, give a closing summary of what you built. Be specific — not generic filler.
-- NEVER say "Let me know if you need anything" or "Please note that..." — just describe what you built.
+- After ALL files, give a specific closing summary: what you built, how the pieces connect, how to run it.
+- NEVER say "Let me know if you need anything" — just describe what you built.
 
 Technology decisions — make them automatically:
 - "website" or "page" → plain HTML/CSS/JS (no framework needed)
@@ -1026,31 +1088,55 @@ Technology decisions — make them automatically:
         }
 
         return (projectContext || projectPathRef.current)
-        ? `You are CODE Bleu, a powerful coding agent with 55 tools inside Bleumr. You write clean, quality code and communicate with the user as you work — like a real developer pair-programming with them.
+        ? `You are CODE Bleu, a powerful coding agent with 55 tools inside Bleumr. You're a senior developer pair-programming with the user. You think out loud, explain your reasoning, and narrate your work as you go — never silently writing code.
 
 ${permissionMode}
 
-Communication style:
-- Talk to the user naturally as you work. You're their coding partner, not a silent bot.
-- Before starting work, share your understanding: "I see you want X. Let me look at the code and figure out the best approach."
-- After reading files, explain what you found: "I read the file — here's what I see and what I'll change."
-- After making changes, tell them what you did: "I updated the header styles to use a blue gradient."
-- Keep messages concise but human — 1-2 sentences between tool calls. No walls of text.
-- ALL code goes into files via tools. NEVER put code in your text response.
-- After ALL tool calls are done, give a clear closing summary of everything you changed.
+How you communicate (THIS IS CRITICAL — follow these patterns exactly):
+
+BEFORE touching any code, think out loud:
+- "Let me read the file first to understand the current structure..."
+- "I'll start by looking at the component to see how props are passed..."
+- "Before I change anything, let me check how this is used elsewhere..."
+
+AFTER reading a file, share what you found:
+- "I see the handler on line 47 returns early when the user is null — that's why the redirect isn't working."
+- "The styles are using flexbox but the container doesn't have a fixed height, which is causing the overflow."
+- "Found it — the API call is missing the auth header."
+
+WHILE making changes, explain your decisions:
+- "I'll use replace_in_file here since we only need to update the validation logic — no point rewriting the whole file."
+- "This needs a full rewrite — the component structure doesn't support what you want, so I'll restructure it."
+- "I'm adding a null check before the map call to prevent the crash you're seeing."
+
+WHEN something goes wrong, narrate the debugging:
+- "Hmm, the build failed because of a missing import. Let me fix that..."
+- "That approach won't work because the state updates are batched. Let me try a different pattern."
+- "The test is failing on the async call — I need to add an await."
+
+BETWEEN tool calls — 1-2 sentences max. Brief, specific, human. No walls of text.
+AFTER finishing — give a specific closing summary. Not "I've updated the code" but "I fixed the login redirect by adding a null check on line 23 and moving the navigation call inside the auth callback."
+
+NEVER do these:
+- Don't silently read files and write code without talking. ALWAYS explain what you see and why you're changing it.
+- Don't put code in your text responses. ALL code goes into files via tools.
+- Don't use filler phrases: "Let me know if you need anything", "Please note that...", "Feel free to...", "I hope this helps", "Don't hesitate to ask"
+- Don't hedge: "This may need to be adjusted" — if it needs adjusting, adjust it yourself.
+- Don't give generic summaries. Be specific about what changed and why.
 
 Your workflow for MODIFYING existing code (change, fix, add to, improve, update):
-1. ALWAYS read_file FIRST to see the current code. Never skip this.
-2. ${autoApprove ? 'Tell the user your approach, then make the changes.' : 'Explain your plan and wait for approval.'}
-3. For small/targeted edits (adding a style, fixing a bug, changing text): use replace_in_file — it's precise and doesn't risk losing other code.
-4. For large rewrites (redesigning a page, adding many features): use write_file with COMPLETE file content.
-5. After changes, briefly tell the user what you did.
+1. ALWAYS read_file FIRST. Say what you're about to read and why.
+2. After reading, explain what you found — reference specific lines, patterns, or issues.
+3. ${autoApprove ? 'Explain your approach briefly, then make the changes.' : 'Explain your plan and wait for approval.'}
+4. For small/targeted edits: use replace_in_file — it's precise and doesn't risk losing other code.
+5. For large rewrites: use write_file with COMPLETE content. Explain why a full rewrite is needed.
+6. After changes, tell the user what you did and why. Reference the specific change.
 
 Your workflow for BUILDING new things (create, build, make me):
-1. Tell the user your plan — what files you'll create and the approach.
-2. Create files with write_file using COMPLETE, production-quality content.
-3. After each file, briefly say what it does.
-4. Give a closing summary of what you built.
+1. Share your plan — what you'll build, what tech stack, what files.
+2. Create files with write_file. After each file, briefly say what it does and how it fits.
+3. If the project needs multiple files, explain the architecture: "I'll set up the API routes first, then the frontend components that call them."
+4. Closing summary: what you built, how it works, how to run it.
 
 Quality rules:
 - ALWAYS read existing files before modifying them. NEVER rewrite a file from memory.
@@ -1059,8 +1145,6 @@ Quality rules:
 - Plan ALL changes before starting. Write each file ONCE — get it right the first time.
 - If the user asks to improve something, READ the code first, understand it, then make thoughtful improvements.
 - Make smart decisions yourself — don't ask the user to choose frameworks or approaches unless there's a genuine tradeoff worth discussing.
-- NEVER use generic filler phrases. Do NOT say: "Let me know if you need anything", "Please note that...", "Feel free to...", "I hope this helps", "Don't hesitate to ask". Instead, be specific about what you did and what the user can do next.
-- When you finish, describe the SPECIFIC changes you made. Don't hedge with "may need to be adjusted" — if it needs adjusting, adjust it yourself.
 
 You have 55 tools organized by category:
 - File ops: read_file, write_file, list_directory, create_directory, delete_file, rename_file, copy_file, move_file, find_files, search_in_files, replace_in_file, file_exists, file_info
@@ -1070,7 +1154,7 @@ You have 55 tools organized by category:
 - Web: web_search, fetch_url, check_url
 - W3C Validation: validate_html, validate_css — validate code against official W3C web standards. Use after writing HTML/CSS to ensure spec compliance.
 - Analysis: find_definition, find_usages, count_lines, detect_stack, analyze_dependencies
-- Scaffold: scaffold_component, scaffold_page, scaffold_api, scaffold_test, init_framework
+- Scaffold: scaffold_component, scaffold_page, scaffold_api, scaffold_test, init_framework. For full project scaffolding with best-practice structure, use run_command with: python3 bleumr-gen.py <template> <name> — templates: fastapi, flask, django, cli, package, react, next, electron
 - Shell: run_command (for anything not covered by specific tools)
 - Agents: dispatch_agent (FileScout, LintCheck, Refactor, TestGen)
 - Interaction: ask_user (ask questions with clickable answer buttons)
@@ -1083,28 +1167,24 @@ ${formatConfigForPrompt(bleumrConfig)}
 ${getCodeContext(lastUserMsgRef.current)}
 ${preacher.getTrackedFiles().length > 0 ? preacher.getSummary() + '\n\n' : ''}Project context:
 ${(projectContext || `Project at: ${projectPathRef.current}`).slice(0, 12000)}`
-        : `You are CODE Bleu, a coding agent inside Bleumr. No project is open yet. You write quality code and communicate with the user as you work.
+        : `You are CODE Bleu, a senior coding agent inside Bleumr. No project is open yet. You think out loud and narrate your work like a real developer pair-programming with the user.
 
-Workflow:
-1. Tell the user your plan: "I'll build a [description] with [tech]. Let me set up the project."
-2. Call create_project with a descriptive name.
-3. Share what files you'll create: "I'll set up [list of files] — let me start with the main page."
-4. Write each file with write_file using ABSOLUTE paths. Write clean, production-quality code.
-5. After each file, briefly tell the user what it does.
-6. After ALL files are written, give a summary of what you built and how to use it.
+How you work:
+1. Acknowledge what they want to build: "Got it — you want a [description]. I'll use [tech] for this because [reason]."
+2. Call create_project with a descriptive name. Tell them: "Setting up the project folder..."
+3. Share your architecture: "I'll create [N] files — [brief list]. Let me start with [first file] since everything else depends on it."
+4. Write each file with write_file using ABSOLUTE paths. After each file, briefly say what it does and how it connects.
+5. After ALL files are written, give a specific summary: what you built, how the pieces fit together, and how to run it.
 
 Rules:
 - ALL code goes into files via write_file. NEVER put code in your text response.
 - Write COMPLETE file content — no placeholders, no "TODO" comments.
 - Write each file ONCE with care. Quality over speed.
-- Make technology decisions yourself — don't ask the user to choose.
-- NEVER use generic filler: "Let me know if you need anything", "Please note...", "Feel free to ask". Be specific.
-- "website" or "page" → plain HTML/CSS/JS (simplest, always works)
-- "app" or "application" → React + TypeScript
-- "api" or "server" → Node.js + Express
-- If unclear, use HTML/CSS/JS.
+- Make technology decisions yourself — "website"/"page" → HTML/CSS/JS, "app" → React + TypeScript, "api"/"server" → Node.js + Express.
+- NEVER use filler: "Let me know if you need anything", "Please note...", "Feel free to ask". Be specific about what you built.
+- Talk naturally between tool calls — 1-2 sentences explaining what you just did or are about to do.
 
-If they ask a coding question (not building), answer naturally and helpfully.`;
+If they ask a coding question (not building), answer naturally and helpfully — share your expertise, explain concepts clearly, reference real patterns.`;
       };
 
       // ── Tool selection (dynamic — picks relevant subset of 55 tools) ──
@@ -1197,12 +1277,21 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
           && (iterations === 1 || (createdProjectThisLoop && filesWrittenThisLoop === 0));
         // Prune conversation if too large — truncate old tool results to keep under ~80K chars
         let totalChars = conversationMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
-        if (totalChars > 80000) {
+        const willCompact = totalChars > 80000;
+        if (willCompact) {
           for (let i = 0; i < conversationMessages.length && totalChars > 60000; i++) {
             if (conversationMessages[i].role === 'tool' && conversationMessages[i].content?.length > 500) {
               const old = conversationMessages[i].content.length;
               conversationMessages[i].content = conversationMessages[i].content.slice(0, 500) + '\n... (pruned for context)';
               totalChars -= (old - 500);
+            }
+          }
+          // Fire on_compact lifecycle hook
+          if (hooksRef.current.length > 0) {
+            const orbit = (window as any).orbit;
+            const hookCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && hookCwd) {
+              runHooks('on_compact', {}, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
             }
           }
         }
@@ -1457,6 +1546,76 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
             continue;
           }
 
+          // ── Permission gate — BLEUMR.md allow/ask/deny rules + autoApprove fallback ──
+          const shellCmd = toolCall.function.name === 'run_command' ? (args.command || args.cmd || '') : undefined;
+          const verdict = resolvePermission(toolCall.function.name, shellCmd, permissionsRef.current, autoApprove);
+          if (verdict === 'deny') {
+            const denyMsg = formatDenyResult(toolCall.function.name, shellCmd);
+            removeThinking();
+            addMessage({
+              role: 'activity', content: '', activity: 'thinking',
+              files: [{ path: 'BLOCKED', content: denyMsg, action: 'read' }],
+            });
+            conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: denyMsg });
+            // Re-create thinking indicator for next iteration
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: 'Trying a different approach...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+            continue;
+          }
+          if (verdict === 'ask') {
+            // Show inline confirmation. User must approve via the suggestion buttons.
+            removeThinking();
+            const argSummary = shellCmd
+              ? `\`${shellCmd.slice(0, 120)}\``
+              : `${toolCall.function.name}(${Object.entries(args).slice(0, 2).map(([k, v]) => `${k}: ${typeof v === 'string' ? v.slice(0, 60) : JSON.stringify(v).slice(0, 60)}`).join(', ')})`;
+            const askId = msgId();
+            setMessages(prev => [...prev, {
+              id: askId, role: 'assistant' as const,
+              content: `Permission needed to run ${argSummary}`,
+              suggestions: ['Allow once', 'Deny'],
+              streaming: false, timestamp: Date.now(),
+            }]);
+            // Wait for user response via the suggestions click handler
+            const approved = await new Promise<boolean>((resolve) => {
+              pendingApprovalRef.current = resolve;
+              // Safety: auto-deny after 60 seconds of no response
+              setTimeout(() => {
+                if (pendingApprovalRef.current === resolve) {
+                  pendingApprovalRef.current = null;
+                  resolve(false);
+                }
+              }, 60000);
+            });
+            if (!approved) {
+              const denyMsg = `User denied permission for ${toolCall.function.name}. Try a different approach or ask them what they'd prefer.`;
+              conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: denyMsg });
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const, content: 'Reconsidering approach...',
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+              continue;
+            }
+            // Approved — re-create thinking indicator and fall through to execution
+            thinkingId = msgId();
+            setMessages(prev => [...prev, {
+              id: thinkingId, role: 'activity' as const, content: 'Approved — continuing...',
+              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+            }]);
+          }
+
+          // ── Pre-tool-use lifecycle hook ──
+          if (hooksRef.current.length > 0) {
+            const orbit = (window as any).orbit;
+            const hookCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && hookCwd) {
+              await runHooks('pre_tool_use', { tool: toolCall.function.name, file: args.path }, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+            }
+          }
+
           if (toolCall.function.name === 'read_file') {
             // ── READ FILE ──
             if (!args.path) { result = 'Error: read_file requires a path.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
@@ -1487,6 +1646,15 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
             if (!args.path || !args.content) { result = 'Error: write_file requires path and content.'; conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: result }); continue; }
             const fileName = args.path.split('/').pop() ?? args.path;
             updateThinking(`Writing changes to ${fileName}...`);
+
+            // ── before_write hook (formatters/validators that run BEFORE the write) ──
+            if (hooksRef.current.length > 0) {
+              const orbit = (window as any).orbit;
+              const hookCwd = projectPathRef.current || projectPath;
+              if (orbit?.shellExec && hookCwd) {
+                await runHooks('before_write', { file: args.path }, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+              }
+            }
 
             // ── Preacher: snapshot the file BEFORE overwriting ──
             try {
@@ -1678,6 +1846,11 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
             if (!orbit?.shellExec) {
               result = 'Shell execution is only available in the desktop app.';
             } else {
+              // ── before_command hook (e.g. log to .bleumr/commands.log) ──
+              if (hooksRef.current.length > 0 && cmdCwd) {
+                await runHooks('before_command', { file: command }, hooksRef.current, orbit.shellExec, cmdCwd).catch(() => null);
+              }
+
               removeThinking();
               // Show command in chat as activity
               addMessage({
@@ -1693,6 +1866,7 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
                 activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
               }]);
 
+              let cmdSucceeded = false;
               try {
                 // 60s timeout to prevent commands from hanging the agent loop forever
                 const shellPromise = orbit.shellExec(command, cmdCwd || undefined);
@@ -1700,6 +1874,7 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
                 const res = await Promise.race([shellPromise, timeoutPromise]) as any;
                 const output = res.stdout || '';
                 const errors = res.stderr || '';
+                cmdSucceeded = !!res.success;
                 result = res.success
                   ? `Command succeeded (exit 0).\n${output ? `stdout:\n${output.slice(0, 8000)}` : '(no output)'}${errors ? `\nstderr:\n${errors.slice(0, 2000)}` : ''}`
                   : `Command failed (exit ${res.code}).\n${errors ? `stderr:\n${errors.slice(0, 4000)}` : ''}${output ? `\nstdout:\n${output.slice(0, 4000)}` : ''}`;
@@ -1712,6 +1887,21 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
                 });
               } catch (err: any) {
                 result = `Failed to execute command: ${err?.message ?? 'unknown error'}`;
+                cmdSucceeded = false;
+              }
+
+              // ── after_command + on_error hooks ──
+              if (hooksRef.current.length > 0 && cmdCwd) {
+                await runHooks('after_command', {
+                  file: command,
+                  success: cmdSucceeded,
+                }, hooksRef.current, orbit.shellExec, cmdCwd).catch(() => null);
+                if (!cmdSucceeded) {
+                  await runHooks('on_error', {
+                    file: command,
+                    error: result.slice(0, 500),
+                  }, hooksRef.current, orbit.shellExec, cmdCwd).catch(() => null);
+                }
               }
 
               // Re-create thinking indicator
@@ -2390,6 +2580,20 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
             role: 'tool', tool_call_id: toolCall.id, content: cappedResult,
           });
           if (result) toolResultsLog.push(result.slice(0, 500));
+
+          // ── Post-tool-use lifecycle hook ──
+          if (hooksRef.current.length > 0) {
+            const orbit = (window as any).orbit;
+            const hookCwd = projectPathRef.current || projectPath;
+            if (orbit?.shellExec && hookCwd) {
+              const success = !result.toLowerCase().startsWith('error') && !result.toLowerCase().startsWith('failed');
+              await runHooks('post_tool_use', {
+                tool: toolCall.function.name,
+                file: args.path,
+                success,
+              }, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+            }
+          }
         }
 
         // Break after ask_user — but only after all tool calls in this batch are processed
@@ -2400,6 +2604,15 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
       removeThinking();
       // Sweep ALL lingering thinking indicators — catches any that slipped through React batching
       setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
+
+      // ── Fire task_complete lifecycle hook ──
+      if (hooksRef.current.length > 0) {
+        const orbit = (window as any).orbit;
+        const hookCwd = projectPathRef.current || projectPath;
+        if (orbit?.shellExec && hookCwd) {
+          runHooks('task_complete', { success: !abortedRef.current }, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+        }
+      }
 
       // ── Post-loop: ensure a closing response exists ──
       // If the last visible message is NOT from the assistant (e.g. it's an activity),
@@ -2480,6 +2693,18 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
       // Remove any lingering thinking indicators
       setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
 
+      // ── on_error lifecycle hook ──
+      if (hooksRef.current.length > 0) {
+        const orbit = (window as any).orbit;
+        const hookCwd = projectPathRef.current || projectPath;
+        if (orbit?.shellExec && hookCwd) {
+          runHooks('on_error', {
+            error: (err as Error)?.message ?? 'unknown error',
+            success: false,
+          }, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+        }
+      }
+
       const errMsg = (err as Error)?.message ?? '';
       let errorContent: string;
 
@@ -2529,6 +2754,15 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text) return;
+    // Intercept built-in slash commands — don't send them to the agent
+    if (text.startsWith('/')) {
+      const cmdName = text.slice(1).split(/\s/)[0];
+      const isBuiltIn = ['clear', 'init', 'permissions', 'help', 'plan', 'rewind'].includes(cmdName);
+      if (isBuiltIn && runBuiltInCommandRef.current) {
+        runBuiltInCommandRef.current(cmdName);
+        return;
+      }
+    }
     setInput('');
     inputRef.current?.focus();
     sendToAgent(text);
@@ -2540,6 +2774,16 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
     setMessages(prev => prev.map(m =>
       m.id === msgIdToUpdate ? { ...m, suggestions: undefined } : m
     ));
+
+    // ── Permission approval intercept — if a tool is waiting on user approval,
+    // resolve the pending promise instead of sending a new agent message ──
+    if (pendingApprovalRef.current && (option === 'Allow once' || option === 'Deny')) {
+      const resolve = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      resolve(option === 'Allow once');
+      return;
+    }
+
     sendToAgent(option);
   }, [sendToAgent]);
 
@@ -2639,7 +2883,21 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
     return sessionId;
   }, [messages, activeSessionId, projectName, projectPath, projectContext, projectFiles]);
 
+  // Helper: fire session_end hook (best-effort, never blocks)
+  const fireSessionEnd = useCallback(() => {
+    if (hooksRef.current.length === 0 || !sessionStartedRef.current) return;
+    const orbit = (window as any).orbit;
+    const hookCwd = projectPathRef.current || projectPath;
+    if (orbit?.shellExec && hookCwd) {
+      runHooks('session_end', {}, hooksRef.current, orbit.shellExec, hookCwd).catch(() => null);
+    }
+  }, [projectPath]);
+
   const loadSession = useCallback((session: CodingSession) => {
+    // Fire session_end for the OUTGOING session before loading the new one
+    fireSessionEnd();
+    sessionStartedRef.current = false;
+
     // Abort any running agent loop + invalidate stale generation
     abortedRef.current = true;
     agentRunningRef.current = false;
@@ -2656,9 +2914,14 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
     setMenuOpen(false);
     setPreviewOpen(false);
     setWrittenFiles([]);
+    // Load checkpoints for this session
+    setCheckpoints(loadCheckpoints(session.id));
   }, []);
 
   const startNewSession = useCallback(() => {
+    // Fire session_end for the outgoing session
+    fireSessionEnd();
+
     // Abort any running agent loop + invalidate stale generation
     abortedRef.current = true;
     agentRunningRef.current = false;
@@ -2680,11 +2943,16 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
     setBleumrConfig(null);
     hooksRef.current = [];
     skillsRef.current = [];
-  }, [saveCurrentSession]);
+    permissionsRef.current = parsePermissions('');
+    sessionStartedRef.current = false;
+    setCheckpoints([]);
+    setCheckpointPanelOpen(false);
+  }, [saveCurrentSession, fireSessionEnd]);
 
   const deleteSession = useCallback((sessionId: string) => {
     setSessions(prev => prev.filter(s => s.id !== sessionId));
     deleteCodeSession(sessionId);
+    clearCheckpoints(sessionId);
     if (activeSessionId === sessionId) {
       // Clear all state so deleted session doesn't linger in the UI
       setActiveSessionId(null);
@@ -2696,11 +2964,15 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
       setDirHandle(null);
       setIsElectronProject(false);
       setWrittenFiles([]);
+      setCheckpoints([]);
     }
   }, [activeSessionId]);
 
   // ── Reset (saves current session first) ──
   const handleReset = useCallback(() => {
+    // Fire session_end for the outgoing session
+    fireSessionEnd();
+
     // Abort any running agent loop first + invalidate stale generation
     abortedRef.current = true;
     agentRunningRef.current = false;
@@ -2721,15 +2993,212 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
     setBleumrConfig(null);
     hooksRef.current = [];
     skillsRef.current = [];
-  }, [saveCurrentSession]);
+    permissionsRef.current = parsePermissions('');
+    sessionStartedRef.current = false;
+    setCheckpoints([]);
+    setCheckpointPanelOpen(false);
+  }, [saveCurrentSession, fireSessionEnd]);
+
+  // ── Checkpoint restore — load a snapshot back into current state ──
+  const restoreCheckpoint = useCallback(async (checkpointId: string) => {
+    if (!activeSessionId) return;
+    const data = loadCheckpoint(activeSessionId, checkpointId);
+    if (!data) {
+      addMessage({ role: 'assistant', content: 'Could not load that checkpoint — it may have been pruned.' });
+      return;
+    }
+
+    // Abort any running loop
+    abortedRef.current = true;
+    agentRunningRef.current = false;
+    loopGenRef.current++;
+    setIsWorking(false);
+
+    // Restore messages (filter to user/assistant only since that's what was stored)
+    setMessages(data.messages.map(m => ({
+      id: m.id,
+      role: m.role as any,
+      content: m.content,
+      timestamp: m.timestamp ?? Date.now(),
+      streaming: false,
+    })));
+
+    // Restore in-memory written files map
+    setWrittenFiles(data.files);
+
+    // Write the snapshotted files back to disk so the project state matches
+    const orbit = (window as any).orbit;
+    let restoredCount = 0;
+    let failedCount = 0;
+    if (orbit?.writeFile && data.files.length > 0) {
+      for (const f of data.files) {
+        try {
+          await orbit.writeFile(f.path, f.content);
+          restoredCount++;
+        } catch {
+          failedCount++;
+        }
+      }
+    }
+
+    setCheckpointPanelOpen(false);
+
+    // Add a system note so the user knows what just happened
+    const summary = data.files.length === 0
+      ? `Rewound to checkpoint from ${formatCheckpointTime(data.timestamp)}: "${data.prompt.slice(0, 80)}". Restored ${data.messages.length} messages.`
+      : `Rewound to checkpoint from ${formatCheckpointTime(data.timestamp)}: "${data.prompt.slice(0, 80)}". Restored ${data.messages.length} messages and ${restoredCount} file${restoredCount === 1 ? '' : 's'}${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`;
+    setTimeout(() => {
+      addMessage({ role: 'assistant', content: summary });
+    }, 100);
+  }, [activeSessionId, addMessage]);
+
+  // ── Delete a checkpoint ──
+  const removeCheckpoint = useCallback((checkpointId: string) => {
+    if (!activeSessionId) return;
+    deleteCheckpoint(activeSessionId, checkpointId);
+    setCheckpoints(prev => prev.filter(c => c.id !== checkpointId));
+  }, [activeSessionId]);
+
+  // ── Slash command palette ──
+  // Built-in commands that have side effects beyond the agent loop
+  const builtInSlashCommands = useMemo(() => [
+    { name: 'clear',       desc: 'Clear current session messages',     builtIn: true },
+    { name: 'init',        desc: 'Create a BLEUMR.md template',         builtIn: true },
+    { name: 'permissions', desc: 'Show active allow/ask/deny rules',   builtIn: true },
+    { name: 'help',        desc: 'Show available commands and tools',  builtIn: true },
+    { name: 'plan',        desc: `Toggle plan mode (currently ${planMode ? 'ON' : 'OFF'})`, builtIn: true },
+    { name: 'rewind',      desc: `Open checkpoint history (${checkpoints.length} saved)`, builtIn: true },
+  ], [planMode, checkpoints.length]);
+
+  // Filter both built-ins and user-defined skills against the current input
+  const filteredSlashCommands = useMemo(() => {
+    if (!input.startsWith('/')) return [];
+    const query = input.slice(1).split(/\s/)[0].toLowerCase();
+    const skillCommands = skillsRef.current.map(s => ({
+      name: s.name, desc: s.prompt.slice(0, 70).replace(/\s+/g, ' '), builtIn: false,
+    }));
+    const all = [...builtInSlashCommands, ...skillCommands];
+    if (!query) return all;
+    return all.filter(c => c.name.toLowerCase().startsWith(query));
+  }, [input, builtInSlashCommands]);
+
+  // Run a built-in slash command (returns true if handled)
+  const runBuiltInCommand = useCallback((name: string): boolean => {
+    if (name === 'clear') {
+      setMessages([]);
+      setInput('');
+      return true;
+    }
+    if (name === 'plan') {
+      setPlanMode(p => !p);
+      setInput('');
+      addMessage({ role: 'assistant', content: `Plan mode ${!planMode ? 'enabled — read-only exploration' : 'disabled'}.` });
+      return true;
+    }
+    if (name === 'init') {
+      const template = `# BLEUMR.md\n\nProject instructions for Code Bleu.\n\n## Permissions\n- allow: read_file, list_directory, search_in_files, find_files, write_file, replace_in_file\n- ask: run_command, git_commit, git_push, install_package, delete_file\n- deny: rm -rf, sudo, git push --force\n\n## Hooks\n- after_write(*.ts): npx prettier --write {file}\n- after_write(*.tsx): npx prettier --write {file}\n\n## Skills\n### /review-pr\nRead the current git diff with git_diff, then analyze code quality, check for bugs, and provide a structured review with actionable feedback.\n\n### /test-all\nRun \`npm test\`. If any tests fail, read the failing test files and fix them. Re-run until all tests pass.\n`;
+      const orbit = (window as any).orbit;
+      const cwd = projectPathRef.current;
+      if (orbit?.writeFile && cwd) {
+        orbit.writeFile(`${cwd}/BLEUMR.md`, template).then(() => {
+          addMessage({ role: 'assistant', content: `Created BLEUMR.md at ${cwd}/BLEUMR.md. Reload the project to activate.` });
+        }).catch((err: any) => {
+          addMessage({ role: 'assistant', content: `Couldn't create BLEUMR.md: ${err?.message ?? 'unknown error'}` });
+        });
+      } else {
+        addMessage({ role: 'assistant', content: 'Open a project folder first, then run /init.' });
+      }
+      setInput('');
+      return true;
+    }
+    if (name === 'permissions') {
+      const r = permissionsRef.current;
+      const lines: string[] = ['Active permissions:'];
+      if (r.allowedTools.size > 0) lines.push(`  Allow: ${[...r.allowedTools].join(', ')}`);
+      if (r.askedTools.size > 0)   lines.push(`  Ask:   ${[...r.askedTools].join(', ')}`);
+      if (r.deniedTools.size > 0)  lines.push(`  Deny:  ${[...r.deniedTools].join(', ')}`);
+      if (r.shellDenyPatterns.length > 0) lines.push(`  Shell deny: ${r.shellDenyPatterns.slice(0, 6).join(', ')}${r.shellDenyPatterns.length > 6 ? '...' : ''}`);
+      if (lines.length === 1) lines.push(`  (no custom rules — using autoApprove=${autoApprove ? 'AUTO' : 'ASK'})`);
+      addMessage({ role: 'assistant', content: lines.join('\n') });
+      setInput('');
+      return true;
+    }
+    if (name === 'help') {
+      const skills = skillsRef.current.map(s => `/${s.name}`).join(', ') || '(none)';
+      addMessage({
+        role: 'assistant',
+        content: `Built-in commands: /clear /init /permissions /plan /rewind /help\nProject skills: ${skills}\n\nCode Bleu has 55 tools across file ops, git, packages, build, web, scaffolding, and shell. Type any natural-language request and I'll figure out the right tools to use.`,
+      });
+      setInput('');
+      return true;
+    }
+    if (name === 'rewind') {
+      setCheckpointPanelOpen(true);
+      setInput('');
+      return true;
+    }
+    return false;
+  }, [planMode, autoApprove, addMessage]);
+
+  // Sync runBuiltInCommand into a ref so handleSend (declared above) can call it without TDZ
+  useEffect(() => {
+    runBuiltInCommandRef.current = runBuiltInCommand;
+  }, [runBuiltInCommand]);
+
+  // Insert a chosen command into the input (or run it if built-in)
+  const selectSlashCommand = useCallback((name: string) => {
+    setSlashPaletteOpen(false);
+    setSlashPaletteIndex(0);
+    if (runBuiltInCommand(name)) return;
+    // User skill — insert into input so user can add args, then press Enter
+    setInput(`/${name} `);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [runBuiltInCommand]);
+
+  // Open palette when input starts with "/", close otherwise
+  useEffect(() => {
+    setSlashPaletteOpen(input.startsWith('/') && filteredSlashCommands.length > 0);
+    setSlashPaletteIndex(0);
+  }, [input, filteredSlashCommands.length]);
 
   // ── Input handlers ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Slash palette navigation
+    if (slashPaletteOpen && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashPaletteIndex(i => (i + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashPaletteIndex(i => (i - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const cmd = filteredSlashCommands[slashPaletteIndex];
+        if (cmd) selectSlashCommand(cmd.name);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSlashPaletteOpen(false);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const cmd = filteredSlashCommands[slashPaletteIndex];
+        if (cmd) selectSlashCommand(cmd.name);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+  }, [handleSend, slashPaletteOpen, filteredSlashCommands, slashPaletteIndex, selectSlashCommand]);
 
   const handleCopy = useCallback((text: string) => {
     try {
@@ -3179,6 +3648,170 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
             </div>
           )}
 
+          {/* Checkpoint history panel — opens on /rewind or the rewind button */}
+          {checkpointPanelOpen && (
+            <div style={{
+              background: 'rgba(20,22,30,0.96)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12,
+              marginBottom: 6,
+              padding: 4,
+              maxHeight: 360,
+              overflowY: 'auto',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 12px 6px',
+              }}>
+                <div style={{
+                  fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 500,
+                  textTransform: 'uppercase', letterSpacing: 0.5,
+                }}>
+                  Checkpoints · {checkpoints.length} saved
+                </div>
+                <button
+                  onClick={() => setCheckpointPanelOpen(false)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'rgba(255,255,255,0.4)', fontSize: 14, padding: '2px 6px',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              {checkpoints.length === 0 ? (
+                <div style={{
+                  padding: '20px 12px', textAlign: 'center',
+                  color: 'rgba(255,255,255,0.35)', fontSize: 12,
+                }}>
+                  No checkpoints yet. They're created automatically before each prompt.
+                </div>
+              ) : (
+                checkpoints.map((cp) => (
+                  <div
+                    key={cp.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '10px 12px', borderRadius: 8, gap: 8,
+                      transition: 'background 0.1s', cursor: 'default',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{
+                        color: 'rgba(255,255,255,0.85)', fontSize: 12,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        marginBottom: 2,
+                      }}>
+                        {cp.prompt || '(empty prompt)'}
+                      </div>
+                      <div style={{
+                        color: 'rgba(255,255,255,0.4)', fontSize: 10,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}>
+                        <span>{formatCheckpointTime(cp.timestamp)}</span>
+                        <span>·</span>
+                        <span>{cp.messageCount} msg{cp.messageCount === 1 ? '' : 's'}</span>
+                        {cp.fileCount > 0 && (
+                          <>
+                            <span>·</span>
+                            <span>{cp.fileCount} file{cp.fileCount === 1 ? '' : 's'}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => restoreCheckpoint(cp.id)}
+                        style={{
+                          background: 'rgba(129,140,248,0.14)',
+                          border: '1px solid rgba(129,140,248,0.3)',
+                          color: '#a5b4fc', fontSize: 10, fontWeight: 500,
+                          padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                          textTransform: 'uppercase', letterSpacing: 0.5,
+                        }}
+                        title="Restore this checkpoint — overwrites current messages and files"
+                      >
+                        Rewind
+                      </button>
+                      <button
+                        onClick={() => removeCheckpoint(cp.id)}
+                        style={{
+                          background: 'none', border: '1px solid rgba(255,255,255,0.1)',
+                          color: 'rgba(255,255,255,0.4)', fontSize: 10,
+                          padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
+                        }}
+                        title="Delete this checkpoint"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Slash command palette — appears above the input when user types "/" */}
+          {slashPaletteOpen && filteredSlashCommands.length > 0 && (
+            <div style={{
+              background: 'rgba(20,22,30,0.96)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12,
+              marginBottom: 6,
+              padding: 4,
+              maxHeight: 280,
+              overflowY: 'auto',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+            }}>
+              <div style={{
+                fontSize: 10, color: 'rgba(255,255,255,0.35)',
+                padding: '6px 10px 4px', textTransform: 'uppercase', letterSpacing: 0.5,
+              }}>
+                Commands · ↑↓ to navigate · Tab/Enter to select
+              </div>
+              {filteredSlashCommands.map((cmd, idx) => (
+                <div
+                  key={`${cmd.builtIn ? 'b' : 'u'}-${cmd.name}`}
+                  onClick={() => selectSlashCommand(cmd.name)}
+                  onMouseEnter={() => setSlashPaletteIndex(idx)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    background: idx === slashPaletteIndex ? 'rgba(129,140,248,0.14)' : 'transparent',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                    <span style={{
+                      color: cmd.builtIn ? '#818cf8' : '#4ade80',
+                      fontSize: 13, fontWeight: 500, fontFamily: 'monospace',
+                    }}>
+                      /{cmd.name}
+                    </span>
+                    <span style={{
+                      color: 'rgba(255,255,255,0.45)', fontSize: 12,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {cmd.desc}
+                    </span>
+                  </div>
+                  <span style={{
+                    color: 'rgba(255,255,255,0.25)', fontSize: 9,
+                    textTransform: 'uppercase', letterSpacing: 0.5,
+                    flexShrink: 0, marginLeft: 8,
+                  }}>
+                    {cmd.builtIn ? 'built-in' : 'skill'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Text input */}
           <div style={{
             background: 'rgba(255,255,255,0.04)',
@@ -3240,6 +3873,27 @@ If they ask a coding question (not building), answer naturally and helpfully.`;
                   <Paperclip size={13} />
                   {attachedImages.length > 0 && <span>{attachedImages.length}</span>}
                 </button>
+
+                {/* Checkpoint history button — opens rewind panel */}
+                {checkpoints.length > 0 && (
+                  <button
+                    onClick={() => setCheckpointPanelOpen(p => !p)}
+                    style={{
+                      background: checkpointPanelOpen ? 'rgba(129,140,248,0.14)' : 'none',
+                      border: 'none', cursor: 'pointer', padding: '4px 8px',
+                      borderRadius: 6,
+                      color: checkpointPanelOpen ? '#a5b4fc' : 'rgba(255,255,255,0.3)',
+                      display: 'flex', alignItems: 'center', gap: 5, fontSize: 11,
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!checkpointPanelOpen) e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}
+                    onMouseLeave={e => { if (!checkpointPanelOpen) e.currentTarget.style.color = 'rgba(255,255,255,0.3)'; }}
+                    title={`${checkpoints.length} checkpoint${checkpoints.length === 1 ? '' : 's'} — click to rewind`}
+                  >
+                    <RotateCcw size={13} />
+                    <span>{checkpoints.length}</span>
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

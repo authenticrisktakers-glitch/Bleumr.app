@@ -20,6 +20,7 @@ export interface StoredMessage {
   responseTimeMs?: number;
   followUps?: string[];
   generatedImage?: string;
+  vote?: 'up' | 'down' | null;
 }
 
 const THREADS_KEY = 'orbit_chat_threads';

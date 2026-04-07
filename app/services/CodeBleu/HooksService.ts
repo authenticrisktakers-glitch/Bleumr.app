@@ -15,16 +15,29 @@
  * Placeholder values are shell-escaped to prevent injection.
  */
 
-export type HookTrigger = 'before_write' | 'after_write' | 'before_command' | 'after_command' | 'on_error';
+export type HookTrigger =
+  | 'before_write'
+  | 'after_write'
+  | 'before_command'
+  | 'after_command'
+  | 'on_error'
+  | 'session_start'    // fires once when a Code Bleu session starts
+  | 'session_end'      // fires when the session is closed/switched
+  | 'pre_tool_use'     // fires before ANY tool call (context.tool = name)
+  | 'post_tool_use'    // fires after ANY tool call (context.tool, context.success)
+  | 'on_compact'       // fires when conversation is compacted to save tokens
+  | 'task_complete';   // fires when the agentic loop finishes naturally
 
 export interface Hook {
   trigger: HookTrigger;
   command: string;
-  pattern?: string;  // optional glob pattern to match file paths
+  pattern?: string;  // optional glob pattern to match file paths or tool names
 }
 
 const VALID_TRIGGERS = new Set<HookTrigger>([
   'before_write', 'after_write', 'before_command', 'after_command', 'on_error',
+  'session_start', 'session_end', 'pre_tool_use', 'post_tool_use',
+  'on_compact', 'task_complete',
 ]);
 
 /**
@@ -121,19 +134,38 @@ function matchesPattern(filePath: string, pattern?: string): boolean {
 
 /**
  * Find and run matching hooks for a trigger.
- * Placeholder values ({file}, {error}) are shell-escaped before substitution.
+ * Placeholder values ({file}, {tool}, {error}) are shell-escaped before substitution.
+ *
+ * For file-scoped triggers (before/after_write), the hook's `pattern` is matched
+ * against context.file. For tool-scoped triggers (pre/post_tool_use), `pattern` is
+ * matched against context.tool. Lifecycle triggers (session_start, task_complete,
+ * on_compact) ignore patterns.
+ *
  * @returns combined output from all matching hooks, or null if none ran
  */
 export async function runHooks(
   trigger: HookTrigger,
-  context: { file?: string; error?: string },
+  context: { file?: string; tool?: string; error?: string; success?: boolean },
   hooks: Hook[],
   shellExec: (cmd: string, cwd: string) => Promise<{ stdout: string; stderr: string; success: boolean }>,
   cwd: string,
 ): Promise<string | null> {
-  const matching = hooks.filter(h =>
-    h.trigger === trigger && matchesPattern(context.file || '', h.pattern)
-  );
+  // Pick the right field for pattern matching based on trigger type
+  const matchTarget =
+    trigger === 'pre_tool_use' || trigger === 'post_tool_use'
+      ? context.tool || ''
+      : context.file || '';
+
+  // Lifecycle triggers don't pattern-match
+  const isLifecycle =
+    trigger === 'session_start' || trigger === 'session_end' ||
+    trigger === 'task_complete' || trigger === 'on_compact';
+
+  const matching = hooks.filter(h => {
+    if (h.trigger !== trigger) return false;
+    if (isLifecycle) return true;
+    return matchesPattern(matchTarget, h.pattern);
+  });
 
   if (matching.length === 0) return null;
 
@@ -143,7 +175,11 @@ export async function runHooks(
     let cmd = hook.command;
     // Shell-escape placeholder values to prevent injection
     if (context.file) cmd = cmd.replace(/\{file\}/g, shellEscape(context.file));
+    if (context.tool) cmd = cmd.replace(/\{tool\}/g, shellEscape(context.tool));
     if (context.error) cmd = cmd.replace(/\{error\}/g, shellEscape(context.error.slice(0, 200)));
+    if (context.success !== undefined) {
+      cmd = cmd.replace(/\{success\}/g, context.success ? 'true' : 'false');
+    }
 
     try {
       const res = await shellExec(cmd, cwd);

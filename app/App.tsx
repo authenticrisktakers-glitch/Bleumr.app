@@ -99,6 +99,7 @@ interface Message {
   agent?: 'chat' | 'browser';
   brainEntryId?: string;
   pdfDownload?: { url: string; filename: string };
+  vote?: 'up' | 'down' | null;
 }
 
 interface OrbitConfig {
@@ -126,6 +127,7 @@ import { WorkspacePage } from './components/WorkspacePage';
 import { VoiceChatModal } from './components/VoiceChatModal';
 import { CodingPage } from './components/CodingPage';
 import { TradingDashboard } from './components/TradingDashboard';
+import AutomationBuilderPage from './components/AutomationBuilderPage';
 import { initTrading } from './services/trading';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
@@ -348,6 +350,7 @@ export default function App() {
   const [showApps, setShowApps] = useState(false);
   const [showGameGen, setShowGameGen] = useState(false);
   const [showOrbits, setShowOrbits] = useState(false);
+  const [showAutomation, setShowAutomation] = useState(false);
   const [orbitUnreadCount, setOrbitUnreadCount] = useState(() => orbitService.getUnreadCount());
   const [orbitThreadIds, setOrbitThreadIds] = useState<Set<string>>(() => orbitService.getActiveThreadIds());
   const [orbitTotalCount, setOrbitTotalCount] = useState(() => orbitService.getActive().length);
@@ -508,7 +511,7 @@ export default function App() {
   // render behind it unless we explicitly push it off-screen first.
   useEffect(() => {
     const orbitBrowser = (window as any).orbit?.browser;
-    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showGameGen || showWebDesigner || showVoiceChat || showUpgradeModal || showOrbits;
+    const anyOverlayOpen = showScheduler || showWorkspace || showCoding || showTrading || showApps || showGameGen || showWebDesigner || showVoiceChat || showUpgradeModal || showOrbits || showAutomation;
     if (anyOverlayOpen) {
       orbitBrowser?.hideAll?.();
     } else if (appMode === 'browser' && activeTabId) {
@@ -518,7 +521,7 @@ export default function App() {
       }, 180);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showGameGen, showWebDesigner, showVoiceChat, showUpgradeModal, showOrbits]);
+  }, [showScheduler, showWorkspace, showCoding, showTrading, showApps, showGameGen, showWebDesigner, showVoiceChat, showUpgradeModal, showOrbits, showAutomation]);
 
   // Code Editor Panel
   const [codePanel, setCodePanel] = useState<{ language: string; code: string; title: string } | null>(null);
@@ -730,6 +733,7 @@ export default function App() {
     setShowTrading(false);
     setShowWebDesigner(false);
     setShowGameGen(false);
+    setShowAutomation(false);
   }, []);
 
   const handleSelectThread = useCallback((threadId: string) => {
@@ -2901,6 +2905,7 @@ export default function App() {
             onOpenApps={() => setShowApps(true)}
             onOpenGameGen={() => setShowGameGen(true)}
             onOpenOrbits={() => setShowOrbits(true)}
+            onOpenAutomation={() => setShowAutomation(true)}
             orbitUnreadCount={orbitUnreadCount}
             orbitThreadIds={orbitThreadIds}
             orbitTotalCount={orbitTotalCount}
@@ -2913,6 +2918,17 @@ export default function App() {
               chatAbortRef.current?.abort();
             }}
             onNavigateInternal={(url) => { createTab(url); setAppMode('browser'); }}
+            onVote={(msgId, vote) => {
+              setMessages(prev => {
+                const updated = prev.map(m => m.id === msgId ? { ...m, vote } : m);
+                // Persist to storage immediately
+                if (currentThreadId) {
+                  const chatMsgs = updated.filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isBrowserFeedback && m.content?.trim());
+                  saveThreadMessages(currentThreadId, chatMsgs);
+                }
+                return updated;
+              });
+            }}
           />
         )}
       </AnimatePresence>
@@ -3791,6 +3807,25 @@ export default function App() {
               setShowOrbits(false);
               handleSelectThread(threadId);
             }}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Automation Builder */}
+    <AnimatePresence>
+      {showAutomation && (
+        <motion.div
+          key="automation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10002 }}
+        >
+          <AutomationBuilderPage
+            onClose={() => setShowAutomation(false)}
+            apiKey={secureApiKey}
           />
         </motion.div>
       )}
