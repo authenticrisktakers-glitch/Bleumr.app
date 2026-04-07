@@ -575,6 +575,18 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   const skillsRef = useRef<Skill[]>([]);
   const permissionsRef = useRef<PermissionRuleSet>(parsePermissions(''));
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
+  // Free-text feedback the user typed while a permission prompt was open. The
+  // approval handler stashes it here, the loop's deny branch reads it back and
+  // injects it into the next iteration so the agent actually sees what the
+  // user said instead of just "denied".
+  const denyFeedbackRef = useRef<string | null>(null);
+  // Full LLM conversation history (including tool_use + tool_result blocks)
+  // preserved across sendToAgent calls so the agent remembers EXACTLY what it
+  // built last turn — file paths, command outputs, the lot. Without this the
+  // model gets only the user/assistant text messages on the next turn and
+  // loses all knowledge of which files it just created. Capped to the last 30
+  // messages on save to prevent unbounded growth across long sessions.
+  const prevConversationRef = useRef<any[]>([]);
   const sessionStartedRef = useRef(false);
   const runBuiltInCommandRef = useRef<((name: string) => boolean) | null>(null);
 
@@ -938,6 +950,11 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       setProjectPath(null);
       setIsElectronProject(false);
       setMessages([]);
+      // Drop conversation context — switching project means the previous
+      // tool history points at files in a different folder
+      prevConversationRef.current = [];
+      lastToolContextRef.current = '';
+      denyFeedbackRef.current = null;
 
       addMessage({ role: 'assistant', content: `Opening ${handle.name}... scanning files.` });
 
@@ -969,6 +986,11 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
       setDirHandle(null);
       setIsElectronProject(true);
       setMessages([]);
+      // Drop conversation context — switching project means the previous
+      // tool history points at files in a different folder
+      prevConversationRef.current = [];
+      lastToolContextRef.current = '';
+      denyFeedbackRef.current = null;
 
       addMessage({ role: 'assistant', content: `Opening ${folderName}... scanning files.` });
 
@@ -1050,6 +1072,11 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
     });
     setIsWorking(true);
     abortedRef.current = false;
+
+    // Hoisted out of try{} so the finally block can persist it back to
+    // prevConversationRef for the next turn. Initialised inside try once
+    // we know the request is valid.
+    let conversationMessages: any[] = [];
 
     try {
       if (!apiKey) throw new Error('NO_KEY');
@@ -1192,16 +1219,31 @@ If they ask a coding question (not building), answer naturally and helpfully —
       lastUserMsgRef.current = text;
 
       // ── Build conversation history ──
-      const historyMsgs = messages
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .slice(-10)
-        .map(m => ({ role: m.role, content: m.content }));
-      // Inject previous tool context so model remembers what it did last turn
-      if (lastToolContextRef.current) {
-        historyMsgs.push({ role: 'assistant', content: `[Previous actions: ${lastToolContextRef.current}]` });
-      }
-      const conversationMessages: any[] = [
-        ...historyMsgs,
+      // ── Build conversation history ──
+      // Prefer the FULL persisted conversation from the previous turn if we
+      // have one. It includes tool_use + tool_result blocks so the model
+      // already knows the absolute file paths it wrote, what each command
+      // returned, and where the project lives. Without this, "fix it" turns
+      // into "let me read the project to understand…" because the model only
+      // sees user/assistant text and has no idea what it built last time.
+      //
+      // Falls back to the lossy text-only history (the old behaviour) on the
+      // very first turn or after a session reset.
+      const prevTurn = prevConversationRef.current;
+      const seedHistory: any[] = prevTurn.length > 0
+        ? prevTurn.slice()
+        : (() => {
+            const h: any[] = messages
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .slice(-10)
+              .map(m => ({ role: m.role, content: m.content }));
+            if (lastToolContextRef.current) {
+              h.push({ role: 'assistant', content: `[Previous actions: ${lastToolContextRef.current}]` });
+            }
+            return h;
+          })();
+      conversationMessages = [
+        ...seedHistory,
         { role: 'user', content: text + imageContext },
       ];
 
@@ -1590,7 +1632,15 @@ If they ask a coding question (not building), answer naturally and helpfully —
               }, 60000);
             });
             if (!approved) {
-              const denyMsg = `User denied permission for ${toolCall.function.name}. Try a different approach or ask them what they'd prefer.`;
+              // If the user typed free text instead of clicking Allow/Deny,
+              // their message was stashed in denyFeedbackRef. Surface it to
+              // the model so it actually knows what they want, instead of
+              // just seeing "denied" and guessing.
+              const userFeedback = denyFeedbackRef.current;
+              denyFeedbackRef.current = null;
+              const denyMsg = userFeedback
+                ? `User denied permission for ${toolCall.function.name} and said: "${userFeedback.slice(0, 400)}". Adjust your approach to match what they want.`
+                : `User denied permission for ${toolCall.function.name}. Try a different approach or ask them what they'd prefer.`;
               conversationMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: denyMsg });
               thinkingId = msgId();
               setMessages(prev => [...prev, {
@@ -2740,10 +2790,26 @@ If they ask a coding question (not building), answer naturally and helpfully —
           .join(' | ')
           .slice(0, 800);
       }
+      // Persist the FULL conversation (with tool_use + tool_result blocks)
+      // so the next turn picks up exactly where this one left off. Cap to the
+      // last 30 entries — long enough to remember what was just built, short
+      // enough that we don't blow the context window over many turns.
+      if (!isStale && conversationMessages.length > 0) {
+        prevConversationRef.current = conversationMessages.slice(-30);
+      }
       // Auto-memory: extract learnable patterns from this interaction (safe even if stale)
       if (toolResultsLog.length > 0 || lastAssistantText) {
         try { extractCodeMemories(lastUserMsgRef.current, lastAssistantText, toolResultsLog); } catch { /* best-effort */ }
       }
+      // Defensive: if a permission prompt is still pending (e.g. the loop
+      // exited via abort or maxIterations while awaiting approval), resolve
+      // it as deny so the awaiting promise doesn't leak forever.
+      if (pendingApprovalRef.current) {
+        const resolve = pendingApprovalRef.current;
+        pendingApprovalRef.current = null;
+        try { resolve(false); } catch { /* ignore */ }
+      }
+      denyFeedbackRef.current = null;
       // Always release running locks — a stuck "running" state is worse than a brief race
       agentRunningRef.current = false;
       setIsWorking(false);
@@ -2754,6 +2820,34 @@ If they ask a coding question (not building), answer naturally and helpfully —
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text) return;
+
+    // ── Pending-approval intercept ──────────────────────────────────────────
+    // If a tool is currently waiting on user permission and the user types
+    // free text instead of clicking [Allow once] / [Deny], interpret short
+    // affirmative phrases as approval and treat everything else as denial
+    // while passing the typed message through to the agent as feedback. This
+    // is the fix for the "agent never stops, I had to press Stop" bug — the
+    // promise the loop was awaiting now resolves the instant the user types
+    // anything, so isWorking flips back to false on its own.
+    if (pendingApprovalRef.current) {
+      const lc = text.toLowerCase();
+      const looksAffirmative = /^(y|yes|yeah|yep|yup|sure|ok|okay|fine|please|do it|go|go ahead|allow|approve|approved|run it|continue|proceed)\b[.,!\s]*$/.test(lc);
+      const resolve = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      // Show the user's reply in the chat so they have a record of it
+      addMessage({ role: 'user', content: text });
+      setInput('');
+      inputRef.current?.focus();
+      if (!looksAffirmative) {
+        // Stash the typed feedback so the loop's deny branch can inject it
+        // into the next iteration as an actual user message instead of just
+        // "denied". The agent then reconsiders based on what they said.
+        denyFeedbackRef.current = text;
+      }
+      resolve(looksAffirmative);
+      return;
+    }
+
     // Intercept built-in slash commands — don't send them to the agent
     if (text.startsWith('/')) {
       const cmdName = text.slice(1).split(/\s/)[0];
@@ -2766,7 +2860,7 @@ If they ask a coding question (not building), answer naturally and helpfully —
     setInput('');
     inputRef.current?.focus();
     sendToAgent(text);
-  }, [input, sendToAgent]);
+  }, [input, sendToAgent, addMessage]);
 
   // Handle suggestion chip clicks
   const handleSuggestionClick = useCallback((option: string, msgIdToUpdate: string) => {
@@ -2904,6 +2998,17 @@ If they ask a coding question (not building), answer naturally and helpfully —
     loopGenRef.current++;
     setIsWorking(false);
 
+    // Wipe conversation context — the new session has its own history and
+    // tool results; carrying the old ones over would confuse the agent.
+    prevConversationRef.current = [];
+    lastToolContextRef.current = '';
+    denyFeedbackRef.current = null;
+    if (pendingApprovalRef.current) {
+      const r = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { r(false); } catch { /* ignore */ }
+    }
+
     setMessages(session.messages);
     setProjectName(session.projectName);
     setProjectPath(session.projectPath);
@@ -2927,6 +3032,16 @@ If they ask a coding question (not building), answer naturally and helpfully —
     agentRunningRef.current = false;
     loopGenRef.current++;
     setIsWorking(false);
+
+    // Wipe conversation context — fresh session starts from zero
+    prevConversationRef.current = [];
+    lastToolContextRef.current = '';
+    denyFeedbackRef.current = null;
+    if (pendingApprovalRef.current) {
+      const r = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { r(false); } catch { /* ignore */ }
+    }
 
     saveCurrentSession();
     setMessages([]);
@@ -2965,6 +3080,16 @@ If they ask a coding question (not building), answer naturally and helpfully —
       setIsElectronProject(false);
       setWrittenFiles([]);
       setCheckpoints([]);
+      // Wipe conversation context too — the deleted session's tool history
+      // would point at files that may no longer exist
+      prevConversationRef.current = [];
+      lastToolContextRef.current = '';
+      denyFeedbackRef.current = null;
+      if (pendingApprovalRef.current) {
+        const r = pendingApprovalRef.current;
+        pendingApprovalRef.current = null;
+        try { r(false); } catch { /* ignore */ }
+      }
     }
   }, [activeSessionId]);
 
@@ -2978,6 +3103,16 @@ If they ask a coding question (not building), answer naturally and helpfully —
     agentRunningRef.current = false;
     loopGenRef.current++;
     setIsWorking(false);
+
+    // Wipe conversation context — fresh start
+    prevConversationRef.current = [];
+    lastToolContextRef.current = '';
+    denyFeedbackRef.current = null;
+    if (pendingApprovalRef.current) {
+      const r = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { r(false); } catch { /* ignore */ }
+    }
 
     saveCurrentSession();
     setMessages([]);
@@ -3013,6 +3148,17 @@ If they ask a coding question (not building), answer naturally and helpfully —
     agentRunningRef.current = false;
     loopGenRef.current++;
     setIsWorking(false);
+
+    // Wipe conversation context — checkpoint restore is a hard rewind, the
+    // tool history from after this point is no longer valid
+    prevConversationRef.current = [];
+    lastToolContextRef.current = '';
+    denyFeedbackRef.current = null;
+    if (pendingApprovalRef.current) {
+      const r = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { r(false); } catch { /* ignore */ }
+    }
 
     // Restore messages (filter to user/assistant only since that's what was stored)
     setMessages(data.messages.map(m => ({
@@ -3229,6 +3375,16 @@ If they ask a coding question (not building), answer naturally and helpfully —
   const handleInterrupt = useCallback(() => {
     abortedRef.current = true;
     agentRunningRef.current = false;
+    // Wake any in-flight permission prompt so the awaiting loop unblocks
+    // immediately instead of sitting on a hung promise for the 60s timeout.
+    // Without this, pressing Stop frees the input but the ghost loop keeps
+    // running in the background until the auto-deny fires.
+    if (pendingApprovalRef.current) {
+      const resolve = pendingApprovalRef.current;
+      pendingApprovalRef.current = null;
+      try { resolve(false); } catch { /* ignore */ }
+    }
+    denyFeedbackRef.current = null;
     setIsWorking(false);
     // Clear any lingering thinking indicators
     setMessages(prev => prev.filter(m => !(m.role === 'activity' && m.activity === 'thinking' && m.streaming)));
