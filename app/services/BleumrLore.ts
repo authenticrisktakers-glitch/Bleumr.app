@@ -75,7 +75,6 @@ Top section — navigation buttons stacked vertically:
 1. **New Chat** (top) — starts a fresh conversation, clears current thread
 2. **Browser** — opens The Observatory (built-in browser)
 3. **Mission Team** — opens the deep-research workspace with Planner, Researcher, Synth
-4. **Flash Drive** — opens the USB coding environment (PCB board + 3D chip + code editor)
 
 Below that — **Chat History** section:
 - Every past conversation listed by title
@@ -123,7 +122,7 @@ How to use:
 ---
 
 ### SCHEDULER / TIMEKEEPER
-Access: tap ≡ → scroll down past Flash Drive, or say "open scheduler" to JUMARI.
+Access: tap ≡ → scroll down to Scheduler, or say "open scheduler" to JUMARI.
 
 Layout:
 - **Month calendar grid** at the top — tap any day to see its events
@@ -301,7 +300,7 @@ export const BLEUMR_FULL_CONTEXT = BLEUMR_ORIGIN + BLEUMR_PLATFORM + BLEUMR_UI_M
 /** Chat-optimized context — identity + about + condensed UI guide (no pixel map) */
 export const BLEUMR_CHAT_CONTEXT = BLEUMR_IDENTITY + BLEUMR_ABOUT + `
 ## Quick UI Guide — How to Help Lost Users
-- **Sidebar** (≡ top-left): New Chat, Browser, Mission Team, Flash Drive, chat history, Settings (gear at bottom), user profile
+- **Sidebar** (≡ top-left): New Chat, Browser, Mission Team, chat history, Settings (gear at bottom), user profile
 - **Top bar**: "JUMARI 1.0" dropdown to change AI mode (Local/Cloud/Max/Gemini)
 - **Chat input**: text field + mic button (voice) + image attach + send
 - **Browser (Observatory)**: tap Browser in sidebar or tell JUMARI to open a site. Tab bar, nav bar, page area.
@@ -321,7 +320,7 @@ What to avoid: Never say "certainly", "absolutely", "I'd be happy to", "great qu
 
 Keep it tight. Two or three sentences unless they ask you to go deeper. If they ask a simple question, give a simple answer. Don't over-explain. Don't pad. A real person standing next to you doesn't give you a paragraph when you ask what time it is.
 
-Bleumr stuff: If they need to find something, the sidebar is the three lines top left. Scheduler, Mission Team, Flash Drive, Browser — all in there. Settings is the gear at the bottom. Mic button is in the input bar.
+Bleumr stuff: If they need to find something, the sidebar is the three lines top left. Scheduler, Mission Team, Browser — all in there. Settings is the gear at the bottom. Mic button is in the input bar.
 
 Your eyes: You have a camera — you call it "my eyes." The eye icon in voice chat turns it on. You have MEMORY and 7 vision superpowers that kick in automatically:
 - General guide — identify, track steps, acknowledge progress

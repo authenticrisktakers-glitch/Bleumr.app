@@ -6,6 +6,7 @@ import { InlineStarSphere } from './InlineStarSphere';
 import { cpuCores } from '../services/CPUAccelerator';
 import SubscriptionService from '../services/SubscriptionService';
 import { pullSyncData } from '../services/SyncService';
+import { onPageVisibilityChange } from '../hooks/useVisibilityPause';
 
 interface OnboardingProps {
   onComplete: (profile: UserProfile) => void;
@@ -68,9 +69,12 @@ function StarField() {
     }));
 
     let startTs: number | null = null;
-    let raf: number;
+    let raf: number = 0;
+    let paused = false;
+    let disposed = false;
 
     const draw = (ts: number) => {
+      if (disposed || paused) return;
       if (startTs === null) startTs = ts;
       const t = ts - startTs;
 
@@ -136,11 +140,30 @@ function StarField() {
       raf = requestAnimationFrame(draw);
     };
 
-    raf = requestAnimationFrame(draw);
+    const stopVisibility = onPageVisibilityChange({
+      onHide: () => { paused = true; cancelAnimationFrame(raf); },
+      onShow: () => {
+        if (disposed || !paused) return;
+        paused = false;
+        // Reset start timestamp so the drift doesn't snap forward
+        startTs = null;
+        raf = requestAnimationFrame(draw);
+      },
+    });
+
+    if (typeof document !== 'undefined' && document.hidden) {
+      paused = true;
+    } else {
+      raf = requestAnimationFrame(draw);
+    }
+
     return () => {
+      disposed = true;
+      paused = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMove);
+      stopVisibility();
     };
   }, []);
 

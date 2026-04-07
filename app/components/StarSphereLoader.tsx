@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, memo } from 'react';
 import { performanceTier, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
+import { onPageVisibilityChange } from '../hooks/useVisibilityPause';
 
 // More stars, smaller and brighter for a 4K-quality look
 const BG_STAR_COUNT = isMobileDevice
@@ -18,11 +19,13 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId: number = 0;
     let width = 0;
     let height = 0;
     let startTimestamp: number | null = null;
     let lastFrameTime = 0;
+    let paused = false;
+    let disposed = false;
 
     const bgStars = Array.from({ length: BG_STAR_COUNT }, () => ({
       x: Math.random(),
@@ -46,6 +49,7 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
     resizeCanvas();
 
     const render = (timestamp: number) => {
+      if (paused || disposed) return;
       // FPS throttle — skip frames to stay within budget
       if (timestamp - lastFrameTime < frameIntervalMs) {
         animationFrameId = requestAnimationFrame(render);
@@ -75,11 +79,29 @@ export const StarSphereLoader = memo(function StarSphereLoader() {
       animationFrameId = requestAnimationFrame(render);
     };
 
-    animationFrameId = requestAnimationFrame(render);
+    const stopVisibility = onPageVisibilityChange({
+      onHide: () => { paused = true; cancelAnimationFrame(animationFrameId); },
+      onShow: () => {
+        if (disposed || !paused) return;
+        paused = false;
+        // Reset frame timer so we don't draw a stale catch-up frame
+        lastFrameTime = 0;
+        animationFrameId = requestAnimationFrame(render);
+      },
+    });
+
+    if (typeof document !== 'undefined' && document.hidden) {
+      paused = true;
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+    }
 
     return () => {
+      disposed = true;
+      paused = true;
       window.removeEventListener('resize', resizeCanvas);
       cancelAnimationFrame(animationFrameId);
+      stopVisibility();
     };
   }, []);
 

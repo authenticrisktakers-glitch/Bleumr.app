@@ -77,6 +77,7 @@ import { MiniStarSphereButton } from './components/MiniStarSphereButton';
 import { InlineStarSphere } from './components/InlineStarSphere';
 import { OrbitHome } from './components/OrbitHome';
 import { cpuCores } from './services/CPUAccelerator';
+import { onPageVisibilityChange } from './hooks/useVisibilityPause';
 
 // --- Types ---
 type Role = 'user' | 'assistant' | 'system';
@@ -156,8 +157,11 @@ function PWAInstallStarField() {
       driftSpd: Math.random() * 0.012 + 0.003,
     }));
     let startTs: number | null = null;
-    let raf: number;
+    let raf: number = 0;
+    let paused = false;
+    let disposed = false;
     const draw = (ts: number) => {
+      if (disposed || paused) return;
       if (startTs === null) startTs = ts;
       const t = ts - startTs;
       ctx.fillStyle = '#020208';
@@ -174,8 +178,27 @@ function PWAInstallStarField() {
       ctx.globalAlpha = 1;
       raf = requestAnimationFrame(draw);
     };
-    raf = requestAnimationFrame(draw);
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
+    const stopVisibility = onPageVisibilityChange({
+      onHide: () => { paused = true; cancelAnimationFrame(raf); },
+      onShow: () => {
+        if (disposed || !paused) return;
+        paused = false;
+        startTs = null;
+        raf = requestAnimationFrame(draw);
+      },
+    });
+    if (typeof document !== 'undefined' && document.hidden) {
+      paused = true;
+    } else {
+      raf = requestAnimationFrame(draw);
+    }
+    return () => {
+      disposed = true;
+      paused = true;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', resize);
+      stopVisibility();
+    };
   }, []);
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
 }

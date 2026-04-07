@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, memo, useCallback } from 'react';
 import { cpuCores, isMobileDevice, frameIntervalMs } from '../services/CPUAccelerator';
+import { onPageVisibilityChange } from '../hooks/useVisibilityPause';
 
 interface InlineStarSphereProps {
   className?: string;
@@ -133,11 +134,14 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     };
     setupCanvas();
 
-    let animationFrameId: number;
+    let animationFrameId: number = 0;
     let isVisible = true;
+    let paused = false;
+    let disposed = false;
     let lastFrameTime = 0;
 
     const render = (timestamp: number) => {
+      if (disposed || paused) return;
       if (!isVisible) {
         animationFrameId = requestAnimationFrame(render);
         return;
@@ -243,11 +247,30 @@ export const InlineStarSphere: React.FC<InlineStarSphereProps> = memo(function I
     );
     observer.observe(container);
 
-    animationFrameId = requestAnimationFrame(render);
+    const stopVisibility = onPageVisibilityChange({
+      onHide: () => { paused = true; cancelAnimationFrame(animationFrameId); },
+      onShow: () => {
+        if (disposed || !paused) return;
+        paused = false;
+        // Reset frame timer + start TS so paused time doesn't snap forward
+        lastFrameTime = 0;
+        startTimestamp = null;
+        animationFrameId = requestAnimationFrame(render);
+      },
+    });
+
+    if (typeof document !== 'undefined' && document.hidden) {
+      paused = true;
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+    }
 
     return () => {
+      disposed = true;
+      paused = true;
       cancelAnimationFrame(animationFrameId);
       observer.disconnect();
+      stopVisibility();
     };
   }, [size, interactive]);
 

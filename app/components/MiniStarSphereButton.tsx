@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { onPageVisibilityChange } from '../hooks/useVisibilityPause';
 
 interface MiniStarSphereButtonProps {
   onClick: () => void;
@@ -21,7 +22,9 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId: number = 0;
+    let paused = false;
+    let disposed = false;
     let width = size;
     let height = size;
     let centerX = size / 2;
@@ -69,6 +72,7 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
     setupCanvas();
 
     const render = (timestamp: number) => {
+      if (paused || disposed) return;
       if (startTimestamp === null) startTimestamp = timestamp;
       const elapsedMs = timestamp - startTimestamp;
 
@@ -136,10 +140,28 @@ export const MiniStarSphereButton: React.FC<MiniStarSphereButtonProps> = ({
       animationFrameId = requestAnimationFrame(render);
     };
 
-    animationFrameId = requestAnimationFrame(render);
+    const stopVisibility = onPageVisibilityChange({
+      onHide: () => { paused = true; cancelAnimationFrame(animationFrameId); },
+      onShow: () => {
+        if (disposed || !paused) return;
+        paused = false;
+        // Reset start timestamp so the rotation doesn't snap forward
+        startTimestamp = null;
+        animationFrameId = requestAnimationFrame(render);
+      },
+    });
+
+    if (typeof document !== 'undefined' && document.hidden) {
+      paused = true;
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+    }
 
     return () => {
+      disposed = true;
+      paused = true;
       cancelAnimationFrame(animationFrameId);
+      stopVisibility();
     };
   }, [size]);
 
