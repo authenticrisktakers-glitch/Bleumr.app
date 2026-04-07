@@ -32,6 +32,10 @@ import {
   extractSuggestions, pickModel, highlightCode, safeClipboardCopy,
 } from './CodeBleu/utils';
 import { ALL_TOOLS, TOOL_CAT, SHELL_CMD, pickTools } from './CodeBleu/tools';
+import {
+  PALETTES, FONT_PAIRINGS, DESIGN_SYSTEMS, ICON_LIBRARIES,
+  buildPollinationsUrl, styleImagePrompt,
+} from './CodeBleu/designLibrary';
 import { groqFetch, streamGroqResponse } from './CodeBleu/api';
 import {
   readDirRecursive, readFileFromHandle, writeFileFromHandle,
@@ -1135,6 +1139,57 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
         ? `You have FULL PERMISSION to read, write, create, delete, and run any commands without asking. The user enabled auto-approve mode. Just do the work — no need to ask "should I?" or "want me to?" — go ahead and execute immediately. Be fast and efficient.`
         : `Ask the user for permission before writing or deleting files. Explain what you plan to change and why. If the user says "yes", "go ahead", "do it", "fix it", or anything affirmative — proceed.`;
 
+      // ── Designer prompt block — only injected when the user is asking for
+      // design-quality work (websites, landing pages, branding, UI). Tells the
+      // model what the design toolkit can do and what defaults to reach for.
+      const looksLikeDesignWork = /website|landing|hero|design|theme|brand|logo|icon|color|palette|font|typograph|\bui\b|layout|figma|template|aesthetic|gorgeous|beautiful|professional|modern|sleek|premium|minimal|playful|cozy|luxury|elegant|polished|stunning|illustration|graphic/i.test(text);
+      const DESIGNER_PROMPT = `
+
+═══ DESIGNER MODE — REAL DESIGNS, NOT PLACEHOLDERS ═══
+You have a full design toolkit. Use it. The days of "<!-- TODO: add real logo here -->" are over.
+
+For ANY website, landing page, or visual project, follow this workflow:
+
+1. PICK A LOOK FIRST. Before writing a single line of HTML, call:
+   • get_color_palette({ vibe: 'modern-tech' | 'warm-cozy' | 'playful' | 'luxury' | 'minimal' | 'dark-neon' | 'earthy' | 'pastel' | 'editorial' | 'ocean' })
+   • get_font_pairing({ style: 'modern' | 'classic' | 'playful' | 'tech' | 'editorial' | 'luxury' })
+   These return curated, hand-picked color systems and Google Fonts pairings that ACTUALLY look good together. No more guessing #336699.
+
+2. GENERATE REAL ASSETS. For every image the design needs:
+   • Logos → generate_image({ prompt: '...', style: 'logo', path: 'public/logo.png', width: 512, height: 512 })
+   • Hero photos → find_stock_photo({ query: '...', path: 'public/hero.jpg', width: 1920, height: 1080 })
+   • Illustrations → generate_image({ prompt: '...', style: 'illustration', path: 'public/about-illustration.png' })
+   • Icons → use add_icon_library, NOT generate_image (icon libraries are sharper)
+   These call Pollinations.ai (Flux.1) — completely free, no API key, works offline-resilient via the Electron proxy.
+   NEVER use placeholder.com, picsum, or "<!-- image goes here -->". ALWAYS generate real assets.
+
+3. INSTALL ICONS. For React/Next/Vite projects, default to: add_icon_library({ library: 'lucide' }) — it's what shadcn uses.
+   For plain HTML, embed icons via inline SVG from Lucide's icon set (https://lucide.dev) — copy the SVG paths directly into the HTML.
+
+4. DEFAULT STACK for new sites:
+   • Plain marketing site → HTML + Tailwind CDN + Lucide inline SVGs + real generated images. Single index.html, gorgeous, no build step.
+   • React app → Vite + React + Tailwind + apply_design_system({ system: 'shadcn' }) + Lucide + Framer Motion (install separately if animations needed).
+   • Always link the chosen Google Fonts pairing in the <head>.
+   • Always use the chosen palette as CSS variables in :root, then reference them throughout.
+
+5. VERIFY VISUALLY. After writing/modifying any HTML page, call:
+   screenshot_preview({ path: 'index.html', viewport: 'desktop' })
+   The PNG saves to .bleumr-preview/. Look at how the page actually rendered. If spacing, colors, or layout are off, FIX IT and screenshot again. Do not stop at "the file was written" — stop at "the page LOOKS right".
+
+DESIGN QUALITY BAR — what counts as "done":
+• Real logo (generated, saved to disk, referenced in <img>)
+• Real hero image (generated photo, not a gradient placeholder)
+• Curated palette applied via CSS variables
+• Curated font pairing loaded from Google Fonts
+• Real icons from Lucide (or matching library)
+• Layout verified via screenshot_preview at desktop viewport
+• Responsive — also screenshot at mobile viewport
+• No "lorem ipsum" — write real, contextual copy
+
+If the user says "make it pretty" / "make it look professional" / "design it like figma" / "real design" — that's your cue to use ALL of the above. Don't hand-roll a CSS color scheme. Don't paste in placeholder.com URLs. Use the toolkit.
+═══════════════════════════════════════════════════════
+`;
+
       // Rebuild system prompt each iteration — projectPathRef may change after create_project
       const buildSysPrompt = () => {
         // If project was just created this loop and no files written yet, keep the "build from scratch" prompt
@@ -1160,7 +1215,8 @@ Technology decisions — make them automatically:
 - "website" or "page" → plain HTML/CSS/JS (no framework needed)
 - "app" or "application" → React + TypeScript
 - "api" or "server" → Node.js + Express
-- If unclear, use HTML/CSS/JS — it's simplest and always works.`;
+- If unclear, use HTML/CSS/JS — it's simplest and always works.
+${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
         }
 
         return (projectContext || projectPathRef.current)
@@ -1239,6 +1295,7 @@ You have 55 tools organized by category:
 Not all tools are available at once — the system loads relevant tools based on context. If you need a tool that's not available, use run_command as a fallback.
 
 ${planMode ? PLAN_MODE_PROMPT : ''}
+${looksLikeDesignWork ? DESIGNER_PROMPT : ''}
 ${formatConfigForPrompt(bleumrConfig)}
 ${getCodeContext(lastUserMsgRef.current)}
 ${preacher.getTrackedFiles().length > 0 ? preacher.getSummary() + '\n\n' : ''}Project context:
@@ -1260,7 +1317,8 @@ Rules:
 - NEVER use filler: "Let me know if you need anything", "Please note...", "Feel free to ask". Be specific about what you built.
 - Talk naturally between tool calls — 1-2 sentences explaining what you just did or are about to do.
 
-If they ask a coding question (not building), answer naturally and helpfully — share your expertise, explain concepts clearly, reference real patterns.`;
+If they ask a coding question (not building), answer naturally and helpfully — share your expertise, explain concepts clearly, reference real patterns.
+${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
       };
 
       // ── Tool selection (dynamic — picks relevant subset of 55 tools) ──
@@ -2645,6 +2703,241 @@ If they ask a coding question (not building), answer naturally and helpfully —
                 }
               } catch (err: any) {
                 result = `Error importing image: ${err?.message ?? 'unknown'}`;
+              }
+            }
+
+          } else if (toolCall.function.name === 'generate_image' || toolCall.function.name === 'find_stock_photo') {
+            // ── DESIGN: GENERATE/FIND IMAGE via Pollinations.ai ──
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            const isPhoto = toolCall.function.name === 'find_stock_photo';
+            const prompt: string = (isPhoto ? args.query : args.prompt) ?? '';
+            const style: string = isPhoto ? 'photo' : (args.style ?? 'illustration');
+            const path: string = args.path ?? '';
+            const widthRaw = parseInt(args.width || '', 10);
+            const heightRaw = parseInt(args.height || '', 10);
+            const width = Number.isFinite(widthRaw) && widthRaw > 0 ? Math.min(widthRaw, 2048) : (isPhoto ? 1920 : 1024);
+            const height = Number.isFinite(heightRaw) && heightRaw > 0 ? Math.min(heightRaw, 2048) : (isPhoto ? 1080 : 1024);
+
+            if (!prompt) {
+              result = `${toolCall.function.name} requires a ${isPhoto ? 'query' : 'prompt'}.`;
+            } else if (!path || !safePath(path)) {
+              result = 'Invalid save path — must be a relative project path with no ".." or shell metacharacters.';
+            } else if (!orbit?.downloadImage || !cmdCwd) {
+              result = 'Image generation only available in the desktop app with a project open.';
+            } else {
+              const fullDest = path.startsWith('/') ? path : `${cmdCwd}/${path}`;
+              const parentDir = fullDest.substring(0, fullDest.lastIndexOf('/'));
+              const styledPrompt = styleImagePrompt(prompt, style);
+              const imageUrl = buildPollinationsUrl({
+                prompt: styledPrompt,
+                width,
+                height,
+                model: style.toLowerCase().includes('photo') || style.toLowerCase().includes('product') ? 'flux-realism' : 'flux',
+              });
+
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'thinking',
+                files: [{ path, content: `Generating ${style} image: "${prompt.slice(0, 100)}"...`, action: 'write' }],
+              });
+
+              try {
+                if (orbit.mkdir && parentDir) await orbit.mkdir(parentDir);
+                const dlRes = await orbit.downloadImage(imageUrl, fullDest);
+                if (dlRes?.success) {
+                  result = `Generated ${style} image at ${path} (${width}x${height}, ~${Math.round((dlRes.bytes || 0) / 1024)}KB). Reference it as "${path}" or "/${path.replace(/^public\//, '')}" depending on your stack.`;
+                  removeThinking();
+                  addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path, content: `[Generated ${style}: ${prompt.slice(0, 80)}]`, action: 'write' }] });
+                  setProjectFiles(prev => prev.some(f => f.path === path) ? prev : [...prev, { path, name: path.split('/').pop() ?? path }]);
+                  thinkingId = msgId();
+                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Generated ${path.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                } else {
+                  result = `Image generation failed: ${dlRes?.reason || 'unknown error'}. Pollinations.ai may be slow — try again or use a simpler prompt.`;
+                }
+              } catch (err: any) {
+                result = `Image generation error: ${err?.message ?? 'unknown'}`;
+              }
+            }
+
+          } else if (toolCall.function.name === 'get_color_palette') {
+            // ── DESIGN: lookup curated color palette ──
+            const vibeRaw = (args.vibe ?? '').toLowerCase().trim();
+            const aliasMap: Record<string, string> = {
+              'tech': 'modern-tech', 'modern': 'modern-tech', 'indigo': 'modern-tech', 'linear': 'modern-tech', 'vercel': 'modern-tech',
+              'cozy': 'warm-cozy', 'warm': 'warm-cozy', 'coffee': 'warm-cozy', 'cafe': 'warm-cozy',
+              'fun': 'playful', 'kid': 'playful', 'pink': 'playful',
+              'gold': 'luxury', 'premium': 'luxury', 'elegant': 'luxury',
+              'apple': 'minimal', 'stripe': 'minimal', 'clean': 'minimal',
+              'cyber': 'dark-neon', 'neon': 'dark-neon', 'matrix': 'dark-neon', 'gaming': 'dark-neon',
+              'sage': 'earthy', 'natural': 'earthy', 'organic': 'earthy', 'wellness': 'earthy',
+              'soft': 'pastel',
+              'magazine': 'editorial', 'newspaper': 'editorial',
+              'sea': 'ocean', 'beach': 'ocean', 'travel': 'ocean', 'blue': 'ocean',
+            };
+            const key = (PALETTES[vibeRaw] ? vibeRaw : (aliasMap[vibeRaw] || 'modern-tech'));
+            const palette = PALETTES[key];
+            result = `Palette "${palette.name}" — ${palette.vibe}\n\n` +
+              `background: ${palette.background}\n` +
+              `surface: ${palette.surface}\n` +
+              `text: ${palette.text}\n` +
+              `textMuted: ${palette.textMuted}\n` +
+              `primary: ${palette.primary}\n` +
+              `primaryHover: ${palette.primaryHover}\n` +
+              `accent: ${palette.accent}\n` +
+              `border: ${palette.border}\n` +
+              `gradient: ${palette.gradient}\n\n` +
+              `Tailwind CSS variables (paste into globals.css):\n` +
+              `:root {\n` +
+              `  --bg: ${palette.background};\n` +
+              `  --surface: ${palette.surface};\n` +
+              `  --text: ${palette.text};\n` +
+              `  --text-muted: ${palette.textMuted};\n` +
+              `  --primary: ${palette.primary};\n` +
+              `  --primary-hover: ${palette.primaryHover};\n` +
+              `  --accent: ${palette.accent};\n` +
+              `  --border: ${palette.border};\n` +
+              `}\n\n` +
+              `Tailwind hex shorthand: bg-[${palette.tailwindHexes.bg}] surface-[${palette.tailwindHexes.surface}] primary-[${palette.tailwindHexes.primary}] accent-[${palette.tailwindHexes.accent}]`;
+
+          } else if (toolCall.function.name === 'get_font_pairing') {
+            // ── DESIGN: lookup curated Google Fonts pairing ──
+            const styleRaw = (args.style ?? '').toLowerCase().trim();
+            const aliasMap: Record<string, string> = {
+              'modern': 'modern', 'clean': 'modern', 'minimal': 'modern', 'sans': 'modern',
+              'classic': 'classic', 'serif': 'classic', 'traditional': 'classic',
+              'fun': 'playful', 'friendly': 'playful', 'soft': 'playful',
+              'tech': 'tech', 'developer': 'tech', 'code': 'tech',
+              'editorial': 'editorial', 'magazine': 'editorial', 'longform': 'editorial',
+              'luxury': 'luxury', 'premium': 'luxury', 'elegant': 'luxury',
+            };
+            const key = (FONT_PAIRINGS[styleRaw] ? styleRaw : (aliasMap[styleRaw] || 'modern'));
+            const fp = FONT_PAIRINGS[key];
+            result = `Font pairing "${fp.name}" — ${fp.style}\n\n` +
+              `Google Fonts <link>:\n` +
+              `<link rel="preconnect" href="https://fonts.googleapis.com">\n` +
+              `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n` +
+              `<link href="${fp.googleFontsUrl}" rel="stylesheet">\n\n` +
+              `CSS:\n` +
+              `body { ${fp.bodyCss} }\n` +
+              `h1, h2, h3, h4, h5, h6 { ${fp.headingCss} }\n\n` +
+              `Heading font: ${fp.headingFamily}\nBody font: ${fp.bodyFamily}`;
+
+          } else if (toolCall.function.name === 'add_icon_library') {
+            // ── DESIGN: install icon library ──
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            const libRaw = (args.library ?? 'lucide').toLowerCase().trim();
+            const lib = ICON_LIBRARIES[libRaw] || ICON_LIBRARIES['lucide'];
+
+            if (!orbit?.shellExec || !cmdCwd) {
+              result = `Icon library install requires desktop app + open project.\n\n${lib.name}: ${lib.description}\nInstall: ${lib.installCommand}\n${lib.exampleImport}\nUsage: ${lib.exampleUsage}`;
+            } else {
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `$ ${lib.installCommand}`, content: 'Installing...', action: 'read' }],
+              });
+              try {
+                const res = await orbit.shellExec(lib.installCommand, cmdCwd);
+                result = res.success
+                  ? `Installed ${lib.name}.\n\nImport:\n${lib.exampleImport}\n\nUsage:\n${lib.exampleUsage}\n\n${lib.description}`
+                  : `Install failed (exit ${res.code}): ${res.stderr?.slice(0, 1000) || ''}\n\nYou can still use it after installing manually:\n${lib.installCommand}`;
+                removeThinking();
+                addMessage({
+                  role: 'activity', content: '', activity: 'analyzing',
+                  files: [{ path: `$ ${lib.installCommand}`, content: (res.stdout || res.stderr || '').slice(0, 1500) || '(no output)', action: 'read' }],
+                });
+                thinkingId = msgId();
+                setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `${lib.name} added`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+              } catch (err: any) {
+                result = `Install error: ${err?.message ?? 'unknown'}`;
+              }
+            }
+
+          } else if (toolCall.function.name === 'apply_design_system') {
+            // ── DESIGN: install + setup React component library ──
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            const sysRaw = (args.system ?? 'shadcn').toLowerCase().trim();
+            const sys = DESIGN_SYSTEMS[sysRaw] || DESIGN_SYSTEMS['shadcn'];
+
+            if (!orbit?.shellExec || !cmdCwd) {
+              result = `Design system install requires desktop app + open project.\n\n${sys.name}: ${sys.description}\nSetup:\n${sys.setupCommands.join('\n')}\nExample: ${sys.exampleImport}`;
+            } else {
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `Apply ${sys.name}`, content: sys.setupCommands.join('\n'), action: 'read' }],
+              });
+              const outputs: string[] = [];
+              let overallSuccess = true;
+              for (const cmd of sys.setupCommands) {
+                try {
+                  thinkingId = msgId();
+                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Running: ${cmd.slice(0, 60)}...`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                  const res = await orbit.shellExec(cmd, cmdCwd);
+                  outputs.push(`$ ${cmd}\n${res.success ? '(ok)' : `(exit ${res.code})`}\n${(res.stdout || '').slice(0, 800)}${res.stderr ? `\n${res.stderr.slice(0, 800)}` : ''}`);
+                  if (!res.success) overallSuccess = false;
+                  removeThinking();
+                } catch (err: any) {
+                  outputs.push(`$ ${cmd}\nError: ${err?.message ?? 'unknown'}`);
+                  overallSuccess = false;
+                }
+              }
+              result = `${overallSuccess ? 'Applied' : 'Partially applied'} ${sys.name}.\n\n${sys.description}\n\nUsage:\n${sys.exampleImport}\n\nSetup output:\n${outputs.join('\n\n').slice(0, 3500)}`;
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `${sys.name} setup`, content: outputs.join('\n').slice(0, 2000), action: 'read' }],
+              });
+              thinkingId = msgId();
+              setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `${sys.name} ready`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+            }
+
+          } else if (toolCall.function.name === 'screenshot_preview') {
+            // ── DESIGN: capture HTML file as PNG via offscreen browser ──
+            const orbit = (window as any).orbit;
+            const cmdCwd = projectPathRef.current || projectPath;
+            const path: string = args.path ?? '';
+            const viewportRaw = (args.viewport ?? 'desktop').toLowerCase();
+            const viewport: 'mobile' | 'tablet' | 'desktop' =
+              viewportRaw === 'mobile' || viewportRaw === 'tablet' || viewportRaw === 'desktop' ? viewportRaw : 'desktop';
+
+            if (!path || !safePath(path)) {
+              result = 'Invalid path — must be a relative project path with no ".." or shell metacharacters.';
+            } else if (!orbit?.captureHTMLFile || !cmdCwd) {
+              result = 'Screenshot preview only available in the desktop app with a project open.';
+            } else {
+              const fullPath = path.startsWith('/') ? path : `${cmdCwd}/${path}`;
+              // Save the screenshot next to the HTML file (or in .bleumr-preview/)
+              const baseName = path.split('/').pop()?.replace(/\.html?$/, '') ?? 'preview';
+              const previewDir = `${cmdCwd}/.bleumr-preview`;
+              const savePath = `${previewDir}/${baseName}-${viewport}.png`;
+
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'thinking',
+                files: [{ path, content: `Rendering ${path} at ${viewport}...`, action: 'read' }],
+              });
+
+              try {
+                if (orbit.mkdir) await orbit.mkdir(previewDir);
+                const capRes = await orbit.captureHTMLFile(fullPath, viewport, savePath);
+                if (capRes?.success) {
+                  const dims = viewport === 'mobile' ? '390x844' : viewport === 'tablet' ? '820x1180' : '1440x900';
+                  result = `Screenshot saved to .bleumr-preview/${baseName}-${viewport}.png (${dims}). The page rendered successfully — check the layout, colors, spacing, and content. If anything looks off, edit ${path} and call screenshot_preview again to verify.`;
+                  removeThinking();
+                  addMessage({
+                    role: 'activity', content: '', activity: 'analyzing',
+                    files: [{ path: `.bleumr-preview/${baseName}-${viewport}.png`, content: `[PNG ${dims}]`, action: 'read' }],
+                  });
+                  thinkingId = msgId();
+                  setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Captured ${baseName}-${viewport}.png`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                } else {
+                  result = `Screenshot failed: ${capRes?.reason || 'unknown error'}. Make sure ${path} exists and is valid HTML.`;
+                }
+              } catch (err: any) {
+                result = `Screenshot error: ${err?.message ?? 'unknown'}`;
               }
             }
 

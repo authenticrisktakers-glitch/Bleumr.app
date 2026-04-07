@@ -830,6 +830,119 @@ ipcMain.handle(
   },
 )
 
+// ── Download image to disk (for Code Bleu's generate_image / find_stock_photo) ─
+// Fetches an image from a small allowlist of free providers and saves it to a
+// user-permitted path on disk. Used by the design toolkit so the agent can
+// generate logos, hero images, and stock photos and write them straight into
+// the project folder.
+ipcMain.handle(
+  'orbit:fs:downloadImage',
+  async (_e, imageUrl: string, savePath: string) => {
+    try {
+      const parsed = new URL(imageUrl)
+      if (parsed.protocol !== 'https:') {
+        return { success: false, reason: 'Only HTTPS allowed' }
+      }
+      const allowedHosts = [
+        'image.pollinations.ai',
+        'pollinations.ai',
+        'picsum.photos',
+        'images.unsplash.com',
+        'images.pexels.com',
+      ]
+      if (!allowedHosts.some(h => parsed.hostname.endsWith(h))) {
+        return { success: false, reason: `Domain not allowed: ${parsed.hostname}` }
+      }
+      if (!isPathAllowed(savePath)) {
+        return { success: false, reason: 'Save path not permitted' }
+      }
+      const res = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      })
+      if (!res.ok) return { success: false, reason: `HTTP ${res.status}` }
+      const buffer = Buffer.from(await res.arrayBuffer())
+      // Make sure the parent directory exists
+      try {
+        const parent = savePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+        if (parent) mkdirSync(parent, { recursive: true })
+      } catch { /* ignore — write will surface the error */ }
+      writeFileSync(savePath, buffer)
+      return { success: true, path: savePath, bytes: buffer.length }
+    } catch (err: any) {
+      return { success: false, reason: err?.message || 'Download failed' }
+    }
+  },
+)
+
+// ── Render an HTML file in an offscreen window and return a screenshot ─────
+// Used by Code Bleu's screenshot_preview tool so the agent can verify what
+// the page actually looks like after writing HTML/CSS. Saves the resulting
+// PNG into the project at savePath if provided.
+ipcMain.handle(
+  'orbit:fs:captureHTMLFile',
+  async (_e, htmlPath: string, viewport?: 'mobile' | 'tablet' | 'desktop', savePath?: string) => {
+    if (!isPathAllowed(htmlPath)) {
+      return { success: false, reason: 'HTML path not permitted' }
+    }
+    if (!existsSync(htmlPath)) {
+      return { success: false, reason: 'HTML file does not exist' }
+    }
+    if (savePath && !isPathAllowed(savePath)) {
+      return { success: false, reason: 'Save path not permitted' }
+    }
+    const dims = viewport === 'mobile'
+      ? { width: 390, height: 844 }
+      : viewport === 'tablet'
+        ? { width: 820, height: 1180 }
+        : { width: 1440, height: 900 }
+    let win: BrowserWindow | null = null
+    try {
+      win = new BrowserWindow({
+        width: dims.width,
+        height: dims.height,
+        show: false,
+        webPreferences: {
+          offscreen: false,
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+        },
+      })
+      // Load the HTML file via file:// protocol
+      await win.loadFile(htmlPath)
+      // Brief wait for fonts/images/animation to settle (capped)
+      await new Promise(r => setTimeout(r, 800))
+      const image = await win.webContents.capturePage()
+      const png = image.toPNG()
+      const base64 = png.toString('base64')
+      let writtenPath: string | null = null
+      if (savePath) {
+        try {
+          const parent = savePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+          if (parent) mkdirSync(parent, { recursive: true })
+        } catch { /* ignore */ }
+        writeFileSync(savePath, png)
+        writtenPath = savePath
+      }
+      return {
+        success: true,
+        base64,
+        contentType: 'image/png',
+        bytes: png.length,
+        path: writtenPath,
+        viewport: viewport || 'desktop',
+        dimensions: dims,
+      }
+    } catch (err: any) {
+      return { success: false, reason: err?.message || 'Capture failed' }
+    } finally {
+      try { win?.close() } catch { /* ignore */ }
+    }
+  },
+)
+
 // Connector / plugin system
 ipcMain.handle(
   'orbit:connector:invoke',

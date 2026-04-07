@@ -227,6 +227,20 @@ contextBridge.exposeInMainWorld('orbit', {
   fetchImage: (imageUrl: string) =>
     ipcRenderer.invoke('orbit:fetchImage', imageUrl),
 
+  // ── Download image to disk (Pollinations / Picsum / Unsplash / Pexels) ───
+  // Used by Code Bleu's design toolkit (generate_image, find_stock_photo).
+  downloadImage: (imageUrl: string, savePath: string) =>
+    ipcRenderer.invoke('orbit:fs:downloadImage', imageUrl, savePath),
+
+  // ── Capture an HTML file as a PNG (visual feedback for Code Bleu) ────────
+  // Loads the file in an offscreen BrowserWindow and screenshots it. Returns
+  // base64 PNG and optionally writes the PNG to disk at savePath.
+  captureHTMLFile: (
+    htmlPath: string,
+    viewport?: 'mobile' | 'tablet' | 'desktop',
+    savePath?: string,
+  ) => ipcRenderer.invoke('orbit:fs:captureHTMLFile', htmlPath, viewport, savePath),
+
   // ── Model invocation stubs ────────────────────────────────────────────────
   // These return empty values until a provider key is configured.
   // Add real implementations via the connector system.
