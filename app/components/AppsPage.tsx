@@ -85,14 +85,15 @@ const apps = [
     iconBg: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
     action: 'onOpenWebDesigner' as const,
   },
-  {
+  // CODE Bleu — desktop (Electron) only
+  ...(IS_ELECTRON ? [{
     id: 'code',
     label: 'CODE Bleu',
     Icon: CodeLabIcon,
     color: 'text-emerald-400',
     iconBg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
     action: 'onOpenCoding' as const,
-  },
+  }] : []),
   {
     id: 'trading',
     label: 'Trading',

@@ -76,8 +76,7 @@ import localforage from 'localforage';
 import { MiniStarSphereButton } from './components/MiniStarSphereButton';
 import { InlineStarSphere } from './components/InlineStarSphere';
 import { OrbitHome } from './components/OrbitHome';
-import { cpuCores } from './services/CPUAccelerator';
-import { onPageVisibilityChange } from './hooks/useVisibilityPause';
+import PWAInstallGate, { shouldShowInstallGate } from './components/PWAInstallGate';
 
 // --- Types ---
 type Role = 'user' | 'assistant' | 'system';
@@ -133,90 +132,8 @@ import { initTrading } from './services/trading';
 import { getProfile, saveProfile, clearProfile, restoreProfileFromStore, UserProfile } from './services/UserProfile';
 
 
-// Detect if running as installed PWA (standalone) vs regular browser tab
-// Lightweight starfield for PWA install gate (no sphere barrier, no cursor lines — just drifting stars)
-const PWA_STAR_COUNT = cpuCores >= 8 ? 300 : cpuCores >= 4 ? 180 : 100;
-
-function PWAInstallStarField() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return;
-    let W = 0, H = 0, maxH = 0;
-    const resize = () => { W = canvas.width = window.innerWidth; maxH = Math.max(maxH, window.innerHeight, screen.height); H = canvas.height = maxH; };
-    resize();
-    window.addEventListener('resize', resize);
-    const stars = Array.from({ length: PWA_STAR_COUNT }, () => ({
-      x: Math.random(), y: Math.random(),
-      r: Math.random() * 1.3 + 0.2,
-      baseAlpha: Math.random() * 0.5 + 0.08,
-      twinkleSpd: Math.random() * 0.0008 + 0.0003,
-      twinklePhase: Math.random() * Math.PI * 2,
-      driftSpd: Math.random() * 0.012 + 0.003,
-    }));
-    let startTs: number | null = null;
-    let raf: number = 0;
-    let paused = false;
-    let disposed = false;
-    const draw = (ts: number) => {
-      if (disposed || paused) return;
-      if (startTs === null) startTs = ts;
-      const t = ts - startTs;
-      ctx.fillStyle = '#020208';
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#ffffff';
-      for (let i = 0; i < PWA_STAR_COUNT; i++) {
-        const s = stars[i];
-        const tw = Math.sin(t * s.twinkleSpd + s.twinklePhase) * 0.5 + 0.5;
-        const sx = ((s.x * W) + t * s.driftSpd) % W;
-        const sy = s.y * H;
-        ctx.globalAlpha = s.baseAlpha * (0.4 + 0.6 * tw);
-        ctx.fillRect(sx, sy, s.r, s.r);
-      }
-      ctx.globalAlpha = 1;
-      raf = requestAnimationFrame(draw);
-    };
-    const stopVisibility = onPageVisibilityChange({
-      onHide: () => { paused = true; cancelAnimationFrame(raf); },
-      onShow: () => {
-        if (disposed || !paused) return;
-        paused = false;
-        startTs = null;
-        raf = requestAnimationFrame(draw);
-      },
-    });
-    if (typeof document !== 'undefined' && document.hidden) {
-      paused = true;
-    } else {
-      raf = requestAnimationFrame(draw);
-    }
-    return () => {
-      disposed = true;
-      paused = true;
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', resize);
-      stopVisibility();
-    };
-  }, []);
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
-}
-
-function isStandaloneMode(): boolean {
-  if (IS_ELECTRON) return true; // Electron is always "installed"
-  // Dev bypass — ?standalone=1 in URL
-  if (new URLSearchParams(window.location.search).get('standalone') === '1') return true;
-  // iOS standalone
-  if ((navigator as any).standalone === true) return true;
-  // Android / desktop PWA
-  if (window.matchMedia('(display-mode: standalone)').matches) return true;
-  if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
-  return false;
-}
-
 export default function App() {
-  const [isInstalled, setIsInstalled] = useState(() => isStandaloneMode());
+  const [installGated] = useState(() => shouldShowInstallGate());
   const [appMode, setAppMode] = useState<'platform' | 'browser'>('platform');
   const [agentMode, setAgentMode] = useState<'chat' | 'browser' | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -580,6 +497,17 @@ export default function App() {
     executeJS,
     setTabs,
   } = useBrowserEngine(webviewRefs);
+
+  // Open a URL. Electron has an in-app browser; web does not, so open a real tab.
+  const openUrl = useCallback((url: string) => {
+    if (IS_ELECTRON) {
+      createTab(url);
+      setAppMode('browser');
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  }, [createTab]);
+
   const [bookmarks, setBookmarks] = useState(() => {
     try {
       const saved = localStorage.getItem('orbit_bookmarks');
@@ -630,12 +558,11 @@ export default function App() {
       if (anchor.dataset.internal) return;
       e.preventDefault();
       e.stopPropagation();
-      createTab(href);
-      setAppMode('browser');
+      openUrl(href);
     };
     document.addEventListener('click', handleLinkClick, true);
     return () => document.removeEventListener('click', handleLinkClick, true);
-  }, [createTab]);
+  }, [openUrl]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1105,7 +1032,9 @@ export default function App() {
     // Local (heuristic) engine still uses the queue-based path.
     // Home screen / no tab always routes to Chat Agent.
     const browserPatterns = /^(go to|navigate to|open (the )?browser|browse to|click( on)?|type into|fill (in|out)|scroll (down|up|the)|find on the (web|page|site)|take a screenshot|go back|reload|refresh (the )?page|open (a )?new tab|close (the )?tab|download|visit (the )?website|search (the )?(web|internet|online) for)/i;
-    const isBrowserCommand = browserPatterns.test(processedInput.trim());
+    // The browser agent needs Electron's in-app browser; web has none, so on web
+    // every message routes to the Chat Agent instead.
+    const isBrowserCommand = IS_ELECTRON && browserPatterns.test(processedInput.trim());
     const universalQueue = isBrowserCommand ? parseCommandToQueue(processedInput, userProfile) : [];
 
     // True when the user has a real page loaded (not Bleumr home screen)
@@ -1113,7 +1042,7 @@ export default function App() {
     // Cloud-capable engines can handle conversational + page-aware queries
     const isCloudEngine = config.engine === 'cloud' || config.engine === 'max';
     // Route to browser agent for all messages when on a real page with a cloud engine
-    const routeToBrowserAgent = isOnRealPage && isCloudEngine;
+    const routeToBrowserAgent = IS_ELECTRON && isOnRealPage && isCloudEngine;
 
     if (universalQueue.length === 0 && !routeToBrowserAgent) {
        // ── Subscription gate — blocks ALL engines at the real send point ──────
@@ -1369,6 +1298,11 @@ export default function App() {
 
            const openHtmlInBrowser = (raw: string): boolean => {
              const loadHtml = (html: string) => {
+               if (!IS_ELECTRON) {
+                 const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                 window.open(blobUrl, '_blank', 'noopener,noreferrer');
+                 return;
+               }
                setTimeout(async () => {
                  setAppMode('browser');
                  await BrowserService.loadHTML(html);
@@ -1383,7 +1317,7 @@ export default function App() {
                  const stripped = raw.replace(/<open>[\s\S]*?<\/open>/gi, '').replace(/<schedule>[\s\S]*?<\/schedule>/gi, '').trim();
                  if (stripped.length > 30) { loadHtml(stripped); return true; }
                } else if (target.startsWith('http://') || target.startsWith('https://')) {
-                 setTimeout(() => { createTab(target); setAppMode('browser'); }, 400);
+                 setTimeout(() => openUrl(target), 400);
                  return true;
                }
                return false;
@@ -2832,66 +2766,9 @@ export default function App() {
     }
   };
 
-  // ── PWA Install Gate — block usage unless added to home screen ──
-  if (IS_PWA && !isInstalled) {
-    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
-    return (
-      <div className="fixed inset-0 z-[99999] overflow-hidden text-white font-sans"
-        style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', background: '#020208' }}>
-        {/* Starfield canvas */}
-        <PWAInstallStarField />
-        {/* Content overlay */}
-        <div className="relative z-10 flex flex-col items-center justify-center h-full px-6">
-          <div className="flex flex-col items-center gap-5 max-w-sm text-center">
-            {/* Animated sphere */}
-            <div className="mb-2">
-              <InlineStarSphere size={120} />
-            </div>
-
-            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-300 via-indigo-300 to-cyan-300 bg-clip-text text-transparent">
-              Install Bleumr
-            </h1>
-            <p className="text-sm text-slate-400/80 leading-relaxed max-w-xs">
-              Add to your home screen for the full experience — offline access, faster loads, and a native feel.
-            </p>
-
-            {isIOS ? (
-              <div className="flex flex-col gap-3 w-full mt-2">
-                {[
-                  { n: '1', text: <>Tap the <span className="inline-flex items-center mx-1 px-1.5 py-0.5 bg-white/10 rounded text-white text-xs font-semibold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></span> Share button</> },
-                  { n: '2', text: <>Scroll and tap <span className="font-semibold text-white">"Add to Home Screen"</span></> },
-                  { n: '3', text: <>Tap <span className="font-semibold text-white">"Add"</span> to install</> },
-                ].map((step) => (
-                  <div key={step.n} className="flex items-center gap-3 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-2xl px-4 py-3 text-left">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-indigo-500/30 border border-violet-400/20 flex items-center justify-center shrink-0">
-                      <span className="text-violet-300 text-sm font-bold">{step.n}</span>
-                    </div>
-                    <p className="text-[13px] text-slate-300">{step.text}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3 w-full mt-2">
-                {[
-                  { n: '1', text: <>Tap the <span className="font-semibold text-white">menu</span> (three dots) in your browser</> },
-                  { n: '2', text: <>Tap <span className="font-semibold text-white">"Add to Home Screen"</span> or <span className="font-semibold text-white">"Install App"</span></> },
-                ].map((step) => (
-                  <div key={step.n} className="flex items-center gap-3 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-2xl px-4 py-3 text-left">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-indigo-500/30 border border-violet-400/20 flex items-center justify-center shrink-0">
-                      <span className="text-violet-300 text-sm font-bold">{step.n}</span>
-                    </div>
-                    <p className="text-[13px] text-slate-300">{step.text}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <p className="text-[10px] text-slate-500/60 mt-3">Open Bleumr from your home screen to get started.</p>
-            <p className="text-[9px] text-slate-600/40 mt-1">Created by Jumar Washington</p>
-          </div>
-        </div>
-      </div>
-    );
+  // ── PWA Install Gate — mobile web only; desktop web uses the platform in-browser ──
+  if (installGated) {
+    return <PWAInstallGate />;
   }
 
   return (
@@ -2940,7 +2817,7 @@ export default function App() {
               agentAbortRef.current = true;
               chatAbortRef.current?.abort();
             }}
-            onNavigateInternal={(url) => { createTab(url); setAppMode('browser'); }}
+            onNavigateInternal={(url) => openUrl(url)}
             onVote={(msgId, vote) => {
               setMessages(prev => {
                 const updated = prev.map(m => m.id === msgId ? { ...m, vote } : m);
@@ -3561,7 +3438,7 @@ export default function App() {
             approveAll={approveAll}
             setApproveAll={setApproveAll}
             scheduledJobs={scheduledJobs}
-            onOpenStripe={(url) => { setShowSettings(false); createTab(url); setAppMode('browser'); }}
+            onOpenStripe={(url) => { setShowSettings(false); openUrl(url); }}
 
             onLicenseActivated={() => {
               SubscriptionService.getStoredApiKeys().then(keys => {
@@ -3711,9 +3588,9 @@ export default function App() {
       )}
     </AnimatePresence>
 
-    {/* Coding Page */}
+    {/* Coding Page — desktop (Electron) only */}
     <AnimatePresence>
-      {showCoding && (
+      {showCoding && IS_ELECTRON && (
         <motion.div
           key="coding"
           initial={{ opacity: 0 }}
@@ -3762,9 +3639,9 @@ export default function App() {
       )}
     </AnimatePresence>
 
-    {/* BLEU BASE GG — 3D Game Generator */}
+    {/* BLEU BASE GG — 3D Game Generator — desktop (Electron) only */}
     <AnimatePresence>
-      {showGameGen && (
+      {showGameGen && IS_ELECTRON && (
         <motion.div
           key="gamegen"
           initial={{ opacity: 0 }}
