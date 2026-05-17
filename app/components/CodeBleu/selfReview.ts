@@ -8,7 +8,7 @@ import { groqFetch } from './api';
 import { GROQ_MODELS } from './constants';
 
 /** Hard ceiling for a single edit's self-review. Edit is NOT blocked if exceeded. */
-export const SELF_REVIEW_TIMEOUT_MS = 20 * 1000;
+export const SELF_REVIEW_TIMEOUT_MS = 3 * 60 * 1000;
 
 // Keep latency inside the 20s budget — large files are reviewed on a head/tail
 // slice (where syntax/import/scope problems almost always surface).
@@ -84,7 +84,7 @@ export async function reviewEdit(
 
   const timeout = new Promise<string>((resolve) =>
     setTimeout(
-      () => resolve(`[Self-review skipped: exceeded ${SELF_REVIEW_TIMEOUT_MS / 1000}s limit — edit kept; verify manually]`),
+      () => resolve(`[Self-review skipped: exceeded ${Math.round(SELF_REVIEW_TIMEOUT_MS / 60000)}min limit — edit kept; verify manually]`),
       SELF_REVIEW_TIMEOUT_MS,
     ),
   );

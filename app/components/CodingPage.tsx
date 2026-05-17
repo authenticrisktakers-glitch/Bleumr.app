@@ -1655,10 +1655,11 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
           if (streamMsgId) setMessages(prev => prev.filter(m => m.id !== streamMsgId));
           streamedAnyText = false;
 
-          const errMsg = fetchErr?.message || '';
+          let errMsg = fetchErr?.message || '';
           const isToolError = errMsg.includes('400') || errMsg.includes('tool_use_failed');
           const isTimeout = errMsg.includes('timeout') || errMsg.includes('Stream connect') || errMsg.includes('Stream idle');
           const isNetworkErr = errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('ECONNREFUSED');
+          const isRateLimit = errMsg.includes('429') || /rate.?limit/i.test(errMsg);
 
           if (isToolError) {
             console.warn('[CodeBleu] Stream 400 — retrying with core tools:', errMsg);
@@ -1711,34 +1712,69 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               await typewriterAnimate(assistantMsg.content.trim(), fbId);
               streamedAnyText = true;
             }
-          } else if (isTimeout || isNetworkErr) {
-            // Streaming stalled or network glitch — retry once via non-streaming path.
-            console.warn('[CodeBleu] Stream timeout/network — retrying via non-streaming:', errMsg);
-            removeThinking();
-            const retryId = msgId();
-            setMessages(prev => [...prev, {
-              id: retryId, role: 'activity' as const,
-              content: 'Connection stalled — retrying...',
-              activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
-            }]);
-            try {
-              const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify(requestBody),
-              });
-              setMessages(prev => prev.filter(m => m.id !== retryId));
-              assistantMsg = data.choices?.[0]?.message;
-              if (assistantMsg?.content?.trim()) {
-                const fbId = msgId();
-                setMessages(prev => [...prev, { id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now() }]);
-                await typewriterAnimate(assistantMsg.content.trim(), fbId);
-                streamedAnyText = true;
+          } else if (isTimeout || isNetworkErr || isRateLimit) {
+            // Silent auto-continue: a timeout / network blip / Groq rate limit is
+            // transient. Don't show an error or a "stalled" banner — keep the
+            // thinking indicator up so it just looks like the agent is still
+            // working, back off (honoring Groq's "try again in Ns" for 429s),
+            // and retry. Only surface an error if every silent retry fails.
+            const MAX_SILENT_RETRIES = 5;
+            let recovered = false;
+            let lastErr = errMsg;
+            for (let attempt = 1; attempt <= MAX_SILENT_RETRIES && !recovered && !abortedRef.current; attempt++) {
+              // Backoff. For a rate limit, respect Groq's stated wait if present.
+              let waitMs = Math.min(1500 * 2 ** (attempt - 1), 20000);
+              const ra = lastErr.match(/try again in ([\d.]+)\s*s/i);
+              if (/429|rate.?limit/i.test(lastErr) && ra) {
+                waitMs = Math.min(Math.ceil(parseFloat(ra[1]) * 1000) + 500, 60000);
               }
-            } catch (retryErr: any) {
-              setMessages(prev => prev.filter(m => m.id !== retryId));
-              throw retryErr;
+              console.warn(`[CodeBleu] Transient model error (silent retry ${attempt}/${MAX_SILENT_RETRIES}, wait ${waitMs}ms):`, lastErr.slice(0, 200));
+              updateThinking('Working...');
+              await new Promise(r => setTimeout(r, waitMs));
+              if (abortedRef.current) break;
+              try {
+                const retryRes = await streamGroqResponse(apiKey!, requestBody, (chunk) => {
+                  bumpActivity();
+                  if (!streamedAnyText) {
+                    removeThinking();
+                    streamMsgId = msgId();
+                    setMessages(prev => [...prev, { id: streamMsgId, role: 'assistant' as const, content: chunk, streaming: true, timestamp: Date.now() }]);
+                    streamedAnyText = true;
+                  } else {
+                    streamBuf += chunk;
+                    if (!rafId) rafId = requestAnimationFrame(flushStream);
+                  }
+                }, abortedRef);
+                if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+                if (streamBuf) {
+                  const f = streamBuf; streamBuf = '';
+                  setMessages(prev => { const i = prev.findIndex(m => m.id === streamMsgId); if (i === -1) return prev; const u = [...prev]; u[i] = { ...u[i], content: u[i].content + f }; return u; });
+                }
+                assistantMsg = retryRes.message;
+                recovered = true;
+              } catch (rErr: any) {
+                lastErr = rErr?.message || lastErr;
+                if (attempt === MAX_SILENT_RETRIES) {
+                  // Final fallback: one non-streaming attempt before giving up.
+                  try {
+                    const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                      body: JSON.stringify(requestBody),
+                    });
+                    assistantMsg = data.choices?.[0]?.message;
+                    if (assistantMsg?.content?.trim()) {
+                      const fbId = msgId();
+                      setMessages(prev => [...prev, { id: fbId, role: 'assistant' as const, content: '', streaming: true, timestamp: Date.now() }]);
+                      await typewriterAnimate(assistantMsg.content.trim(), fbId);
+                      streamedAnyText = true;
+                    }
+                    recovered = !!assistantMsg;
+                  } catch { /* exhausted — fall through to throw */ }
+                }
+              }
             }
+            if (!recovered) throw fetchErr;
           } else {
             throw fetchErr;
           }
