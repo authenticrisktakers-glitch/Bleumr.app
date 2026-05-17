@@ -3816,6 +3816,15 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
     return () => clearTimeout(t);
   }, [messages, projectPath, projectName, saveCurrentSession]);
 
+  // Close the preview reliably. Hides the React panel AND tears down any native
+  // Electron browser WebContentsView (from "Open in Tab" / agent-loaded HTML),
+  // which renders ABOVE React — that's why the X "did nothing": it only hid the
+  // panel while the native view stayed on top.
+  const closePreview = useCallback(() => {
+    setPreviewOpen(false);
+    try { (window as any).orbit?.browser?.hideAll?.(); } catch { /* not in Electron */ }
+  }, []);
+
   // Helper: fire session_end hook (best-effort, never blocks)
   const fireSessionEnd = useCallback(() => {
     if (hooksRef.current.length === 0 || !sessionStartedRef.current) return;
@@ -5083,7 +5092,8 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                   <ExternalLink size={10} /> Open in Tab
                 </button>
                 <button
-                  onClick={() => setPreviewOpen(false)}
+                  onClick={closePreview}
+                  title="Close preview"
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
                     color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center',
