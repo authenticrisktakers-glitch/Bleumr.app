@@ -3770,6 +3770,16 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
     return sessionId;
   }, [messages, activeSessionId, projectName, projectPath, projectContext, projectFiles]);
 
+  // Always hard-save the session to localStorage as it progresses — not just on
+  // reset/close. Debounced so rapid message updates don't thrash storage. This
+  // guarantees the session (with its project-folder path) shows in the sidebar
+  // even if the app is closed abruptly or the agent is interrupted.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const t = setTimeout(() => { saveCurrentSession(); }, 1200);
+    return () => clearTimeout(t);
+  }, [messages, projectPath, projectName, saveCurrentSession]);
+
   // Helper: fire session_end hook (best-effort, never blocks)
   const fireSessionEnd = useCallback(() => {
     if (hooksRef.current.length === 0 || !sessionStartedRef.current) return;
@@ -5002,15 +5012,15 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
             }}
           >
-            {/* Floating control bar — minimal, glass-like */}
+            {/* Control bar — a real top toolbar (a flex child, NOT an absolute
+                overlay). An absolute bar over an <iframe> had its clicks
+                swallowed by the iframe, so the nav bar did nothing. */}
             <div style={{
-              position: 'absolute', top: 10, left: 12, right: 12, zIndex: 10,
+              flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '6px 10px',
-              background: 'rgba(10,10,15,0.75)',
-              backdropFilter: 'blur(12px)',
-              borderRadius: 10,
-              border: '1px solid rgba(255,255,255,0.06)',
+              padding: '8px 12px',
+              background: 'rgba(10,10,15,0.95)',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Eye size={11} style={{ color: '#818cf8' }} />
@@ -5051,12 +5061,12 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
               </div>
             </div>
 
-            {/* Full-bleed iframe — no borders, fills the whole panel */}
+            {/* iframe fills the space BELOW the toolbar (flex:1) — never overlaps it */}
             <iframe
               srcDoc={buildPreviewFromFiles(writtenFiles)}
               sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
               style={{
-                width: '100%', height: '100%', border: 'none',
+                flex: 1, minHeight: 0, width: '100%', border: 'none',
                 background: '#0a0a0a',
               }}
               title="Code Bleu Preview"

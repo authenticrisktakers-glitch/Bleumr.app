@@ -14,6 +14,16 @@ export const SELF_REVIEW_TIMEOUT_MS = 20 * 1000;
 // slice (where syntax/import/scope problems almost always surface).
 const MAX_REVIEW_CHARS = 9000;
 
+// Only code/markup edits are worth a model round-trip. Skipping configs, data,
+// assets, and trivially small writes keeps Groq call volume (and timeouts) down.
+const REVIEWABLE_EXT = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|rb|go|rs|java|kt|swift|php|c|h|cpp|cs|css|scss|less|html?|sql|sh)$/i;
+
+function shouldSkipReview(path: string, content: string): string | null {
+  if (content.trim().length < 400) return 'tiny edit';
+  if (!REVIEWABLE_EXT.test(path)) return 'non-code file';
+  return null;
+}
+
 function clipForReview(content: string): string {
   if (content.length <= MAX_REVIEW_CHARS) return content;
   const head = content.slice(0, MAX_REVIEW_CHARS - 2000);
@@ -38,6 +48,9 @@ export async function reviewEdit(
   apiKey: string,
   edit: { path: string; content: string },
 ): Promise<string> {
+  // Skip trivial/non-code edits entirely — no Groq call, no added latency.
+  if (shouldSkipReview(edit.path, edit.content)) return '';
+
   const reviewCall = (async (): Promise<string> => {
     const data = await groqFetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
