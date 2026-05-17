@@ -6,5 +6,6 @@ export { IMPORTANT_FILES, SOURCE_DIRS, IGNORE_DIRS, LANG_MAP, GROQ_MODELS } from
 export { getLang, msgId, shellSafe, safePath, fetchWithTimeout, extractSuggestions, pickModel, highlightCode, safeClipboardCopy } from './utils';
 export { ALL_TOOLS, TOOL_CAT, SHELL_CMD, mkTool, pickTools } from './tools';
 export { groqFetch, streamGroqResponse } from './api';
+export { reviewEdit, SELF_REVIEW_TIMEOUT_MS } from './selfReview';
 export { readDirRecursive, readFileFromHandle, writeFileFromHandle, listDirElectron, readFileElectron, writeFileElectron, readDirElectronRecursive } from './fileSystem';
 export { PREVIEW_CONSOLE_BRIDGE, buildPreviewFromFiles } from './preview';

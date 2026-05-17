@@ -18,7 +18,7 @@ import {
   extractCodeMemories, getCodeContext,
   parseHooks, runHooks,
   parseSkills, matchSkillCommand, getSkillPrompt,
-  parsePermissions, resolvePermission, formatDenyResult, hasCustomPermissions,
+  parsePermissions, resolvePermission, formatDenyResult, hasCustomPermissions, applyCatastrophicFloor,
   createCheckpoint, loadCheckpoints, loadCheckpoint, deleteCheckpoint, clearCheckpoints,
   formatCheckpointTime,
 } from '../services/CodeBleu';
@@ -37,6 +37,7 @@ import {
   buildPollinationsUrl, styleImagePrompt,
 } from './CodeBleu/designLibrary';
 import { groqFetch, streamGroqResponse } from './CodeBleu/api';
+import { reviewEdit } from './CodeBleu/selfReview';
 import {
   readDirRecursive, readFileFromHandle, writeFileFromHandle,
   readFileElectron, writeFileElectron, readDirElectronRecursive,
@@ -604,6 +605,10 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
   const skillsRef = useRef<Skill[]>([]);
   const permissionsRef = useRef<PermissionRuleSet>(parsePermissions(''));
   const pendingApprovalRef = useRef<((approved: boolean) => void) | null>(null);
+  // The agent's live task checklist (its external scratchpad). Maintained via the
+  // update_tasks tool, re-injected into the system prompt every turn so it never
+  // drifts from its own plan; also feeds the compaction summary.
+  const taskListRef = useRef<{ task: string; status: string }[]>([]);
   // Free-text feedback the user typed while a permission prompt was open. The
   // approval handler stashes it here, the loop's deny branch reads it back and
   // injects it into the next iteration so the agent actually sees what the
@@ -981,14 +986,11 @@ export function CodingPage({ onClose, apiKey }: CodingPageProps) {
 
       if (webFiles.length > 0) {
         setWrittenFiles(webFiles);
-        // Auto-open preview
+        // Auto-open the in-app preview panel (it has a close button). The
+        // Electron browser tab is opt-in via the panel's "Open in Tab" button —
+        // loading it directly puts an uncloseable native view over Code Bleu.
         setTimeout(() => {
-          const orbit = (window as any).orbit;
-          if (orbit?.browser?.loadHTML) {
-            orbit.browser.loadHTML(buildPreviewFromFiles(webFiles));
-          } else {
-            setPreviewOpen(true);
-          }
+          setPreviewOpen(true);
         }, 800);
       }
     }
@@ -1528,12 +1530,38 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
         const willCompact = totalChars > 80000;
         if (willCompact) {
           for (let i = 0; i < conversationMessages.length && totalChars > 60000; i++) {
-            if (conversationMessages[i].role === 'tool' && conversationMessages[i].content?.length > 500) {
+            if (conversationMessages[i].role === 'tool' && conversationMessages[i].content?.length > 500
+                && !(conversationMessages[i] as any)._compaction) {
               const old = conversationMessages[i].content.length;
               conversationMessages[i].content = conversationMessages[i].content.slice(0, 500) + '\n... (pruned for context)';
               totalChars -= (old - 500);
             }
           }
+          // Durable structured summary so pruning never loses the goal, the
+          // plan, or the latest blocker (deterministic — no extra model call).
+          const mk = (s: string) => (s === 'completed' ? '[x]' : s === 'in_progress' ? '[~]' : '[ ]');
+          let lastError = '';
+          for (let i = conversationMessages.length - 1; i >= 0; i--) {
+            const m = conversationMessages[i];
+            if (m.role === 'tool' && typeof m.content === 'string'
+                && /\b(fail|error|exit [1-9]|not found|denied|cannot|undefined)\b/i.test(m.content)) {
+              lastError = m.content; break;
+            }
+          }
+          const summary = [
+            'CONTEXT SUMMARY (older tool output was pruned — rely on this for durable state):',
+            `Original request: ${String(text).slice(0, 400)}`,
+            taskListRef.current.length > 0
+              ? 'Plan:\n' + taskListRef.current.map((t, i) => `${mk(t.status)} ${i + 1}. ${t.task}`).join('\n')
+              : '',
+            lastError ? `Most recent error / blocker:\n${lastError.slice(0, 600)}` : '',
+            'Resume from the first task that is not completed. Do not redo finished work.',
+          ].filter(Boolean).join('\n\n');
+          // Replace any prior injected summary, then put the fresh one up front.
+          for (let i = conversationMessages.length - 1; i >= 0; i--) {
+            if ((conversationMessages[i] as any)._compaction) conversationMessages.splice(i, 1);
+          }
+          conversationMessages.unshift({ role: 'system', content: summary, _compaction: true });
           // Fire on_compact lifecycle hook
           if (hooksRef.current.length > 0) {
             const orbit = (window as any).orbit;
@@ -1547,7 +1575,13 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
         const agentModel = pickModel('agent', text);
         const requestBody: any = {
           model: agentModel,
-          messages: [{ role: 'system', content: buildSysPrompt() }, ...conversationMessages],
+          messages: [{ role: 'system', content: buildSysPrompt()
+            + '\n\nAUTO-REVIEW: every write_file and replace_in_file is automatically checked against a 5-point checklist (syntax, imports/refs, types, logic, scope/safety). The verdict is appended to that tool\'s result. If the verdict is FAIL, fix the flagged points immediately with another edit before doing anything else. Do not move on from an edit that failed review.'
+            + '\n\nTASKS: maintain a plan with the update_tasks tool. For any multi-step request, call update_tasks FIRST with the full step list, then call it again to mark each step in_progress / completed as you go. Do not skip steps or stop until every task is completed.'
+            + (taskListRef.current.length > 0
+                ? '\n\nCURRENT TASK LIST (your own plan — keep working it, do not drift):\n'
+                  + taskListRef.current.map((t, i) => `${t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[~]' : '[ ]'} ${i + 1}. ${t.task}`).join('\n')
+                : '') }, ...conversationMessages],
           max_tokens: 4096,
           temperature: 0.2,
           tools: activeTools,
@@ -1888,7 +1922,12 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
 
           // ── Permission gate — BLEUMR.md allow/ask/deny rules + autoApprove fallback ──
           const shellCmd = toolCall.function.name === 'run_command' ? (args.command || args.cmd || '') : undefined;
-          const verdict = resolvePermission(toolCall.function.name, shellCmd, permissionsRef.current, autoApprove);
+          let verdict = resolvePermission(toolCall.function.name, shellCmd, permissionsRef.current, autoApprove);
+          // Safety floor: catastrophic shell commands always need explicit human
+          // confirmation, even with autoApprove on or a BLEUMR.md allow rule.
+          const catastrophic = verdict === 'allow' && toolCall.function.name === 'run_command';
+          verdict = applyCatastrophicFloor(verdict, toolCall.function.name, shellCmd);
+          const forcedByFloor = catastrophic && verdict === 'ask';
           if (verdict === 'deny') {
             const denyMsg = formatDenyResult(toolCall.function.name, shellCmd);
             removeThinking();
@@ -1914,7 +1953,9 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             const askId = msgId();
             setMessages(prev => [...prev, {
               id: askId, role: 'assistant' as const,
-              content: `Permission needed to run ${argSummary}`,
+              content: forcedByFloor
+                ? `⚠️ This looks destructive and may be irreversible: ${argSummary}. Approve only if you're sure.`
+                : `Permission needed to run ${argSummary}`,
               suggestions: ['Allow once', 'Deny'],
               streaming: false, timestamp: Date.now(),
             }]);
@@ -2066,15 +2107,12 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                     return updated;
                   }
                   const next = [...prev, { path: args.path, content: args.content }];
-                  // Auto-open preview in Electron browser tab when first HTML file is written
+                  // Auto-open the in-app preview panel (it has a close button)
+                  // when the first HTML file is written. The Electron browser
+                  // tab is opt-in via the panel's "Open in Tab" button.
                   if (args.path.endsWith('.html') && !prev.some(f => f.path.endsWith('.html'))) {
                     setTimeout(() => {
-                      const orbit = (window as any).orbit;
-                      if (orbit?.browser?.loadHTML) {
-                        orbit.browser.loadHTML(buildPreviewFromFiles(next));
-                      } else {
-                        setPreviewOpen(true);
-                      }
+                      setPreviewOpen(true);
                     }, 500);
                   }
                   return next;
@@ -2090,6 +2128,11 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                 const hookOutput = await runHooks('after_write', { file: args.path }, hooksRef.current, orbit.shellExec, hookCwd);
                 if (hookOutput) result += `\nHook: ${hookOutput.slice(0, 500)}`;
               }
+            }
+
+            // Self-review: study the edit against a 5-point checklist (20s cap)
+            if (success) {
+              result += await reviewEdit(apiKey, { path: args.path, content: args.content });
             }
 
             // Re-create thinking indicator
@@ -2397,6 +2440,43 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
             result = `Question shown to user: "${question}" with options: [${options.join(', ')}]. Waiting for their response. Do NOT continue until the user responds.`;
             // Flag to break the while loop AFTER processing remaining tool calls
             askUserBreak = true;
+
+          } else if (toolCall.function.name === 'update_tasks') {
+            // ── UPDATE TASK CHECKLIST (the agent's external scratchpad) ──
+            try {
+              let raw = args.tasks;
+              if (typeof raw === 'string') raw = JSON.parse(raw);
+              if (!Array.isArray(raw)) throw new Error('tasks must be a JSON array');
+              const norm = raw
+                .map((t: any) => {
+                  const task = String(t?.task ?? t?.name ?? '').trim();
+                  let status = String(t?.status ?? 'pending').toLowerCase().replace(/\s+/g, '_');
+                  if (status === 'done' || status === 'complete') status = 'completed';
+                  if (status === 'active' || status === 'doing' || status === 'in-progress') status = 'in_progress';
+                  if (!['pending', 'in_progress', 'completed'].includes(status)) status = 'pending';
+                  return { task, status };
+                })
+                .filter((t: { task: string }) => t.task.length > 0)
+                .slice(0, 30);
+              if (norm.length === 0) throw new Error('no valid tasks');
+              taskListRef.current = norm;
+              const mark = (s: string) => (s === 'completed' ? '[x]' : s === 'in_progress' ? '[~]' : '[ ]');
+              const rendered = norm.map((t: { task: string; status: string }, i: number) => `${mark(t.status)} ${i + 1}. ${t.task}`).join('\n');
+              const doneCount = norm.filter((t: { status: string }) => t.status === 'completed').length;
+              removeThinking();
+              addMessage({
+                role: 'activity', content: '', activity: 'analyzing',
+                files: [{ path: `Task list (${doneCount}/${norm.length})`, content: rendered, action: 'read' }],
+              });
+              result = `Task list updated (${doneCount}/${norm.length} done):\n${rendered}\nKeep this current — flip a step to in_progress before you start it and completed when it's verified.`;
+              thinkingId = msgId();
+              setMessages(prev => [...prev, {
+                id: thinkingId, role: 'activity' as const, content: 'Working the plan...',
+                activity: 'thinking' as const, streaming: true, timestamp: Date.now(),
+              }]);
+            } catch (err: any) {
+              result = `update_tasks failed: ${err?.message ?? 'invalid input'}. Pass a JSON array like [{"task":"Find login component","status":"pending"}].`;
+            }
 
           } else if (toolCall.function.name === 'fetch_url') {
             // ── FETCH URL ──
@@ -2726,6 +2806,8 @@ ${looksLikeDesignWork ? DESIGNER_PROMPT : ''}`;
                     addMessage({ role: 'activity', content: '', activity: 'writing', files: [{ path: args.path, content: newContent.slice(0, 2000), action: 'write' }] });
                     thinkingId = msgId();
                     setMessages(prev => [...prev, { id: thinkingId, role: 'activity' as const, content: `Replaced in ${args.path.split('/').pop()}`, activity: 'thinking' as const, streaming: true, timestamp: Date.now() }]);
+                    // Self-review: study the edited file against a 5-point checklist (20s cap)
+                    result += await reviewEdit(apiKey, { path: args.path, content: newContent });
                   }
                 }
               }

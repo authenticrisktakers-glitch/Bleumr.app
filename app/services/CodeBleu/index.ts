@@ -10,6 +10,7 @@ export { parseSkills, matchSkillCommand, getSkillPrompt } from './SkillsService'
 export type { Skill } from './SkillsService';
 export {
   parsePermissions, resolvePermission, formatDenyResult, formatAskMessage, hasCustomPermissions,
+  isCatastrophicCommand, applyCatastrophicFloor,
 } from './PermissionsService';
 export type { PermissionVerdict, PermissionRule, PermissionRuleSet } from './PermissionsService';
 export {

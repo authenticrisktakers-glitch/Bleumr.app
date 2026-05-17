@@ -32,6 +32,7 @@ export const ALL_TOOLS = [
   tagged('core', mkTool('list_directory', 'List files and subdirectories. Use "." for project root.', { path: 'Directory path' }, ['path'])),
   tagged('core', mkTool('run_command', 'Run any shell command in the project directory. Returns stdout, stderr, exit code.', { command: 'Shell command to execute' }, ['command'])),
   tagged('core', mkTool('ask_user', 'Ask the user a question with clickable option buttons. Use when you need clarification.', { question: 'The question to ask', options: 'Comma-separated list of clickable answer options' }, ['question', 'options'])),
+  tagged('core', mkTool('update_tasks', 'Maintain your task checklist — your external scratchpad and source of truth for what you are doing. Call this FIRST to lay out your plan as steps, then call it again to flip a step to in_progress / completed as you work. It is shown to the user and re-injected into your context every turn so you never drift from the plan. Always pass the FULL list (not a diff).', { tasks: 'JSON array of steps, each {"task": "short description", "status": "pending" | "in_progress" | "completed"}' }, ['tasks'])),
   tagged('files', mkTool('create_directory', 'Create a directory (including nested parents).', { path: 'Directory path to create' }, ['path'])),
   tagged('files', mkTool('delete_file', 'Delete a file or empty directory.', { path: 'Path to delete' }, ['path'])),
   tagged('files', mkTool('rename_file', 'Rename or move a file.', { old_path: 'Current path', new_path: 'New path' }, ['old_path', 'new_path'])),
@@ -171,13 +172,14 @@ export function pickTools(userMsg: string, hasProject: boolean): any[] {
       'create_project', 'write_file', 'read_file', 'create_directory',
       'list_directory', 'run_command', 'web_search',
       'install_package', 'init_framework', 'start_dev_server',
-      'file_exists',
+      'file_exists', 'update_tasks',
     ].includes(t.function.name));
   }
 
   const selected = new Set<string>(['read_file', 'write_file', 'replace_in_file', 'run_command', 'list_directory', 'rollback_file', 'rollback_file_original']);
   selected.add('web_search');
   selected.add('dispatch_agent');
+  selected.add('update_tasks');
 
   const msg = userMsg.toLowerCase();
 

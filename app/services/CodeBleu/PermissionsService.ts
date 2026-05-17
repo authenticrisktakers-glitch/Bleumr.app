@@ -178,6 +178,52 @@ export function resolvePermission(
   return autoApprove ? 'allow' : 'ask';
 }
 
+// Catastrophic, usually-irreversible shell patterns. These are a SAFETY FLOOR:
+// even with autoApprove on or a BLEUMR.md allow rule, the agent must still get
+// explicit human confirmation before running one of these. (An explicit BLEUMR.md
+// deny still wins — the floor only ever downgrades 'allow' → 'ask'.)
+const CATASTROPHIC_PATTERNS: RegExp[] = [
+  /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i,   // rm -rf / -fr (any flag order)
+  /\brm\s+-[a-z]*\s+(\/|~|\$HOME|\.\s*$|\*)/i,      // rm -... targeting /, ~, $HOME, ., *
+  /\bsudo\s+rm\b/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+clean\s+-[a-z]*f/i,
+  /\bgit\s+push\s+.*(--force|-f)\b/i,
+  /\bgit\s+checkout\s+--\s+\./i,
+  /\b(drop|truncate)\s+(database|table|schema)\b/i,
+  /\bmkfs\b|\bdd\s+if=|\bof=\/dev\//i,
+  /:\(\)\s*\{.*\}\s*;:/,                            // fork bomb
+  /\bchmod\s+-[a-z]*\s*777\s+(\/|~)/i,
+  /\b(shutdown|reboot|halt|poweroff)\b/i,
+  /\bkillall\b|\bpkill\s+-9\b/i,
+  /\bnpm\s+publish\b/i,
+  />\s*\/dev\/(sd|nvme|disk)/i,
+  /\bcurl\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i,         // curl ... | sh
+  /\bwget\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i,
+];
+
+/** True if a shell command is catastrophic / usually irreversible. */
+export function isCatastrophicCommand(cmd: string | undefined): boolean {
+  if (!cmd) return false;
+  return CATASTROPHIC_PATTERNS.some((re) => re.test(cmd));
+}
+
+/**
+ * Safety floor: catastrophic shell commands can never be silently auto-allowed.
+ * Downgrades 'allow' → 'ask' for catastrophic run_command calls. Leaves an
+ * existing 'deny' or 'ask' untouched (an explicit deny still wins).
+ */
+export function applyCatastrophicFloor(
+  verdict: PermissionVerdict,
+  toolName: string,
+  shellCmd: string | undefined,
+): PermissionVerdict {
+  if (verdict === 'allow' && toolName === 'run_command' && isCatastrophicCommand(shellCmd)) {
+    return 'ask';
+  }
+  return verdict;
+}
+
 /**
  * Format a deny verdict as a tool result string the model will understand.
  */
